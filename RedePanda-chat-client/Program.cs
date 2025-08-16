@@ -22,7 +22,7 @@ namespace RedePanda_chat_client
         {
             if (args.Length < 2 || (args[0] != "produce" && args[0] != "consume"))
             {
-                Console.WriteLine("Usage:\n  kchat produce <bootstrap> [--nick NAME] [--topic chat.room1]\n  kchat consume <bootstrap> [--topic chat.room1]");
+                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- produce <bootstrap> [--nick NAME] [--topic chat.room1]\n  dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]");
                 return;
             }
 

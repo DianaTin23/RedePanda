@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RedePanda-chat-client", "RedePanda-chat-client\RedePanda-chat-client.csproj", "{1F8D066B-6A1F-7C1D-BE26-4EE603994F78}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1F8D066B-6A1F-7C1D-BE26-4EE603994F78}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F8D066B-6A1F-7C1D-BE26-4EE603994F78}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F8D066B-6A1F-7C1D-BE26-4EE603994F78}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F8D066B-6A1F-7C1D-BE26-4EE603994F78}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {466F6FA8-A78C-4B80-8438-490C9D56BFBB}
+	EndGlobalSection
+EndGlobal

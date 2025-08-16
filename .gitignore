@@ -416,3 +416,12 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Rider IDE files
+.idea/
+*.sln.iml
+
+# Rider workspace and config
+*.DotSettings
+.idea/
+.idea_modules/

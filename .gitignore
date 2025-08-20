@@ -425,3 +425,6 @@ FodyWeavers.xsd
 *.DotSettings
 .idea/
 .idea_modules/
+
+# env
+RedePanda-kafka-docker/env.lan

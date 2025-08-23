@@ -24,6 +24,13 @@ public class Producer
     public async Task SendMessages(ChatMsg msg)
     {
         var json = JsonSerializer.Serialize(msg.Text);
-        await _producer.ProduceAsync(_topic, new Message<Null, string> { Value = json });
+        try
+        {
+            await _producer.ProduceAsync(_topic, new Message<Null, string> { Value = json });
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("Message could not be send: " + e.Message);
+        }
     }
 }

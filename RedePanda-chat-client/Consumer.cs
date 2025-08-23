@@ -7,7 +7,7 @@ public class Consumer
 {
     private readonly IConsumer<Null, string> _consumer;
 
-    public Consumer(string bootstrap, string topic, string groupId)
+    public Consumer(string bootstrap, string topic)
     {
         var config = new ConsumerConfig
         {
@@ -36,6 +36,7 @@ public class Consumer
             }
             catch (OperationCanceledException)
             {
+                Console.WriteLine("Chat was closed, shutting down...");
             }
             finally
             {

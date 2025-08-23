@@ -28,10 +28,9 @@ namespace RedePanda_chat_client
             string bootstrap = args[1];
             string topic = GetArg(args, "--topic", "chat.room1");
             string nick = GetArg(args, "--nick");
-            var groupId = "kchat-" + Guid.NewGuid().ToString("N")[..6];
 
             var producer = new Producer(bootstrap, topic);
-            var consumer = new Consumer(bootstrap, topic, groupId);
+            var consumer = new Consumer(bootstrap, topic);
 
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (RedePanda_chat_client, e) =>

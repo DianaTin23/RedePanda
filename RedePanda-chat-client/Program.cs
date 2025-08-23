@@ -33,9 +33,12 @@ namespace RedePanda_chat_client
             string bootstrap = args[0];
             string topic = GetArg(args, "--topic", "chat.room1");
             string nick = GetArg(args, "--nick");
+            string history = GetArg(args, "--hist");
+            bool showHist = false;
+            if (history == "true") showHist = true;
 
             var producer = new Producer(bootstrap, topic);
-            var consumer = new Consumer(bootstrap, topic);
+            var consumer = new Consumer(bootstrap, topic, showHist);
             
             var bootstrapRegex = new Regex(@"^([a-zA-Z0-9.-]+:\d{1,5})(,[a-zA-Z0-9.-]+:\d{1,5})*$");
             if (args.Length < 2 || !bootstrapRegex.IsMatch(bootstrap))

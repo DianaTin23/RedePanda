@@ -7,13 +7,23 @@ public class Consumer
 {
     private readonly IConsumer<Null, string> _consumer;
 
-    public Consumer(string bootstrap, string topic)
+    public Consumer(string bootstrap, string topic, bool showHist)
     {
+        AutoOffsetReset autoOffsetReset;
+        if (showHist)
+        {
+            autoOffsetReset = AutoOffsetReset.Earliest;
+        }
+        else
+        {
+            autoOffsetReset = AutoOffsetReset.Latest;
+        }
+
         var config = new ConsumerConfig
         {
             BootstrapServers = bootstrap,
             GroupId = "kchat-" + Guid.NewGuid().ToString("N")[..6],
-            AutoOffsetReset = AutoOffsetReset.Latest,
+            AutoOffsetReset = autoOffsetReset,
             EnablePartitionEof = true
         };
 

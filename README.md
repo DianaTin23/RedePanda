@@ -39,16 +39,7 @@ You should see `redpanda-0` running.
 
 ---
 
-## 2. Create a Chat Topic (if not already there)
-
-```bash
-docker exec -it redpanda-0 rpk topic create chat.room1 -p 1 --brokers redpanda-0:9092
-docker exec -it redpanda-0 rpk topic list --brokers redpanda-0:9092
-```
-
----
-
-## 3. Build the Client
+## 2. Build the Client
 
 From inside `RedePanda-chat-client`:
 
@@ -59,35 +50,31 @@ dotnet build
 
 ---
 
-## 4. Run the Consumer
+## 3. Create a Chat Topic (if not already there)
 
-Open one terminal:
+If you are starting the chat for the first time or if you want to start a new chat, you need to add the following command that includes the newTopic tag.
+This creates a new chat and opens the chat instantly.
 
 ```bash
-cd RedePanda-chat-client
-dotnet run -- consume 127.0.0.1:19092
+dotnet run -- 127.0.0.1:19092 --nick alice --newTopic newChat
 ```
 
-Output:
+You can choose any name you want instead of "newChat" to reference your chat. Or create multiple topics for chatting with different people.
+To check if the topic was created successfully you can optionally execute the following command in the docker folder.
 
-```
-Consumer ← 127.0.0.1:19092 topic=chat.room1. Ctrl+C exits.
+```bash
+docker exec -it redpanda-0 rpk topic list --brokers redpanda-0:9092
 ```
 
 ---
 
-## 5. Run the Producer
+## 4. Run an existing Chat
 
-Open another terminal:
+Open one terminal and enter the following command:
 
 ```bash
 cd RedePanda-chat-client
-dotnet run -- produce 127.0.0.1:19092 --nick alice
-```
-Output:
-
-```
-Producer → 127.0.0.1:19092 topic=chat.room1. Type and Enter. Ctrl+C exits.
+dotnet run -- 127.0.0.1:19092 --nick alice --topic newChat
 ```
 
 ---
@@ -97,7 +84,7 @@ Type a message:
 Hello world
 ```
 
-The consumer terminal will show:
+The terminal will show:
 
 ```
 [12:34:56] alice: Hello world
@@ -107,12 +94,36 @@ The consumer terminal will show:
 
 ## Multiple Participants
 
-Start as many producers as you like, each with a different nickname:
+Enter the chat with as many participants as you like, each with a different nickname:
 
 ```bash
-dotnet run -- produce 127.0.0.1:19092 --nick bob
+dotnet run -- 127.0.0.1:19092 --nick bob --topic newChat
 ```
-All messages will appear in the consumer terminal.
+All messages will appear in the terminal of all participants of the chat.
+
+---
+
+## Show chat history
+
+If you want to show the history of the chat when starting the chat and not only the current live chat you can execute the following command instead of starting the normal chat.
+
+```bash
+dotnet run -- 127.0.0.1:19092 --nick alice --topic newChat --hist true
+```
+
+This is only recommended if the history does not contain too many messages, because that would make the depiction messy.
+
+---
+
+## Deleting the history
+
+If you want to delete old messages you have to execute the following command in the docker folder. Remember to use the name of your own topic.
+
+```bash
+docker exec -it redpanda-0 rpk topic delete newChat --brokers redpanda-0:9092
+```
+
+Note that this will the delete the whole topic which means that you will have to once again execute the command which creates a topic.
 
 ---
 

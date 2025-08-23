@@ -3,13 +3,13 @@
 //   dotnet run --project RedePanda-chat-client -- produce <bootstrap> [--nick NAME] [--topic chat.room1]
 //   dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]
 
-using System.Text.Json;
+using System.Text;
+using System.Text.RegularExpressions;
 using Confluent.Kafka;
+using Confluent.Kafka.Admin;
 
 namespace RedePanda_chat_client
 {
-    record ChatMsg(string Nick, string Ts, string Text);
-
     internal static class Program
     {
         static string GetArg(string[] a, string key, string def = "")
@@ -18,86 +18,86 @@ namespace RedePanda_chat_client
             return def;
         }
 
+        static string ReadInput()
+        {
+            var line = Console.ReadLine();
+            if (line is null) return string.Empty;
+            
+            Console.SetCursorPosition(0, Console.CursorTop - 1);
+            Console.Write(new string(' ', Console.WindowWidth));
+            Console.SetCursorPosition(0, Console.CursorTop);
+
+            return line;
+        }
+
+        static async Task CreateTopic(string bootstrap, string topicName)
+        {
+            var adminConfig = new AdminClientConfig { BootstrapServers = bootstrap };
+            using var adminClient = new AdminClientBuilder(adminConfig).Build();
+
+            try
+            {
+                await adminClient.CreateTopicsAsync(new TopicSpecification[]
+                {
+                    new TopicSpecification
+                    {
+                        Name = topicName,
+                        NumPartitions = 1
+                    }
+                });
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Topic could not be created: " + e.Message);
+            }
+        }
+
         public static async Task Main(string[] args)
         {
-            if (args.Length < 2 || (args[0] != "produce" && args[0] != "consume"))
+            string bootstrap = args[0];
+            
+            string topic = GetArg(args, "--topic");
+            string newTopic = GetArg(args, "--newTopic");
+            if (!String.IsNullOrEmpty(newTopic))
             {
-                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- produce <bootstrap> [--nick NAME] [--topic chat.room1]\n  dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]");
+                await CreateTopic(bootstrap, newTopic);
+                topic = newTopic;
+            }
+            if(String.IsNullOrEmpty(topic)) Console.WriteLine("There is no topic with that name.");
+            
+            string nick = GetArg(args, "--nick");
+            string history = GetArg(args, "--hist");
+            bool showHist = false;
+            if (history == "true") showHist = true;
+
+            var producer = new Producer(bootstrap, topic);
+            var consumer = new Consumer(bootstrap, topic, showHist);
+            
+            var bootstrapRegex = new Regex(@"^([a-zA-Z0-9.-]+:\d{1,5})(,[a-zA-Z0-9.-]+:\d{1,5})*$");
+            if (args.Length < 2 || !bootstrapRegex.IsMatch(bootstrap))
+            {
+                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1] [--hist true]");
                 return;
             }
 
-            string mode = args[0];
-            string bootstrap = args[1];
-            string topic = GetArg(args, "--topic", "chat.room1");
-
-            if (mode == "produce")
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
             {
-                string nick = GetArg(args, "--nick");
-                if (string.IsNullOrWhiteSpace(nick))
-                {
-                    Console.Write("Nick: ");
-                    nick = Console.ReadLine() ?? "anon";
-                }
+                e.Cancel = true;
+                cts.Cancel();
+            };
+            
+            consumer.ConsumeMessages(cts.Token);
 
-                var pconf = new ProducerConfig
-                {
-                    BootstrapServers = bootstrap,
-                    Acks = Acks.Leader
-                };
-
-                using var producer = new ProducerBuilder<Null, string>(pconf).Build();
-                Console.WriteLine($"Producer → {bootstrap} topic={topic}. Type and Enter. Ctrl+C exits.");
-                Console.CancelKeyPress += (_, e) => { e.Cancel = true; };
-
-                while (true)
-                {
-                    var line = Console.ReadLine();
-                    if (line is null) break;
-                    var msg = new ChatMsg(nick, DateTime.UtcNow.ToString("HH:mm:ss"), line);
-                    await producer.ProduceAsync(topic, new Message<Null, string> { Value = JsonSerializer.Serialize(msg) });
-                }
-
-                producer.Flush(TimeSpan.FromSeconds(2));
-            }
-            else if (mode == "consume")
+            while (!cts.IsCancellationRequested)
             {
-                var cconf = new ConsumerConfig
-                {
-                    BootstrapServers = bootstrap,
-                    GroupId = "kchat-" + Guid.NewGuid().ToString("N")[..6],
-                    AutoOffsetReset = AutoOffsetReset.Latest,
-                    EnablePartitionEof = true
-                };
-
-                using var consumer = new ConsumerBuilder<Ignore, string>(cconf).Build();
-                consumer.Subscribe(topic);
-                Console.WriteLine($"Consumer ← {bootstrap} topic={topic}. Ctrl+C exits.");
-
-                var cts = new CancellationTokenSource();
-                Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
-
-                try
-                {
-                    while (!cts.IsCancellationRequested)
-                    {
-                        try
-                        {
-                            var cr = consumer.Consume(cts.Token);
-                            if (cr?.Message == null) continue;
-                            var m = JsonSerializer.Deserialize<ChatMsg>(cr.Message.Value);
-                            if (m is not null) Console.WriteLine($"[{m.Ts}] {m.Nick}: {m.Text}");
-                        }
-                        catch (ConsumeException e) { Console.Error.WriteLine($"consume error: {e.Error.Reason}"); }
-                    }
-                }
-                catch (OperationCanceledException) { }
-                finally { consumer.Close(); }
+                var line = ReadInput();
+                if (String.IsNullOrEmpty(line)) break;
+                var msg = new ChatMsg(nick, DateTime.UtcNow.ToString("MM-dd HH:mm:ss"), line);
+                await producer.SendMessages(msg);
             }
-            else
-            {
-                Console.WriteLine("Unknown mode. Use 'produce' or 'consume'.");
-                return;
-            }
+            
+            Console.WriteLine("Chat was closed, shutting down...");
         }
     }
 }

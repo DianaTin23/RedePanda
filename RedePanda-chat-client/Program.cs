@@ -32,7 +32,7 @@ namespace RedePanda_chat_client
 
             if (mode == "produce")
             {
-                string nick = GetArg(args, "--nick", "");
+                string nick = GetArg(args, "--nick");
                 if (string.IsNullOrWhiteSpace(nick))
                 {
                     Console.Write("Nick: ");
@@ -59,7 +59,7 @@ namespace RedePanda_chat_client
 
                 producer.Flush(TimeSpan.FromSeconds(2));
             }
-            else // consume
+            else if (mode == "consume")
             {
                 var cconf = new ConsumerConfig
                 {
@@ -92,6 +92,11 @@ namespace RedePanda_chat_client
                 }
                 catch (OperationCanceledException) { }
                 finally { consumer.Close(); }
+            }
+            else
+            {
+                Console.WriteLine("Unknown mode. Use 'produce' or 'consume'.");
+                return;
             }
         }
     }

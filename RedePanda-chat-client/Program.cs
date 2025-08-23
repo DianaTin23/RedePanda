@@ -8,8 +8,6 @@ using Confluent.Kafka;
 
 namespace RedePanda_chat_client
 {
-    record ChatMsg(string Nick, string Ts, string Text);
-
     internal static class Program
     {
         static string GetArg(string[] a, string key, string def = "")

@@ -4,6 +4,7 @@
 //   dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]
 
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace RedePanda_chat_client
 {
@@ -29,19 +30,19 @@ namespace RedePanda_chat_client
 
         public static async Task Main(string[] args)
         {
-            if (args.Length < 2)
-            {
-                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1]\n  dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]");
-                return;
-            }
-            
             string bootstrap = args[0];
             string topic = GetArg(args, "--topic", "chat.room1");
             string nick = GetArg(args, "--nick");
 
             var producer = new Producer(bootstrap, topic);
             var consumer = new Consumer(bootstrap, topic);
-            var input = new StringBuilder();
+            
+            var bootstrapRegex = new Regex(@"^([a-zA-Z0-9.-]+:\d{1,5})(,[a-zA-Z0-9.-]+:\d{1,5})*$");
+            if (args.Length < 2 || !bootstrapRegex.IsMatch(bootstrap))
+            {
+                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1]\n  dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]");
+                return;
+            }
 
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) =>

@@ -25,7 +25,6 @@ public class Consumer
     {
         Task.Run(() =>
         {
-            Console.WriteLine("Task started");
             try
             {
                 while (!token.IsCancellationRequested)

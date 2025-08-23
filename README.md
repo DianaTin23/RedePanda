@@ -59,35 +59,13 @@ dotnet build
 
 ---
 
-## 4. Run the Consumer
+## 4. Run the Chat
 
 Open one terminal:
 
 ```bash
 cd RedePanda-chat-client
-dotnet run -- consume 127.0.0.1:19092
-```
-
-Output:
-
-```
-Consumer ← 127.0.0.1:19092 topic=chat.room1. Ctrl+C exits.
-```
-
----
-
-## 5. Run the Producer
-
-Open another terminal:
-
-```bash
-cd RedePanda-chat-client
-dotnet run -- produce 127.0.0.1:19092 --nick alice
-```
-Output:
-
-```
-Producer → 127.0.0.1:19092 topic=chat.room1. Type and Enter. Ctrl+C exits.
+dotnet run -- 127.0.0.1:19092 --nick alice
 ```
 
 ---
@@ -107,10 +85,10 @@ The consumer terminal will show:
 
 ## Multiple Participants
 
-Start as many producers as you like, each with a different nickname:
+Enter the chat with as many participants as you like, each with a different nickname:
 
 ```bash
-dotnet run -- produce 127.0.0.1:19092 --nick bob
+dotnet run -- 127.0.0.1:19092 --nick bob
 ```
 All messages will appear in the consumer terminal.
 

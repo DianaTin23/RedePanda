@@ -1,0 +1,22 @@
+name: redpanda-chat
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda-0
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --default-log-level=info
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda-0:9092,external://${ADVERTISED_HOST:-127.0.0.1}:19092
+      - --rpc-addr=redpanda-0:33145
+      - --advertise-rpc-addr=redpanda-0:33145
+    ports:
+      - "19092:19092"   # Kafka extern
+      - "9644:9644"     # Admin API (optional, rpk/Console)
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+volumes:
+  redpanda-data:

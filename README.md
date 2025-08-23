@@ -43,6 +43,12 @@ You should see `redpanda-0` running.
 
 ```bash
 docker exec -it redpanda-0 rpk topic create chat.room1 -p 1 --brokers redpanda-0:9092
+```
+
+You can choose any name you want instead of "chat.room1" to reference your chat. Or create multiple topics for chatting with different people.
+To check if the topic was created successfully you can optionally execute the following command.
+
+```bash
 docker exec -it redpanda-0 rpk topic list --brokers redpanda-0:9092
 ```
 
@@ -75,7 +81,7 @@ Type a message:
 Hello world
 ```
 
-The consumer terminal will show:
+The terminal will show:
 
 ```
 [12:34:56] alice: Hello world
@@ -90,7 +96,31 @@ Enter the chat with as many participants as you like, each with a different nick
 ```bash
 dotnet run -- 127.0.0.1:19092 --nick bob
 ```
-All messages will appear in the consumer terminal.
+All messages will appear in the terminal of all participants of the chat.
+
+---
+
+## Show chat history
+
+If you want to show the history of the chat and not only the current live chat you can execute the following command instead of starting the normal chat.
+
+```bash
+dotnet run -- 127.0.0.1:19092 --nick alice --hist true
+```
+
+This is only recommended if the history does not contain too many messages, because that would make the depiction confusing.
+
+---
+
+## Deleting the history
+
+If you want to delete old messages you have to execute the following command. Remember to use the name of your own topic.
+
+```bash
+docker exec -it redpanda-0 rpk topic delete chat.room1 --brokers redpanda-0:9092
+```
+
+Note that this will the delete the whole topic which means that you will have to once again execute the command which creates a topic.
 
 ---
 

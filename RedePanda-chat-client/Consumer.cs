@@ -25,18 +25,23 @@ public class Consumer
     {
         Task.Run(() =>
         {
+            Console.WriteLine("Task started");
             try
             {
                 while (!token.IsCancellationRequested)
                 {
                     var cr = _consumer.Consume(token);
-                    var msg = JsonSerializer.Deserialize<ChatMsg>(cr.Message.Value);
-                    if (msg is not null) Console.WriteLine($"[{msg.Ts}] {msg.Nick}: {msg.Text}");
+                    if (cr?.Message?.Value is not null)
+                    {
+                        var msg = JsonSerializer.Deserialize<ChatMsg>(cr.Message.Value);
+                        if (msg is not null) Console.WriteLine($"[{msg.Ts}] {msg.Nick}: {msg.Text}");
+                    }
                 }
-            }
-            catch (OperationCanceledException)
-            {
                 Console.WriteLine("Chat was closed, shutting down...");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Message can not be loaded: " + e.Message);
             }
             finally
             {

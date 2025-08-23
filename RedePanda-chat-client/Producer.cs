@@ -23,7 +23,7 @@ public class Producer
 
     public async Task SendMessages(ChatMsg msg)
     {
-        var json = JsonSerializer.Serialize(msg.Text);
+        var json = JsonSerializer.Serialize(msg);
         try
         {
             await _producer.ProduceAsync(_topic, new Message<Null, string> { Value = json });

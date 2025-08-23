@@ -3,8 +3,7 @@
 //   dotnet run --project RedePanda-chat-client -- produce <bootstrap> [--nick NAME] [--topic chat.room1]
 //   dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]
 
-using System.Text.Json;
-using Confluent.Kafka;
+using System.Text;
 
 namespace RedePanda_chat_client
 {
@@ -16,24 +15,36 @@ namespace RedePanda_chat_client
             return def;
         }
 
+        static string ReadInput()
+        {
+            var line = Console.ReadLine();
+            if (line is null) return string.Empty;
+            
+            Console.SetCursorPosition(0, Console.CursorTop - 1);
+            Console.Write(new string(' ', Console.WindowWidth));
+            Console.SetCursorPosition(0, Console.CursorTop);
+
+            return line;
+        }
+
         public static async Task Main(string[] args)
         {
             if (args.Length < 2)
             {
-                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- produce <bootstrap> [--nick NAME] [--topic chat.room1]\n  dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]");
+                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1]\n  dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]");
                 return;
             }
-
-            string mode = args[0];
-            string bootstrap = args[1];
+            
+            string bootstrap = args[0];
             string topic = GetArg(args, "--topic", "chat.room1");
             string nick = GetArg(args, "--nick");
 
             var producer = new Producer(bootstrap, topic);
             var consumer = new Consumer(bootstrap, topic);
+            var input = new StringBuilder();
 
             using var cts = new CancellationTokenSource();
-            Console.CancelKeyPress += (RedePanda_chat_client, e) =>
+            Console.CancelKeyPress += (_, e) =>
             {
                 e.Cancel = true;
                 cts.Cancel();
@@ -43,10 +54,10 @@ namespace RedePanda_chat_client
 
             while (!cts.IsCancellationRequested)
             {
-                var line = Console.ReadLine();
-                if (line is null) break;
+                var line = ReadInput();
+                if (String.IsNullOrEmpty(line)) break;
                 var msg = new ChatMsg(nick, DateTime.UtcNow.ToString("HH:mm:ss"), line);
-                producer.SendMessages(msg);
+                await producer.SendMessages(msg);
             }
         }
     }

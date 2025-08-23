@@ -46,7 +46,6 @@ public class Consumer
                         if (msg is not null) Console.WriteLine($"[{msg.Ts}] {msg.Nick}: {msg.Text}");
                     }
                 }
-                Console.WriteLine("Chat was closed, shutting down...");
             }
             catch (Exception e)
             {

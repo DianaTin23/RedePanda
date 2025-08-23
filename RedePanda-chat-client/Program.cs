@@ -5,6 +5,8 @@
 
 using System.Text;
 using System.Text.RegularExpressions;
+using Confluent.Kafka;
+using Confluent.Kafka.Admin;
 
 namespace RedePanda_chat_client
 {
@@ -28,10 +30,41 @@ namespace RedePanda_chat_client
             return line;
         }
 
+        static async Task CreateTopic(string bootstrap, string topicName)
+        {
+            var adminConfig = new AdminClientConfig { BootstrapServers = bootstrap };
+            using var adminClient = new AdminClientBuilder(adminConfig).Build();
+
+            try
+            {
+                await adminClient.CreateTopicsAsync(new TopicSpecification[]
+                {
+                    new TopicSpecification
+                    {
+                        Name = topicName,
+                        NumPartitions = 1
+                    }
+                });
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Topic could not be created: " + e.Message);
+            }
+        }
+
         public static async Task Main(string[] args)
         {
             string bootstrap = args[0];
-            string topic = GetArg(args, "--topic", "chat.room1");
+            
+            string topic = GetArg(args, "--topic");
+            string newTopic = GetArg(args, "--newTopic");
+            if (!String.IsNullOrEmpty(newTopic))
+            {
+                await CreateTopic(bootstrap, newTopic);
+                topic = newTopic;
+            }
+            if(String.IsNullOrEmpty(topic)) Console.WriteLine("There is no topic with that name.");
+            
             string nick = GetArg(args, "--nick");
             string history = GetArg(args, "--hist");
             bool showHist = false;
@@ -43,7 +76,7 @@ namespace RedePanda_chat_client
             var bootstrapRegex = new Regex(@"^([a-zA-Z0-9.-]+:\d{1,5})(,[a-zA-Z0-9.-]+:\d{1,5})*$");
             if (args.Length < 2 || !bootstrapRegex.IsMatch(bootstrap))
             {
-                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1]\n  dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]");
+                Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1] [--hist true]");
                 return;
             }
 
@@ -60,9 +93,11 @@ namespace RedePanda_chat_client
             {
                 var line = ReadInput();
                 if (String.IsNullOrEmpty(line)) break;
-                var msg = new ChatMsg(nick, DateTime.UtcNow.ToString("HH:mm:ss"), line);
+                var msg = new ChatMsg(nick, DateTime.UtcNow.ToString("MM-dd HH:mm:ss"), line);
                 await producer.SendMessages(msg);
             }
+            
+            Console.WriteLine("Chat was closed, shutting down...");
         }
     }
 }

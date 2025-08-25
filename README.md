@@ -1,7 +1,7 @@
 # RedePanda
 
 A minimal terminal-based chat built with **.NET 9** and **Redpanda** (Kafka-compatible).  
-Each client can act as a **producer** (send messages) or **consumer** (receive messages).  
+Each client act as a **producer** (send messages) and **consumer** (receive messages).  
 Messages are serialized as JSON and streamed through a Kafka topic.
 
 ![RedePandaLogo](RedePanda.png)
@@ -56,7 +56,7 @@ If you are starting the chat for the first time or if you want to start a new ch
 This creates a new chat and opens the chat instantly.
 
 ```bash
-dotnet run -- 127.0.0.1:19092 --nick alice --newTopic newChat
+dotnet run -- local --nick alice --newTopic newChat
 ```
 
 You can choose any name you want instead of "newChat" to reference your chat. Or create multiple topics for chatting with different people.
@@ -74,7 +74,7 @@ Open one terminal and enter the following command:
 
 ```bash
 cd RedePanda-chat-client
-dotnet run -- 127.0.0.1:19092 --nick alice --topic newChat
+dotnet run -- local --nick alice --topic newChat
 ```
 
 ---
@@ -97,7 +97,7 @@ The terminal will show:
 Enter the chat with as many participants as you like, each with a different nickname:
 
 ```bash
-dotnet run -- 127.0.0.1:19092 --nick bob --topic newChat
+dotnet run -- local --nick bob --topic newChat
 ```
 All messages will appear in the terminal of all participants of the chat.
 
@@ -108,7 +108,7 @@ All messages will appear in the terminal of all participants of the chat.
 If you want to show the history of the chat when starting the chat and not only the current live chat you can execute the following command instead of starting the normal chat.
 
 ```bash
-dotnet run -- 127.0.0.1:19092 --nick alice --topic newChat --hist true
+dotnet run -- local --nick alice --topic newChat --hist true
 ```
 
 This is only recommended if the history does not contain too many messages, because that would make the depiction messy.
@@ -126,28 +126,6 @@ docker exec -it redpanda-0 rpk topic delete newChat --brokers redpanda-0:9092
 Note that this will the delete the whole topic which means that you will have to once again execute the command which creates a topic.
 
 ---
-
-<!-- ## LAN Setup (Optional)
-
-To chat across multiple machines in the same network:
-
-1. Edit `env.lan` inside `RedePanda-kafka-docker`:
-   ```
-   ADVERTISED_HOST=192.168.x.x
-   ```
-   Replace with your host machine’s LAN IP.
-2. Restart broker:
-   ```bash
-   docker compose down
-   docker compose --env-file env.lan up -d
-   ```
-3. Other machines can now run:
-   ```bash
-   dotnet run -- consume 192.168.x.x:19092
-   dotnet run -- produce 192.168.x.x:19092 --nick bob
-   ```
-
---- -->
 
 ## Inspect Consumer Groups (Debugging)
 

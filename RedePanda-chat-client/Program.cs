@@ -1,9 +1,4 @@
-﻿// Program.cs — .NET 9, one binary for produce|consume
-// Usage:
-//   dotnet run --project RedePanda-chat-client -- produce <bootstrap> [--nick NAME] [--topic chat.room1]
-//   dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]
-
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Confluent.Kafka;

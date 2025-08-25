@@ -87,6 +87,8 @@ namespace RedePanda_chat_client
                 cts.Cancel();
             };
             
+            Console.WriteLine($"Chat under the topic {topic} was started. Press Ctrl+C to leave the chat.");
+            
             consumer.ConsumeMessages(cts.Token);
 
             while (!cts.IsCancellationRequested)

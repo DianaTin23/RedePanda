@@ -4,9 +4,12 @@
 //   dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]
 
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
+using DotNetEnv;
+using Microsoft.Extensions.Configuration;
 
 namespace RedePanda_chat_client
 {
@@ -52,9 +55,22 @@ namespace RedePanda_chat_client
             }
         }
 
+        static string ConfigureBootstrap(string environment)
+        {
+            var content = File.ReadAllText($"{environment}.json");
+            var json = JsonSerializer.Deserialize<Bootstrap>(content);
+
+            return json.AdvertisedHost + ":" + json.Port;
+        }
+
         public static async Task Main(string[] args)
         {
-            string bootstrap = args[0];
+            string bootstrapArg = args[0];
+            if ((bootstrapArg != "local") && (bootstrapArg != "lan"))
+            {
+                Console.WriteLine("Provide correct argument for bootstrap.");
+            }
+            string bootstrap = ConfigureBootstrap(bootstrapArg);
             
             string topic = GetArg(args, "--topic");
             string newTopic = GetArg(args, "--newTopic");
@@ -73,8 +89,7 @@ namespace RedePanda_chat_client
             var producer = new Producer(bootstrap, topic);
             var consumer = new Consumer(bootstrap, topic, showHist);
             
-            var bootstrapRegex = new Regex(@"^([a-zA-Z0-9.-]+:\d{1,5})(,[a-zA-Z0-9.-]+:\d{1,5})*$");
-            if (args.Length < 2 || !bootstrapRegex.IsMatch(bootstrap))
+            if (args.Length < 2)
             {
                 Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1] [--hist true]");
                 return;

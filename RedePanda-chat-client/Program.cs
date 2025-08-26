@@ -64,6 +64,7 @@ namespace RedePanda_chat_client
             if ((bootstrapArg != "local") && (bootstrapArg != "lan"))
             {
                 Console.WriteLine("Provide correct argument for bootstrap.");
+                return;
             }
             string bootstrap = ConfigureBootstrap(bootstrapArg);
             

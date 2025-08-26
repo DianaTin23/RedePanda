@@ -52,10 +52,30 @@ namespace RedePanda_chat_client
 
         static string ConfigureBootstrap(string environment)
         {
-            var content = File.ReadAllText($"{environment}.json");
-            var json = JsonSerializer.Deserialize<Bootstrap>(content);
+            try
+            {
+                var content = File.ReadAllText($"{environment}.json");
+                var json = JsonSerializer.Deserialize<Bootstrap>(content);
 
-            return json.AdvertisedHost + ":" + json.Port;
+                if (json == null)
+                {
+                    Console.WriteLine($"Failed to deserialize bootstrap configuration {environment}.json.");
+                    return string.Empty;
+                }
+
+                if (string.IsNullOrEmpty(json.AdvertisedHost) || string.IsNullOrEmpty(json.Port))
+                {
+                    Console.WriteLine($"Invalid bootstrap configuration in {environment}.json: missing advertisedHost or port.");
+                    return string.Empty;
+                }
+
+                return json.AdvertisedHost + ":" + json.Port;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Could not open {environment}.json: " + e.Message);
+                return string.Empty;
+            }
         }
 
         public static async Task Main(string[] args)

@@ -1,12 +1,10 @@
-﻿// Program.cs — .NET 9, one binary for produce|consume
-// Usage:
-//   dotnet run --project RedePanda-chat-client -- produce <bootstrap> [--nick NAME] [--topic chat.room1]
-//   dotnet run --project RedePanda-chat-client -- consume <bootstrap> [--topic chat.room1]
-
-using System.Text;
+﻿using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
+using DotNetEnv;
+using Microsoft.Extensions.Configuration;
 
 namespace RedePanda_chat_client
 {
@@ -52,9 +50,43 @@ namespace RedePanda_chat_client
             }
         }
 
+        static string ConfigureBootstrap(string environment)
+        {
+            try
+            {
+                var content = File.ReadAllText($"{environment}.json");
+                var json = JsonSerializer.Deserialize<Bootstrap>(content);
+
+                if (json == null)
+                {
+                    Console.WriteLine($"Failed to deserialize bootstrap configuration {environment}.json.");
+                    return string.Empty;
+                }
+
+                if (string.IsNullOrEmpty(json.AdvertisedHost) || string.IsNullOrEmpty(json.Port))
+                {
+                    Console.WriteLine($"Invalid bootstrap configuration in {environment}.json: missing advertisedHost or port.");
+                    return string.Empty;
+                }
+
+                return json.AdvertisedHost + ":" + json.Port;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Could not open {environment}.json: " + e.Message);
+                return string.Empty;
+            }
+        }
+
         public static async Task Main(string[] args)
         {
-            string bootstrap = args[0];
+            string bootstrapArg = args[0];
+            if ((bootstrapArg != "local") && (bootstrapArg != "lan"))
+            {
+                Console.WriteLine("Provide correct argument for bootstrap.");
+                return;
+            }
+            string bootstrap = ConfigureBootstrap(bootstrapArg);
             
             string topic = GetArg(args, "--topic");
             string newTopic = GetArg(args, "--newTopic");
@@ -73,8 +105,7 @@ namespace RedePanda_chat_client
             var producer = new Producer(bootstrap, topic);
             var consumer = new Consumer(bootstrap, topic, showHist);
             
-            var bootstrapRegex = new Regex(@"^([a-zA-Z0-9.-]+:\d{1,5})(,[a-zA-Z0-9.-]+:\d{1,5})*$");
-            if (args.Length < 2 || !bootstrapRegex.IsMatch(bootstrap))
+            if (args.Length < 2)
             {
                 Console.WriteLine("Usage:\n  dotnet run --project RedePanda-chat-client -- <bootstrap> [--nick NAME] [--topic chat.room1] [--hist true]");
                 return;
@@ -86,6 +117,8 @@ namespace RedePanda_chat_client
                 e.Cancel = true;
                 cts.Cancel();
             };
+            
+            Console.WriteLine($"Chat under the topic {topic} was started. Press Ctrl+C to leave the chat.");
             
             consumer.ConsumeMessages(cts.Token);
 

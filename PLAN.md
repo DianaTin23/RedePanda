@@ -4,6 +4,40 @@ Arbeitsdokument für die Gruppe. Abgehakt wird direkt hier per Commit.
 
 ---
 
+## ⚠ Status 11.08.2026 — Plan umgesetzt, neun Fehler korrigiert
+
+Phasen 0–5 sind implementiert (siehe Git-Historie). Vor der Umsetzung wurden die technischen
+Behauptungen dieses Dokuments gegen Primärquellen geprüft — NuGet, Image-Config-Blobs,
+rpk-/Seastar-Quellen, Collector- und Helm-Doku. **Neun Punkte waren falsch und hätten Build
+oder Deployment gebrochen.** Sie sind im Code bereits korrigiert; die betroffenen Abschnitte
+unten sind entsprechend angepasst. Die Architektur selbst hat gehalten.
+
+| # | Stand im Plan | Tatsächlich |
+|---|---|---|
+| B1 | `command: [redpanda, start, …]` (4.4) | `command:` **ersetzt den Image-ENTRYPOINT**, und nur der mappt `redpanda`→`rpk`. Richtig: `command: [rpk, redpanda, start]`, Flags unter `args:` |
+| B2 | `rpk cluster health --brokers redpanda:9092` (4.3) | Dieses Flag existiert dort nicht, und der Befehl spricht die **Admin-API auf 9644**. Richtig: `-X admin.hosts=redpanda:9644 --exit-when-healthy` |
+| B3 | Topic-Job ohne Idempotenz (4.3) | `rpk topic create` beendet sich bei vorhandenem Topic mit **Exit 1** (nachgemessen) → jeder `helm upgrade` wäre gescheitert |
+| B4 | `runAsNonRoot` für alle Pods | Das Prometheus-Image deklariert `USER nobody` — **nicht numerisch**; das kubelet verweigert den Start. `runAsUser: 65534` nötig |
+| B5 | nginx-Härtung | Entfällt (Caddy). Caddy braucht dafür `runAsUser: 65532` und emptyDirs auf `/data` und `/config` |
+| B6 | `volumeClaimTemplates` ohne `fsGroup` (4.4) | Broker läuft als uid 101; ein frisches PVC gehört root → Broker kann nicht schreiben. `fsGroup: 101` nötig |
+| B7 | `AddService(...)` **und** `OTEL_RESOURCE_ATTRIBUTES` (Phase 3) | Code schlägt Env, und `AddService` erzeugt eine **zufällige** `service.instance.id`. Das Label `instance` wäre nach jedem Neustart eine neue GUID. Lösung: `ConfigureResource` ganz weglassen |
+| B8 | „`using OpenTelemetry;` nicht vergessen" | Richtig, aber nicht ausreichend — zusätzlich `OpenTelemetry.Resources` und `OpenTelemetry.Metrics` |
+| B9 | Caddy (2, 4.5) vs. nginx (Phase 1, 4.1, 12-Factor) | Widerspruch. Entschieden: **Caddy**. Abschnitt 4.1 ist damit gegenstandslos |
+
+Kleinere Korrekturen: `Confluent.Kafka` 2.15.0 hat **kein** `net9.0`-Asset (löst auf `net8.0`
+auf — Base-Image muss glibc bleiben); `EnableAutoCommit = false` gegen Consumer-Group-Müll;
+`HostOptions.ShutdownTimeout` (25 s) und `terminationGracePeriodSeconds` (45 s) dürfen nicht
+beide auf dem Default 30 s stehen; der Collector braucht explizit
+`args: ["--config=/conf/config.yaml"]`; die GroupId in E6 steht in **Zeile 25**, nicht 23;
+`lan.json`/`env.lan` existierten nie. Und: `kubectl apply --dry-run=client` validiert **nicht**
+ohne Cluster — dafür `kubeconform`.
+
+Empirisch bestätigt wurde außerdem der gesamte Abschnitt 4.7: die vier Instrumente kommen als
+`redepanda_messages_sent_total`, `redepanda_messages_received_total`, `redepanda_kafka_errors_total`
+und `redepanda_active_connections` an — ohne `_total_total`, ohne `_ratio`.
+
+---
+
 ## 0. Zielbild in einem Satz
 
 Ein Browser-Chat, bei dem **Frontend (Caddy)** und **Backend (ASP.NET Core)** als zwei
@@ -41,7 +75,7 @@ ist: hier diskutieren, nicht während der Implementierung umschwenken.
 | E3 | **Konsolenclient bleibt erhalten** | Ist bestehende Arbeit und belegt in der Demo schön, dass Backend und Client wirklich dasselbe Kafka-Topic teilen. Er wird nur auf Env-Konfiguration umgestellt, sonst nicht angefasst. |
 | E4 | **Ein Topic, Raum als Feld + Kafka-Key** | Einfacher zu deployen (ein Init-Job) und die Raumtrennung filtert das Backend serverseitig. Key = `Room` sichert die Reihenfolge pro Raum, falls das Topic je mehr Partitionen bekommt. |
 | E5 | **Backend läuft mit 1 Replica**, Skalierung nur dokumentiert | Mehrere Replicas funktionieren mit unserem Consumer-Design (siehe E6) tatsächlich, aber ein Browser hängt immer nur an einem Pod. Wir zeigen es als bewusste Grenze im README statt es halb zu bauen. |
-| E6 | **Consumer-GroupId bleibt pro Pod eindeutig** | `Consumer.cs:23` macht das heute schon richtig (`"kchat-" + Guid`). Beim Umbau **nicht** auf eine feste Group-ID vereinheitlichen — sonst bekäme bei mehreren Replicas jede Nachricht nur ein Pod und die anderen Browser sehen nichts. Im Backend nehmen wir statt des GUID den Pod-Namen (deterministisch, besser zu debuggen). |
+| E6 | **Consumer-GroupId bleibt pro Pod eindeutig** | `Consumer.cs:25` macht das heute schon richtig (`"kchat-" + Guid`). Beim Umbau **nicht** auf eine feste Group-ID vereinheitlichen — sonst bekäme bei mehreren Replicas jede Nachricht nur ein Pod und die anderen Browser sehen nichts. Im Backend nehmen wir statt des GUID den Pod-Namen (deterministisch, besser zu debuggen). |
 | E7 | **Prometheus minimal selbst deployen**, nicht kube-prometheus-stack | Ein Deployment + ConfigMap mit `static_configs`; einziges Scrape-Ziel ist `redepanda-otel-collector:8889`. Der Stack würde 20 Minuten Cluster-Ressourcen fressen für Features (Operator, ServiceMonitor-CRDs, Alertmanager), die wir nicht zeigen. Der Collector macht ServiceMonitors ohnehin überflüssig, weil er die einzige Scrape-Quelle ist. |
 | E9 | **OpenTelemetry-SDK + Collector statt `prometheus-net`** | Das Backend kennt Prometheus nicht mehr, sondern nur einen OTLP-Endpunkt aus einer Env-Variable — das ist 12-Factor „Backing Services" im Reinformat, dieselbe Argumentation wie bei Redpanda. Der Collector ist der austauschbare Teil: das Monitoring-Backend lässt sich ohne Backend-Rebuild wechseln. Zusätzlich ist OpenTelemetry seit 11.05.2026 CNCF *graduated*, also eine weitere bewertbare CNCF-Technologie statt einer Community-Library. Preis: ein Pod und ein Hop mehr, ca. +4–6 h Aufwand. |
 | E10 | **Nur Metriken — keine Traces, keine Logs über OTLP** | Der Collector könnte alle drei Signale, wir schalten bewusst nur die Metrics-Pipeline ein. Traces bräuchten Kontext-Propagierung von Hand über die Kafka-Grenze (`Confluent.Kafka` hat keine Auto-Instrumentierung) plus ein zweites Backend (Jaeger/Tempo) — nicht vor dem 07.09. Logs bleiben auf stdout, siehe 12-Factor. |
@@ -93,18 +127,18 @@ der planbare Teil. Wenn wir uns verschätzen, wollen wir das in Woche 1 merken.
 
 ### Phase 0 — Repo-Umbau (11.–13.08.)
 
-- [ ] Verzeichnisstruktur nach Abschnitt 2 anlegen, `git mv` für den bestehenden Client
-- [ ] `RedePanda.sln` auf die neuen Pfade aktualisieren
-- [ ] `RedePanda.Contracts` mit dem neuen Modell:
+- [x] Verzeichnisstruktur nach Abschnitt 2 anlegen, `git mv` für den bestehenden Client
+- [x] `RedePanda.sln` auf die neuen Pfade aktualisieren
+- [x] `RedePanda.Contracts` mit dem neuen Modell:
       ```csharp
       public record ChatMessage(string Room, string Nickname, string Text, DateTimeOffset Timestamp);
       ```
       plus eine statische `Validate(...)`-Methode (nicht leer, Trim, Längenlimits) —
       die wird von Backend **und** Tests benutzt
-- [ ] Konsolenclient: `ConfigureBootstrap()` und `Bootstrap.cs` ersatzlos löschen,
+- [x] Konsolenclient: `ConfigureBootstrap()` und `Bootstrap.cs` ersatzlos löschen,
       stattdessen `REDPANDA_BOOTSTRAP_SERVERS` / `REDPANDA_TOPIC` aus der Umgebung
-- [ ] `local.json`, `lan.json`, `temp-lan.json`, `temp-env.lan` entfernen; `.gitignore` aufräumen
-- [ ] `.dockerignore` für Backend und Frontend
+- [x] `local.json`, `lan.json`, `temp-lan.json`, `temp-env.lan` entfernen; `.gitignore` aufräumen
+- [x] `.dockerignore` für Backend und Frontend
 
 **Fertig, wenn:** `dotnet build` grün ist und der Konsolenclient mit
 `REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 dotnet run --project src/RedePanda.ChatClient`
@@ -114,14 +148,14 @@ gegen das Compose-Redpanda chattet.
 
 Ziel: **alles deployed, nichts kann Chat.** Erst wenn das steht, kommt Logik dazu.
 
-- [ ] Backend-Projekt mit *nur* `GET /health/live` → `200 OK`
-- [ ] Frontend: statische `index.html` mit „RedePanda" + `nginx.conf` mit Proxy auf `/api`
-- [ ] Zwei Dockerfiles (Multi-Stage, `USER` non-root, Backend `:8080`, Frontend `:8080` via nginx-unprivileged)
-- [ ] `scripts/build-images.sh` — baut beide Images und lädt sie in den lokalen Cluster
-- [ ] Helm-Chart mit Backend, Frontend, Redpanda-StatefulSet, ConfigMap, Topic-Job,
+- [x] Backend-Projekt mit *nur* `GET /health/live` → `200 OK`
+- [x] Frontend: statische `index.html` mit „RedePanda" + `Caddyfile` mit Proxy auf `/api`
+- [x] Zwei Dockerfiles (Multi-Stage, `USER` non-root, Backend `:8080`, Frontend `:8080` via Caddy (non-root, UID 65532))
+- [x] `scripts/build-images.sh` — baut beide Images und lädt sie in den lokalen Cluster
+- [x] Helm-Chart mit Backend, Frontend, Redpanda-StatefulSet, ConfigMap, Topic-Job,
       **OTel-Collector** (Pipeline schon verdrahtet, aber noch schickt niemand etwas hin)
-- [ ] `helm upgrade --install redepanda ./deploy/helm/redepanda -n redepanda --create-namespace`
-- [ ] Port-Forward → Seite lädt, `/api/health/live` antwortet durch den nginx-Proxy
+- [x] `helm upgrade --install redepanda ./deploy/helm/redepanda -n redepanda --create-namespace`
+- [x] Port-Forward → Seite lädt, `/api/health/live` antwortet durch den Caddy-Proxy
 
 **Fertig, wenn:** alle Pods `Running`/`Ready`, der Topic-Job `Completed`, und
 `kubectl exec` in den Backend-Pod erreicht `redpanda:9092` **sowie
@@ -135,13 +169,13 @@ Ziel: **alles deployed, nichts kann Chat.** Erst wenn das steht, kommt Logik daz
 
 ### Phase 2 — Chat-Funktionalität (18.–23.08.)
 
-- [ ] `ChatProducer` (Singleton) — Produce mit `Key = Room`
-- [ ] `ChatConsumerService : BackgroundService` — GroupId aus `POD_NAME`, `AutoOffsetReset.Latest`
-- [ ] `ChatBroadcaster` — In-Memory-Fan-out an alle offenen SSE-Verbindungen, Raumfilter
-- [ ] `POST /api/messages` — validiert, setzt `Timestamp` serverseitig, produziert
-- [ ] `GET /api/stream?room=X` — `text/event-stream`, Heartbeat alle 15s
-- [ ] `GET /health/ready` — prüft Broker-Metadaten (Ergebnis ~5s cachen)
-- [ ] Frontend: Nickname/Raum-Eingabe, Nachrichtenliste, `EventSource`, Reconnect-Anzeige
+- [x] `ChatProducer` (Singleton) — Produce mit `Key = Room`
+- [x] `ChatConsumerService : BackgroundService` — GroupId aus `POD_NAME`, `AutoOffsetReset.Latest`
+- [x] `ChatBroadcaster` — In-Memory-Fan-out an alle offenen SSE-Verbindungen, Raumfilter
+- [x] `POST /api/messages` — validiert, setzt `Timestamp` serverseitig, produziert
+- [x] `GET /api/stream?room=X` — `text/event-stream`, Heartbeat alle 15s
+- [x] `GET /health/ready` — prüft Broker-Metadaten (Ergebnis ~5s cachen)
+- [x] Frontend: Nickname/Raum-Eingabe, Nachrichtenliste, `EventSource`, Reconnect-Anzeige
 
 **Fertig, wenn:** zwei Browserfenster im selben Raum sich sehen, in verschiedenen
 Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
@@ -150,14 +184,14 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
 
 **SDK-Seite (Strang A):**
 
-- [ ] NuGet (alle stabil, Stand 08/2026): `OpenTelemetry.Extensions.Hosting` 1.17.0,
+- [x] NuGet (alle stabil, Stand 08/2026): `OpenTelemetry.Extensions.Hosting` 1.17.0,
       `OpenTelemetry.Exporter.OpenTelemetryProtocol` 1.17.0,
       `OpenTelemetry.Instrumentation.AspNetCore` 1.17.0,
       optional `OpenTelemetry.Instrumentation.Runtime` 1.17.0.
       **Finger weg von** `OpenTelemetry.Instrumentation.Process` (nur `-rc`),
       `OpenTelemetry.Instrumentation.ConfluentKafka` (nur `0.2.0-alpha`) und
       `OpenTelemetry.Exporter.Prometheus.AspNetCore` (nur `-beta`) — alles Prerelease.
-- [ ] Wiring in `Program.cs` (`using OpenTelemetry;` **nicht vergessen** — `ConfigureResource`
+- [x] Wiring in `Program.cs` (`using OpenTelemetry;` **nicht vergessen** — `ConfigureResource`
       und `WithMetrics` liegen im Wurzel-Namespace, sonst CS1061):
       ```csharp
       builder.Services.AddOpenTelemetry()
@@ -167,10 +201,10 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
               .AddMeter("RedePanda")
               .AddOtlpExporter());
       ```
-- [ ] **Kein `/metrics`-Endpunkt im Backend mehr** — kein `MapMetrics()`, kein Scrape-Port,
+- [x] **Kein `/metrics`-Endpunkt im Backend mehr** — kein `MapMetrics()`, kein Scrape-Port,
       keine Prometheus-Annotationen am Backend-Service. Das Backend pusht ausschließlich.
       Muss explizit dastehen, sonst baut es jemand „sicherheitshalber" trotzdem ein.
-- [ ] Vier fachliche Instrumente über `System.Diagnostics.Metrics.Meter("RedePanda")`,
+- [x] Vier fachliche Instrumente über `System.Diagnostics.Metrics.Meter("RedePanda")`,
       **mit Punkten, ohne `_total`, ohne Unit** (Herleitung siehe 4.7):
 
 | Instrument in C# | Typ | Name in Prometheus |
@@ -180,7 +214,7 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
 | `redepanda.kafka.errors` | `Counter<long>` | `redepanda_kafka_errors_total` |
 | `redepanda.active_connections` | `ObservableGauge<int>` | `redepanda_active_connections` |
 
-- [ ] `redepanda.active_connections` als **ObservableGauge** implementieren, dessen Callback
+- [x] `redepanda.active_connections` als **ObservableGauge** implementieren, dessen Callback
       die `.Count`-Property der SSE-Subscriber-Collection im `ChatBroadcaster` liest — nicht
       als `UpDownCounter`. Ein Zähler, den man selbst hoch- und runterzählt, driftet bei jedem
       Client-Abbruch, der am `finally` vorbeigeht, und heilt nie wieder. Der Callback liest
@@ -189,9 +223,9 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
 
 **Cluster-Seite (Strang B):**
 
-- [ ] OTel-Collector scharfschalten: Ports 4317 (OTLP/gRPC), 8889 (Prometheus-Exporter),
+- [x] OTel-Collector scharfschalten: Ports 4317 (OTLP/gRPC), 8889 (Prometheus-Exporter),
       8888 (Collector-Eigenmetriken), 13133 (`health_check`). Per `values.yaml` abschaltbar.
-- [ ] Prometheus-Deployment + Scrape-Config im Chart, per `values.yaml` abschaltbar.
+- [x] Prometheus-Deployment + Scrape-Config im Chart, per `values.yaml` abschaltbar.
       Einziger Diff zum ursprünglichen Plan: Ziel ist `redepanda-otel-collector:8889`
       statt `redepanda-backend:8080`. **`honor_labels: true` ist Pflicht** (siehe 4.7).
       `values.yaml` bekommt damit zwei Toggles statt einem — und Prometheus ohne Collector
@@ -204,9 +238,9 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
 
 ### Phase 4 — Härtung & Tests (29.08.–02.09.)
 
-- [ ] Graceful Shutdown: SIGTERM → Consumer `Close()`, Producer `Flush()`,
+- [x] Graceful Shutdown: SIGTERM → Consumer `Close()`, Producer `Flush()`,
       `terminationGracePeriodSeconds` gesetzt
-- [ ] `resources.requests/limits` und `securityContext` (`runAsNonRoot`, `readOnlyRootFilesystem`)
+- [x] `resources.requests/limits` und `securityContext` (`runAsNonRoot`, `readOnlyRootFilesystem`)
       für alle Pods — „alle" heißt jetzt zwei Pods mehr:
       - **Collector:** Image `otel/opentelemetry-collector:0.158.0` läuft bereits als UID 10001
         und kommt mit `readOnlyRootFilesystem` ohne jeden Schreib-Mount aus (verifiziert)
@@ -214,12 +248,12 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
         für die TSDB. Und: wer `args:` setzt, ersetzt damit das komplette `CMD` — `--config.file`
         und `--storage.tsdb.path` müssen dann beide wieder mit rein, sonst sucht Prometheus
         `./prometheus.yml` im leeren WORKDIR und beendet sich mit Config-Ladefehler
-- [ ] Liveness/Readiness-Probes für **alle** Pods: Frontend, Backend, Redpanda,
+- [x] Liveness/Readiness-Probes für **alle** Pods: Frontend, Backend, Redpanda,
       **Collector (`:13133/`, dafür muss `health_check` unter `extensions:` UND unter
       `service.extensions:` stehen — sonst ist der Port tot) und Prometheus
       (`/-/healthy` bzw. `/-/ready` auf `:9090`)**
-- [ ] Strukturiertes Logging nach stdout, Level über `LOG_LEVEL`
-- [ ] xUnit-Tests (bewusst wenige, dafür sinnvolle):
+- [x] Strukturiertes Logging nach stdout, Level über `LOG_LEVEL`
+- [x] xUnit-Tests (bewusst wenige, dafür sinnvolle):
       1. gültige Nachricht wird akzeptiert
       2. leerer Nickname / leerer Text / leerer Raum → abgelehnt
       3. Text über `MAX_MESSAGE_LENGTH` → abgelehnt
@@ -231,8 +265,8 @@ Alles Weitere (zwei Browserfenster, Pod-Neustart, Helm-Deinstallation) ist eine
 
 ### Phase 5 — Dokumentation & Probelauf (03.–06.09.)
 
-- [ ] README nach Abschnitt 5 dieses Plans
-- [ ] `helm template` → `deploy/k8s/rendered.yaml` committen
+- [x] README nach Abschnitt 5 dieses Plans
+- [x] `helm template` → `deploy/k8s/rendered.yaml` committen
 - [ ] **Kompletter Probelauf auf einem frischen Cluster**, strikt nach eigener README —
       jemand, der es nicht gebaut hat, führt ihn durch
 - [ ] Repository auf public stellen, Gruppenmitglieder eintragen
@@ -245,16 +279,35 @@ Alles Weitere (zwei Browserfenster, Pod-Neustart, Helm-Deinstallation) ist eine
 
 Diese sieben Punkte kosten sonst je einen halben Tag Suche.
 
-**4.1 nginx puffert SSE.** Ohne das hier kommen Nachrichten erst verzögert oder gar nicht an:
-```nginx
-location /api/stream {
-    proxy_pass http://redepanda-backend:8080;
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_http_version 1.1;
+**4.1 ~~nginx puffert SSE~~ — hinfällig, wir nehmen Caddy (B9).** Nachgemessen: Caddy streamt
+`text/event-stream` **ohne jede Direktive** ungepuffert; eine über den Proxy gepostete Nachricht
+erreicht den SSE-Client ohne messbare Verzögerung. `flush_interval -1` ist reine Dokumentation,
+und ein `encode zstd gzip` auf Site-Ebene bricht SSE nicht.
+
+Was bei Caddy stattdessen zählt — alles drei nachgemessen:
+
+```caddyfile
+{
+    auto_https off
+    admin off          # sonst offener :2019
+    persist_config off # sonst schreibt Caddy nach /config und startet read-only nicht
+}
+:8080 {
+    handle /api/* { reverse_proxy {$BACKEND_HOST:redepanda-backend:8080} }
+    handle /healthz { respond "ok" 200 }
+    handle { root * /usr/share/caddy; try_files {path} /index.html; file_server }
 }
 ```
+
+Dazu im Image `setcap -r /usr/bin/caddy` (sonst passt `cap-drop=ALL` nicht zum Binary, das
+`CAP_NET_BIND_SERVICE` trägt) und `XDG_DATA_HOME=/data` — Caddy räumt beim Start seinen
+TLS-Storage auf, auch mit `auto_https off`, und loggt sonst bei read-only Root einen Fehler.
+
+Zum Vergleich, falls doch jemand auf nginx zurück will: dort wären `proxy_buffering off` und
+`proxy_read_timeout 3600s` tatsächlich nötig, `proxy_cache off` wäre ohne `proxy_cache_path`
+wirkungslos, und ein literaler Hostname in `proxy_pass` würde beim Config-Load **einmal**
+aufgelöst und für die Prozesslebensdauer gecacht — existiert der Service noch nicht, beendet
+sich nginx mit `host not found in upstream`.
 
 **4.2 Images landen nicht im Cluster.** Lokal gebaute Images kennt der Cluster nicht →
 `ImagePullBackOff`. Deshalb `imagePullPolicy: IfNotPresent` **und** explizit laden:
@@ -269,23 +322,62 @@ Als Helm-Hook mit Warteschleife:
 ```yaml
 annotations:
   "helm.sh/hook": post-install,post-upgrade
-  "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  # hook-failed ergänzt (B3): Hook-Ressourcen gehören nicht zum Release, ein
+  # fehlgeschlagener Job bleibt sonst liegen und `helm uninstall` räumt ihn nicht weg.
+  "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 10
+  ttlSecondsAfterFinished: 300
 ```
-Im Container: `until rpk cluster health --brokers redpanda:9092 | grep -q "Healthy:.*true"; do sleep 3; done`
-danach `rpk topic create "$REDPANDA_TOPIC" -p 1 -r 1 --brokers redpanda:9092`.
+
+⚠ **Korrigiert (B2/B3).** Die ursprüngliche Warteschleife konnte nie enden:
+`rpk cluster health` hat **kein** `--brokers`-Flag und spricht die Admin-API auf **9644**,
+nicht Kafka auf 9092. Und `rpk topic create` beendet sich bei bereits vorhandenem Topic mit
+**Exit 1** (nachgemessen gegen v26.2.1), was jeden `helm upgrade` hätte scheitern lassen.
+Richtig ist:
+
+```sh
+# auf den Exit-Code warten, nicht auf einen Regex über der Ausgabe
+for i in $(seq 1 60); do
+  rpk cluster health -X admin.hosts=redpanda:9644 --exit-when-healthy && break
+  sleep 3
+done
+
+rpk topic create "$REDPANDA_TOPIC" -p 1 -r 1 -X brokers=redpanda:9092 \
+  || rpk topic describe "$REDPANDA_TOPIC" -X brokers=redpanda:9092
+```
+
+`--brokers` ist auf `rpk topic` seit 23.2.1 deprecated; `-X brokers=` ist die getragene Form.
+Der Service muss Port **9644** mit veröffentlichen, sonst läuft der Job ins Leere.
 
 **4.4 Redpanda-Flags in Kubernetes.** Ohne die Seastar-Begrenzungen belegt der Pod die
-halbe Node oder startet nicht. Wir übernehmen die Compose-Flags und ergänzen Speicher:
+halbe Node oder startet nicht.
+
+⚠ **Korrigiert (B1) — das war der teuerste Fehler im Plan.** Ein Kubernetes-`command:`
+**ersetzt den ENTRYPOINT** des Images (`/entrypoint.sh`), und genau dieses Skript ist das
+einzige, was den Namen `redpanda` auf `rpk` abbildet. `/usr/bin/redpanda` ist das
+Seastar-Broker-Binary: es kennt weder `start` noch `--mode` und beendet sich sofort mit
+„Argument parse error" → `CrashLoopBackOff`. Die Folgesymptome (Topic-Job hängt, Backend
+`connection refused`, Prometheus leer) zeigen alle woandershin.
+
 ```yaml
-command: [redpanda, start, --mode=dev-container, --smp=1, --memory=1G,
-          --reserve-memory=0M, --overprovisioned,
-          --kafka-addr=internal://0.0.0.0:9092,
-          --advertise-kafka-addr=internal://redpanda:9092]
+command: [rpk, redpanda, start]
+args:
+  - --mode=dev-container   # impliziert --overprovisioned, --reserve-memory 0M, --check=false
+  - --smp=1                # NICHT von dev-container impliziert, muss bleiben
+  - --memory=1G
+  - --kafka-addr=internal://0.0.0.0:9092
+  - --advertise-kafka-addr=internal://redpanda:9092
 ```
+
 Speicher via `volumeClaimTemplates` im StatefulSet — **kein separat deklariertes PVC**.
-Image mit fester Version pinnen, nicht `:latest` wie aktuell in der Compose-Datei.
+Dazu **zwingend** `fsGroup: 101` (B6): der Broker läuft als uid 101, ein frisch provisioniertes
+PVC gehört root, und er kann sein Datenverzeichnis dann nicht beschreiben. Das fällt erst auf
+einem *frischen* Cluster auf — also beim Probelauf in Phase 5.
+
+Image mit fester Version pinnen (`v26.2.1`), nicht `:latest` wie in der Compose-Datei.
+Und: der Broker-Pod ist der einzige **ohne** `readOnlyRootFilesystem` — `rpk redpanda start`
+schreibt bei jedem Start nach `/etc/redpanda/redpanda.yaml`.
 
 **4.5 Env-Variablen und ASP.NET.** ASP.NET erwartet standardmäßig `Section__Key`.
 Wir wollen aber die schlichten Namen aus der Aufgabenstellung. Also in `Program.cs`
@@ -407,7 +499,7 @@ Ehrlichkeit war in der Aufgabenstellung ausdrücklich erwünscht, deshalb die dr
 | Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, das Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide als angehängte Ressourcen, beide ohne Codeänderung austauschbar | — |
 | Build, Release, Run | Docker-Build → Helm-Release → Container-Start getrennt | manuell, kein CI (laut Aufgabe erlaubt) |
 | Processes | kein lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | Chatverlauf lebt nur im Kafka-Topic |
-| Port Binding | Backend `:8080`, Frontend `:8080` (nginx-unprivileged), kein externer Webserver nötig | — |
+| Port Binding | Backend `:8080`, Frontend `:8080` (Caddy), kein externer Webserver nötig | — |
 | Concurrency | Consumer-GroupId pro Pod ⇒ echte Fan-out-Skalierung möglich | mit 1 Replica getestet, siehe E5 |
 | Disposability | SIGTERM-Handling, Consumer/Producer sauber geschlossen | — |
 | Dev/Prod Parity | identische Images lokal und im Cluster | Redpanda läuft im `dev-container`-Modus, einzelner Broker |

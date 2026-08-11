@@ -1,7 +1,8 @@
 name: redpanda-chat
 services:
   redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:latest
+    # Pinned rather than :latest so local development and the Helm chart agree on one version.
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.1
     container_name: redpanda-0
     command:
       - redpanda

@@ -1,0 +1,8 @@
+# The frontend image only needs the Caddyfile and wwwroot/.
+**/bin/
+**/obj/
+.git/
+.direnv/
+result
+Dockerfile*
+.dockerignore

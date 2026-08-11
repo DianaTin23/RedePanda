@@ -34,16 +34,20 @@
             pkgs.dotnet-sdk_9
             pkgs.redpanda-client # provides rpk
             pkgs.docker-compose
+            pkgs.kubectl
+            pkgs.kubernetes-helm
           ];
 
           DOTNET_CLI_TELEMETRY_OPTOUT = 1;
           DOTNET_NOLOGO = 1;
 
           shellHook = ''
-            echo "RedePanda dev shell — .NET $(dotnet --version), rpk on PATH"
+            echo "RedePanda dev shell — .NET $(dotnet --version); rpk, kubectl, helm on PATH"
             echo "  broker:  cd RedePanda-kafka-docker && docker compose --env-file env.local up -d"
-            echo "  topics:  rpk topic list --brokers localhost:19092"
-            echo "  chat:    cd RedePanda-chat-client && dotnet run -- local --nick alice --topic newChat"
+            echo "  topics:  rpk topic list -X brokers=localhost:19092"
+            echo "  chat:    REDPANDA_BOOTSTRAP_SERVERS=localhost:19092 \\"
+            echo "           dotnet run --project src/RedePanda.ChatClient -- --nick alice"
+            echo "  chart:   helm lint deploy/helm/redepanda"
           '';
         };
       });

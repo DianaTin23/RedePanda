@@ -428,7 +428,6 @@ FodyWeavers.xsd
 
 # env files
 RedePanda-kafka-docker/env.lan
-RedePanda-chat-client/lan.json
 # Nix
 .direnv/
 /result

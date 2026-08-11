@@ -1,0 +1,39 @@
+{
+	# The site address has no hostname, but say so explicitly so nobody adds one later and the
+	# pod then tries to reach ACME from inside the cluster.
+	auto_https off
+
+	# The admin API would open :2019 and, together with persist_config, wants to write to
+	# /config. Both are off so the container runs with a read-only root filesystem.
+	admin off
+	persist_config off
+
+	# Access logs to stdout as JSON; the platform collects them (12-Factor "Logs").
+	log {
+		output stdout
+		format json
+	}
+}
+
+:8080 {
+	# ---- API proxy: strip the /api prefix ------------------------------------------------
+	# Caddy streams text/event-stream unbuffered on its own, so SSE needs no extra directives
+	# here. The backend hostname comes from the environment, with the in-cluster service name
+	# as the default.
+	handle_path /api/* {
+		reverse_proxy {$BACKEND_HOST:redepanda-backend:8080}
+	}
+
+	# ---- Probe --------------------------------------------------------------------------
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	# ---- Static frontend ----------------------------------------------------------------
+	handle {
+		root * /usr/share/caddy
+		encode zstd gzip
+		try_files {path} /index.html
+		file_server
+	}
+}

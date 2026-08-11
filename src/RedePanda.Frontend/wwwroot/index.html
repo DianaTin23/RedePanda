@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RedePanda</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+    <h1>RedePanda</h1>
+    <span id="status" class="status status--offline" role="status" aria-live="polite">getrennt</span>
+</header>
+
+<form id="join" class="panel">
+    <label>
+        Name
+        <input id="nickname" name="nickname" maxlength="32" required autocomplete="nickname" placeholder="alice">
+    </label>
+    <label>
+        Raum
+        <input id="room" name="room" maxlength="64" required value="general">
+    </label>
+    <button type="submit">Betreten</button>
+</form>
+
+<main hidden id="chat">
+    <p class="room-label">Raum <strong id="current-room"></strong></p>
+    <ul id="messages" aria-live="polite"></ul>
+
+    <form id="send">
+        <input id="text" name="text" maxlength="500" required autocomplete="off"
+               placeholder="Nachricht schreiben…">
+        <button type="submit">Senden</button>
+    </form>
+    <p id="error" class="error" role="alert" hidden></p>
+    <button type="button" id="leave" class="link">Raum verlassen</button>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

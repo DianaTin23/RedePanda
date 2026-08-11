@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "redepanda.brokerService" . }}
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  serviceName: {{ include "redepanda.brokerService" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "broker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "redepanda.labels" . | nindent 8 }}
+        app.kubernetes.io/component: broker
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # The image creates its user with --uid 101 --gid 101.
+        runAsUser: 101
+        runAsGroup: 101
+        # Without fsGroup a freshly provisioned PVC is mounted root-owned and the broker cannot
+        # write its data directory. It only bites on a *fresh* volume, so it survives every
+        # upgrade test and then fails on the first clean install.
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redpanda
+          image: {{ .Values.redpanda.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+
+          # `command` replaces the image ENTRYPOINT (/entrypoint.sh), and that script is the
+          # only thing that maps the name `redpanda` onto rpk. /usr/bin/redpanda is the Seastar
+          # broker binary: it does not understand `start` or `--mode` and exits immediately with
+          # a parse error. Invoking rpk explicitly is what the official chart does too.
+          command: [rpk, redpanda, start]
+          args:
+            # dev-container already implies --overprovisioned, --reserve-memory 0M and
+            # --check=false, but NOT --smp, which is why that one is still listed.
+            - --mode=dev-container
+            - --smp={{ .Values.redpanda.smp }}
+            - --memory={{ .Values.redpanda.memory }}
+            - --kafka-addr=internal://0.0.0.0:9092
+            - --advertise-kafka-addr=internal://{{ include "redepanda.brokerService" . }}:9092
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: admin
+              containerPort: 9644
+          livenessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Deliberately NOT read-only, unlike every other pod in this chart: `rpk redpanda
+            # start` writes the merged broker configuration to /etc/redpanda/redpanda.yaml on
+            # every start. This is recorded as a known limitation in the README.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+          resources:
+            {{- toYaml .Values.redpanda.resources | nindent 12 }}
+  volumeClaimTemplates:
+    # A volumeClaimTemplate rather than a standalone PVC, so the volume is bound to the
+    # StatefulSet's identity. Note that these PVCs deliberately outlive `helm uninstall`.
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.redpanda.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.redpanda.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "redepanda.brokerService" . }}
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "broker") | nindent 4 }}
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+    - name: admin
+      # Needed by the topic job: `rpk cluster health` talks to the Admin API, never to 9092.
+      port: 9644
+      targetPort: admin

@@ -1,0 +1,111 @@
+{{- if .Values.otelCollector.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "redepanda.collectorService" . }}
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "otel-collector") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "redepanda.labels" . | nindent 8 }}
+        app.kubernetes.io/component: otel-collector
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/otel-collector-configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # The image is FROM scratch and already runs as 10001; stated explicitly so the
+        # kubelet's runAsNonRoot check has a numeric uid to verify.
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: otel-collector
+          image: {{ .Values.otelCollector.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          # The image's default CMD points at /etc/otelcol/config.yaml. Kubernetes `args`
+          # replaces CMD wholesale, so mounting the config anywhere else requires saying so.
+          args: ["--config=/conf/config.yaml"]
+          env:
+            - name: OTELCOL_LOG_LEVEL
+              value: {{ .Values.otelCollector.logLevel | quote }}
+            - name: OTELCOL_DEBUG_VERBOSITY
+              value: {{ .Values.otelCollector.debugVerbosity | quote }}
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: prometheus
+              containerPort: 8889
+            - name: self-metrics
+              containerPort: 8888
+            - name: health
+              containerPort: 13133
+          livenessProbe:
+            # Answered by the health_check extension, which must appear both under
+            # `extensions:` and under `service.extensions:` or this port is simply not open.
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Verified: this pipeline (otlp -> memory_limiter/batch -> prometheus/debug) never
+            # writes to disk, so it needs no writable mount at all.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+          resources:
+            {{- toYaml .Values.otelCollector.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "redepanda.collectorService" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "redepanda.collectorService" . }}
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "otel-collector") | nindent 4 }}
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: prometheus
+      port: 8889
+      targetPort: prometheus
+    - name: self-metrics
+      port: 8888
+      targetPort: self-metrics
+    # Port 13133 is intentionally absent: the health endpoint is for the kubelet, not for other
+    # pods. Forward it against deploy/... rather than svc/... when debugging.
+{{- end }}

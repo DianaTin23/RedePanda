@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "redepanda.fullname" . }}-backend
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "redepanda.labels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+      annotations:
+        # Roll the pods when the configuration changes; without this a helm upgrade that only
+        # edits the ConfigMap leaves the old values running.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # There are deliberately NO prometheus.io/scrape annotations here. The backend pushes
+        # over OTLP and exposes no /metrics endpoint.
+    spec:
+      # Longer than the 25s shutdown timeout the application configures for itself, so the
+      # consumer can leave its group and the producer can flush before SIGKILL.
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        # Matches APP_UID in the .NET base image. Must be numeric: the kubelet rejects images
+        # whose USER is a name when runAsNonRoot is set.
+        runAsUser: 1654
+        runAsGroup: 1654
+        fsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: {{ .Values.backend.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ include "redepanda.fullname" . }}-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+{{- if .Values.otelCollector.enabled }}
+            # Expanded by the kubelet from POD_NAME above. This is what makes the Prometheus
+            # "instance" label the pod name; the application never sets the resource in code.
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.instance.id=$(POD_NAME)"
+{{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            # Reports 503 until broker metadata can be fetched, so the pod leaves the Service
+            # endpoints while Redpanda is unreachable. The result is cached for 5s.
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "redepanda.fullname" . }}-backend
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

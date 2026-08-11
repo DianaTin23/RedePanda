@@ -1,0 +1,29 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "redepanda.fullname" . }}-prometheus
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: {{ .Values.prometheus.scrapeInterval }}
+
+    scrape_configs:
+      # The application itself is never scraped. Its metrics are here only because the backend
+      # pushes them to the collector over OTLP and the collector re-exposes them on :8889.
+      - job_name: redepanda-otel
+        # Required. The collector already sets job and instance from service.name and
+        # service.instance.id; without honor_labels Prometheus overwrites both and moves the
+        # originals to exported_job / exported_instance, and the README's queries return empty.
+        honor_labels: true
+        static_configs:
+          - targets: ['{{ include "redepanda.collectorService" . }}:8889']
+
+      # The collector's own pipeline health, so a silent drop is visible somewhere.
+      - job_name: otel-collector
+        static_configs:
+          - targets: ['{{ include "redepanda.collectorService" . }}:8888']
+{{- end }}

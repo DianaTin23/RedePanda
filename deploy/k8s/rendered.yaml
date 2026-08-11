@@ -1,0 +1,859 @@
+---
+# Source: redepanda/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redepanda-config
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+data:
+  # Application configuration. Plain names rather than ASP.NET's Section__Key convention,
+  # because the backend reads these explicitly; see BackendOptions.
+  REDPANDA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  REDPANDA_TOPIC: "redepanda-chat"
+  MAX_MESSAGE_LENGTH: "500"
+  LOG_LEVEL: "Information"
+  ASPNETCORE_URLS: "http://+:8080"
+
+  # OTEL_* are specified by OpenTelemetry and read by the SDK itself. They are deliberately not
+  # re-read in application code, which would create a second source of truth.
+  #
+  # service.namespace is deliberately NOT set: the collector's Prometheus exporter builds the
+  # job label as <service.namespace>/<service.name>, so setting it would turn every job label
+  # into "redepanda/redepanda-backend" and break the PromQL examples in the README.
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://redepanda-otel-collector:4317"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  OTEL_SERVICE_NAME: "redepanda-backend"
+  OTEL_METRIC_EXPORT_INTERVAL: "5000"
+  OTEL_SDK_DISABLED: "false"
+
+---
+# Source: redepanda/templates/otel-collector-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redepanda-otel-collector
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: otel-collector
+data:
+  # Kept as a real file under files/ so it can be checked with the collector binary itself:
+  #   otelcol validate --config=deploy/helm/redepanda/files/otel-collector-config.yaml
+  # It lives in its own template so the Deployment can hash it for a rollout trigger without
+  # a template including itself.
+  config.yaml: |
+    extensions:
+      # Without this block port 13133 is dead and the probes fail. It must ALSO be listed under
+      # service.extensions below, or it is parsed and then never started.
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /
+    
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            # Not localhost: nothing from another pod would ever arrive.
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    
+    processors:
+      # Must be the first processor so backpressure reaches the receiver.
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 160
+        spike_limit_mib: 40
+      batch:
+        send_batch_size: 1024
+        timeout: 10s
+    
+    exporters:
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        # Stated explicitly rather than relying on the default behaviour. This is what turns
+        # redepanda.messages.sent into redepanda_messages_sent_total.
+        translation_strategy: UnderscoreEscapingWithSuffixes
+        send_timestamps: true
+        # Must exceed OTEL_METRIC_EXPORT_INTERVAL or series flicker between scrapes.
+        metric_expiration: 5m
+        without_scope_info: true
+        resource_to_telemetry_conversion:
+          enabled: false
+      # Named "debug"; the old "logging" exporter was removed in v0.111.0.
+      debug:
+        verbosity: ${env:OTELCOL_DEBUG_VERBOSITY:-basic}
+    
+    service:
+      extensions: [health_check]
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [prometheus, debug]
+      telemetry:
+        logs:
+          level: ${env:OTELCOL_LOG_LEVEL:-info}
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+    
+
+---
+# Source: redepanda/templates/prometheus-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redepanda-prometheus
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+
+    scrape_configs:
+      # The application itself is never scraped. Its metrics are here only because the backend
+      # pushes them to the collector over OTLP and the collector re-exposes them on :8889.
+      - job_name: redepanda-otel
+        # Required. The collector already sets job and instance from service.name and
+        # service.instance.id; without honor_labels Prometheus overwrites both and moves the
+        # originals to exported_job / exported_instance, and the README's queries return empty.
+        honor_labels: true
+        static_configs:
+          - targets: ['redepanda-otel-collector:8889']
+
+      # The collector's own pipeline health, so a silent drop is visible somewhere.
+      - job_name: otel-collector
+        static_configs:
+          - targets: ['redepanda-otel-collector:8888']
+
+---
+# Source: redepanda/templates/backend.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redepanda-backend
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/component: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+# Source: redepanda/templates/frontend.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redepanda-frontend
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/component: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+# Source: redepanda/templates/otel-collector.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redepanda-otel-collector
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: otel-collector
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/component: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: prometheus
+      port: 8889
+      targetPort: prometheus
+    - name: self-metrics
+      port: 8888
+      targetPort: self-metrics
+    # Port 13133 is intentionally absent: the health endpoint is for the kubelet, not for other
+    # pods. Forward it against deploy/... rather than svc/... when debugging.
+
+---
+# Source: redepanda/templates/prometheus.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redepanda-prometheus
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/component: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
+
+---
+# Source: redepanda/templates/redpanda.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: broker
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/component: broker
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+    - name: admin
+      # Needed by the topic job: `rpk cluster health` talks to the Admin API, never to 9092.
+      port: 9644
+      targetPort: admin
+
+---
+# Source: redepanda/templates/backend.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redepanda-backend
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redepanda
+      app.kubernetes.io/instance: redepanda
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: redepanda-0.1.0
+        app.kubernetes.io/name: redepanda
+        app.kubernetes.io/instance: redepanda
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: backend
+      annotations:
+        # Roll the pods when the configuration changes; without this a helm upgrade that only
+        # edits the ConfigMap leaves the old values running.
+        checksum/config: 42a6b39a7352c265fa7f1976b3fcc802f2f5ab8643a6a5589a297eae2a49e3ae
+        # There are deliberately NO prometheus.io/scrape annotations here. The backend pushes
+        # over OTLP and exposes no /metrics endpoint.
+    spec:
+      # Longer than the 25s shutdown timeout the application configures for itself, so the
+      # consumer can leave its group and the producer can flush before SIGKILL.
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        # Matches APP_UID in the .NET base image. Must be numeric: the kubelet rejects images
+        # whose USER is a name when runAsNonRoot is set.
+        runAsUser: 1654
+        runAsGroup: 1654
+        fsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: "redepanda-backend:dev"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: redepanda-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # Expanded by the kubelet from POD_NAME above. This is what makes the Prometheus
+            # "instance" label the pod name; the application never sets the resource in code.
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.instance.id=$(POD_NAME)"
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            # Reports 503 until broker metadata can be fetched, so the pod leaves the Service
+            # endpoints while Redpanda is unreachable. The result is cached for 5s.
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+---
+# Source: redepanda/templates/frontend.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redepanda-frontend
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redepanda
+      app.kubernetes.io/instance: redepanda
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: redepanda-0.1.0
+        app.kubernetes.io/name: redepanda
+        app.kubernetes.io/instance: redepanda
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: frontend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: caddy
+          image: "redepanda-frontend:dev"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Caddy substitutes this into the Caddyfile before parsing it. The image carries
+            # the in-cluster service name as its default, so this is belt and braces.
+            - name: BACKEND_HOST
+              value: "redepanda-backend:8080"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              # The image runs setcap -r on the binary, so it never needs CAP_NET_BIND_SERVICE.
+              drop: [ALL]
+          volumeMounts:
+            # Even with auto_https off, Caddy sweeps its TLS storage at startup and logs an
+            # error if these are not writable. Both are throwaway: nothing here is persisted.
+            - name: caddy-data
+              mountPath: /data
+            - name: caddy-config
+              mountPath: /config
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+      volumes:
+        - name: caddy-data
+          emptyDir: {}
+        - name: caddy-config
+          emptyDir: {}
+---
+# Source: redepanda/templates/otel-collector.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redepanda-otel-collector
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redepanda
+      app.kubernetes.io/instance: redepanda
+      app.kubernetes.io/component: otel-collector
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: redepanda-0.1.0
+        app.kubernetes.io/name: redepanda
+        app.kubernetes.io/instance: redepanda
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: otel-collector
+      annotations:
+        checksum/config: 03c0a48ce2dc7cb5fe6acfd7dc9854db1629f2c2037f128a611a58c2537552bc
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # The image is FROM scratch and already runs as 10001; stated explicitly so the
+        # kubelet's runAsNonRoot check has a numeric uid to verify.
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: otel-collector
+          image: "otel/opentelemetry-collector:0.158.0"
+          imagePullPolicy: IfNotPresent
+          # The image's default CMD points at /etc/otelcol/config.yaml. Kubernetes `args`
+          # replaces CMD wholesale, so mounting the config anywhere else requires saying so.
+          args: ["--config=/conf/config.yaml"]
+          env:
+            - name: OTELCOL_LOG_LEVEL
+              value: "info"
+            - name: OTELCOL_DEBUG_VERBOSITY
+              value: "basic"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: prometheus
+              containerPort: 8889
+            - name: self-metrics
+              containerPort: 8888
+            - name: health
+              containerPort: 13133
+          livenessProbe:
+            # Answered by the health_check extension, which must appear both under
+            # `extensions:` and under `service.extensions:` or this port is simply not open.
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Verified: this pipeline (otlp -> memory_limiter/batch -> prometheus/debug) never
+            # writes to disk, so it needs no writable mount at all.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: redepanda-otel-collector
+---
+# Source: redepanda/templates/prometheus.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redepanda-prometheus
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redepanda
+      app.kubernetes.io/instance: redepanda
+      app.kubernetes.io/component: prometheus
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: redepanda-0.1.0
+        app.kubernetes.io/name: redepanda
+        app.kubernetes.io/instance: redepanda
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: prometheus
+      annotations:
+        checksum/config: 66c82716754398517edecba74ece2f64451ead92a342f91a4217eb6cffcf6719
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # The image declares `USER nobody`, which is NOT numeric. With runAsNonRoot set and no
+        # runAsUser, the kubelet refuses to start the container:
+        #   "container has runAsNonRoot and image has non-numeric user (nobody)".
+        # 65534 is nobody.
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prometheus
+          image: "quay.io/prometheus/prometheus:v3.13.2"
+          imagePullPolicy: IfNotPresent
+          # Setting args replaces the image's CMD entirely, and that CMD is exactly these two
+          # flags. Omitting --config.file would make Prometheus look for ./prometheus.yml
+          # relative to its WORKDIR (/prometheus) and exit with a config load error.
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=6h
+          ports:
+            - name: http
+              containerPort: 9090
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: tsdb
+              # Required by readOnlyRootFilesystem: the TSDB is written here. It is an emptyDir
+              # on purpose -- the demo needs no metric history across restarts.
+              mountPath: /prometheus
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: redepanda-prometheus
+        - name: tsdb
+          emptyDir: {}
+---
+# Source: redepanda/templates/redpanda.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: broker
+spec:
+  serviceName: redpanda
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redepanda
+      app.kubernetes.io/instance: redepanda
+      app.kubernetes.io/component: broker
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: redepanda-0.1.0
+        app.kubernetes.io/name: redepanda
+        app.kubernetes.io/instance: redepanda
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: broker
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # The image creates its user with --uid 101 --gid 101.
+        runAsUser: 101
+        runAsGroup: 101
+        # Without fsGroup a freshly provisioned PVC is mounted root-owned and the broker cannot
+        # write its data directory. It only bites on a *fresh* volume, so it survives every
+        # upgrade test and then fails on the first clean install.
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redpanda
+          image: "docker.redpanda.com/redpandadata/redpanda:v26.2.1"
+          imagePullPolicy: IfNotPresent
+
+          # `command` replaces the image ENTRYPOINT (/entrypoint.sh), and that script is the
+          # only thing that maps the name `redpanda` onto rpk. /usr/bin/redpanda is the Seastar
+          # broker binary: it does not understand `start` or `--mode` and exits immediately with
+          # a parse error. Invoking rpk explicitly is what the official chart does too.
+          command: [rpk, redpanda, start]
+          args:
+            # dev-container already implies --overprovisioned, --reserve-memory 0M and
+            # --check=false, but NOT --smp, which is why that one is still listed.
+            - --mode=dev-container
+            - --smp=1
+            - --memory=1G
+            - --kafka-addr=internal://0.0.0.0:9092
+            - --advertise-kafka-addr=internal://redpanda:9092
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: admin
+              containerPort: 9644
+          livenessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Deliberately NOT read-only, unlike every other pod in this chart: `rpk redpanda
+            # start` writes the merged broker configuration to /etc/redpanda/redpanda.yaml on
+            # every start. This is recorded as a known limitation in the README.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+          resources:
+            limits:
+              memory: 2Gi
+            requests:
+              cpu: 200m
+              memory: 1Gi
+  volumeClaimTemplates:
+    # A volumeClaimTemplate rather than a standalone PVC, so the volume is bound to the
+    # StatefulSet's identity. Note that these PVCs deliberately outlive `helm uninstall`.
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+---
+# Source: redepanda/templates/topic-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redepanda-create-topic
+  labels:
+    helm.sh/chart: redepanda-0.1.0
+    app.kubernetes.io/name: redepanda
+    app.kubernetes.io/instance: redepanda
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: topic-job
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # before-hook-creation is what makes a rerun possible at all: a Job's pod template is
+    # immutable, so without deleting the previous Job first, every upgrade would fail with
+    # "field is immutable". hook-failed is included so a failed run does not linger -- hook
+    # resources are not part of the release and `helm uninstall` will not clean them up.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 10
+  # Belt and braces alongside the delete policy, for the case where the hook is run outside a
+  # normal release lifecycle.
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: redepanda-0.1.0
+        app.kubernetes.io/name: redepanda
+        app.kubernetes.io/instance: redepanda
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: topic-job
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: create-topic
+          image: "docker.redpanda.com/redpandadata/redpanda:v26.2.1"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDPANDA_TOPIC
+              value: "redepanda-chat"
+            # rpk writes its scratch config under $HOME; point that at the writable emptyDir.
+            - name: HOME
+              value: /tmp
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              # `rpk cluster health` speaks the Admin API on 9644 -- it has no --brokers flag,
+              # and pointing it at 9092 makes it fail with "unknown flag". Waiting on the exit
+              # code rather than grepping the output keeps this robust across rpk versions.
+              healthy=0
+              for i in $(seq 1 60); do
+                if rpk cluster health -X admin.hosts=redpanda:9644 --exit-when-healthy >/dev/null 2>&1; then
+                  healthy=1
+                  break
+                fi
+                echo "waiting for the broker to become healthy ($i/60)"
+                sleep 3
+              done
+
+              if [ "$healthy" != "1" ]; then
+                echo "broker did not become healthy within 180s" >&2
+                exit 1
+              fi
+
+              # `rpk topic create` exits 1 when the topic already exists, so a plain call would
+              # fail the hook on every single helm upgrade. Verified against Redpanda v26.2.1.
+              if rpk topic create "$REDPANDA_TOPIC" \
+                   -p 1 \
+                   -r 1 \
+                   -X brokers=redpanda:9092; then
+                echo "created topic $REDPANDA_TOPIC"
+              else
+                # Confirm it exists rather than swallowing every possible failure.
+                rpk topic describe "$REDPANDA_TOPIC" -X brokers=redpanda:9092 >/dev/null
+                echo "topic $REDPANDA_TOPIC already exists"
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+

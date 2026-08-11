@@ -36,6 +36,10 @@
             pkgs.docker-compose
             pkgs.kubectl
             pkgs.kubernetes-helm
+            # Validates rendered manifests against the Kubernetes schemas without a cluster.
+            # `kubectl apply --dry-run=client` cannot do this: it still needs an API server to
+            # resolve resource kinds, so it fails with "connection refused" when none is running.
+            pkgs.kubeconform
           ];
 
           DOTNET_CLI_TELEMETRY_OPTOUT = 1;

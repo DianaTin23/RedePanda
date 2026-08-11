@@ -1,0 +1,40 @@
+{{- /*
+Prometheus is pointless without the collector: the collector is its only scrape target. Fail
+at template time with a clear message rather than deploying a Prometheus that scrapes nothing.
+*/ -}}
+{{- if and .Values.prometheus.enabled (not .Values.otelCollector.enabled) -}}
+{{- fail "prometheus.enabled requires otelCollector.enabled: the collector is Prometheus' only scrape target." -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "redepanda.fullname" . }}-config
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+data:
+  # Application configuration. Plain names rather than ASP.NET's Section__Key convention,
+  # because the backend reads these explicitly; see BackendOptions.
+  REDPANDA_BOOTSTRAP_SERVERS: {{ include "redepanda.bootstrapServers" . | quote }}
+  REDPANDA_TOPIC: {{ .Values.chat.topic | quote }}
+  MAX_MESSAGE_LENGTH: {{ .Values.chat.maxMessageLength | quote }}
+  LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
+  ASPNETCORE_URLS: "http://+:8080"
+{{- if .Values.otelCollector.enabled }}
+
+  # OTEL_* are specified by OpenTelemetry and read by the SDK itself. They are deliberately not
+  # re-read in application code, which would create a second source of truth.
+  #
+  # service.namespace is deliberately NOT set: the collector's Prometheus exporter builds the
+  # job label as <service.namespace>/<service.name>, so setting it would turn every job label
+  # into "redepanda/redepanda-backend" and break the PromQL examples in the README.
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://{{ include "redepanda.collectorService" . }}:4317"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  OTEL_SERVICE_NAME: "{{ include "redepanda.fullname" . }}-backend"
+  OTEL_METRIC_EXPORT_INTERVAL: {{ .Values.otelCollector.metricExportIntervalMs | quote }}
+  OTEL_SDK_DISABLED: "false"
+{{- else }}
+
+  # No collector deployed, so the SDK is switched off rather than left retrying an endpoint
+  # that does not exist. Honoured from OpenTelemetry .NET 1.15.0 onwards; this chart ships 1.17.
+  OTEL_SDK_DISABLED: "true"
+{{- end }}

@@ -1,0 +1,89 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "redepanda.fullname" . }}-create-topic
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: topic-job
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # before-hook-creation is what makes a rerun possible at all: a Job's pod template is
+    # immutable, so without deleting the previous Job first, every upgrade would fail with
+    # "field is immutable". hook-failed is included so a failed run does not linger -- hook
+    # resources are not part of the release and `helm uninstall` will not clean them up.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 10
+  # Belt and braces alongside the delete policy, for the case where the hook is run outside a
+  # normal release lifecycle.
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "redepanda.labels" . | nindent 8 }}
+        app.kubernetes.io/component: topic-job
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: create-topic
+          image: {{ .Values.redpanda.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: REDPANDA_TOPIC
+              value: {{ .Values.chat.topic | quote }}
+            # rpk writes its scratch config under $HOME; point that at the writable emptyDir.
+            - name: HOME
+              value: /tmp
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              # `rpk cluster health` speaks the Admin API on 9644 -- it has no --brokers flag,
+              # and pointing it at 9092 makes it fail with "unknown flag". Waiting on the exit
+              # code rather than grepping the output keeps this robust across rpk versions.
+              healthy=0
+              for i in $(seq 1 60); do
+                if rpk cluster health -X admin.hosts={{ include "redepanda.adminHost" . }} --exit-when-healthy >/dev/null 2>&1; then
+                  healthy=1
+                  break
+                fi
+                echo "waiting for the broker to become healthy ($i/60)"
+                sleep 3
+              done
+
+              if [ "$healthy" != "1" ]; then
+                echo "broker did not become healthy within 180s" >&2
+                exit 1
+              fi
+
+              # `rpk topic create` exits 1 when the topic already exists, so a plain call would
+              # fail the hook on every single helm upgrade. Verified against Redpanda v26.2.1.
+              if rpk topic create "$REDPANDA_TOPIC" \
+                   -p {{ .Values.chat.partitions }} \
+                   -r {{ .Values.chat.replicationFactor }} \
+                   -X brokers={{ include "redepanda.bootstrapServers" . }}; then
+                echo "created topic $REDPANDA_TOPIC"
+              else
+                # Confirm it exists rather than swallowing every possible failure.
+                rpk topic describe "$REDPANDA_TOPIC" -X brokers={{ include "redepanda.bootstrapServers" . }} >/dev/null
+                echo "topic $REDPANDA_TOPIC already exists"
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}

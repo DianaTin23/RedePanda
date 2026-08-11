@@ -1,0 +1,91 @@
+# Default values for the redepanda chart.
+# Every image is pinned; nothing here uses a floating tag.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Locally built images are not in any registry, so the kubelet must not try to fetch them.
+# IfNotPresent rather than Never: Never fails outright with ErrImageNeverPull on Docker
+# Desktop, where the image is already present and no pull would happen anyway.
+imagePullPolicy: IfNotPresent
+
+# ---- Chat settings shared by every component --------------------------------------------------
+chat:
+  topic: redepanda-chat
+  partitions: 1
+  replicationFactor: 1
+  maxMessageLength: 500
+
+# ---- Backend ----------------------------------------------------------------------------------
+backend:
+  image: redepanda-backend:dev
+
+  # One replica by design. More replicas do work — each pod consumes under its own group id and
+  # therefore sees every message — but a browser's SSE connection is pinned to a single pod, so
+  # the demo gains nothing from scaling. See the README.
+  replicas: 1
+  logLevel: Information
+
+  # The host's shutdown timeout is set to 25s in code. These two must not be equal, or SIGKILL
+  # races the application's own graceful-shutdown deadline.
+  terminationGracePeriodSeconds: 45
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# ---- Frontend ---------------------------------------------------------------------------------
+frontend:
+  image: redepanda-frontend:dev
+  replicas: 1
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+# ---- Redpanda broker --------------------------------------------------------------------------
+redpanda:
+  image: docker.redpanda.com/redpandadata/redpanda:v26.2.1
+
+  # Service name kept short because it is baked into REDPANDA_BOOTSTRAP_SERVERS defaults and
+  # into the broker's own advertised address.
+  serviceName: redpanda
+  storage: 1Gi
+  storageClassName: ""
+
+  # Seastar needs explicit limits in a container or it sizes itself against the whole node.
+  smp: 1
+  memory: 1G
+  resources:
+    requests: { cpu: 200m, memory: 1Gi }
+    limits: { memory: 2Gi }
+
+# ---- OpenTelemetry Collector ------------------------------------------------------------------
+otelCollector:
+  enabled: true
+
+  # Core distribution, not contrib: core already contains the prometheus exporter and the
+  # health_check extension. otelcol-k8s would be wrong -- it has no prometheus exporter at all.
+  image: otel/opentelemetry-collector:0.158.0
+  logLevel: info
+
+  # Set to "detailed" to have every received metric logged while debugging the pipeline.
+  debugVerbosity: basic
+
+  # The .NET SDK default is 60s, which looks frozen during a five-minute demo.
+  metricExportIntervalMs: 5000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+# ---- Prometheus -------------------------------------------------------------------------------
+# Requires otelCollector.enabled: the collector is its only scrape target, so Prometheus on its
+# own would come up with nothing to scrape. The chart refuses that combination.
+prometheus:
+  enabled: true
+  image: quay.io/prometheus/prometheus:v3.13.2
+
+  # 5s rather than the usual 15s so counters visibly move during the demo.
+  scrapeInterval: 5s
+  retention: 6h
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }

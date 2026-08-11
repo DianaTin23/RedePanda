@@ -1,0 +1,171 @@
+:root {
+    --bg: #14151a;
+    --panel: #1d1f27;
+    --line: #2c2f3a;
+    --text: #e6e7ea;
+    --muted: #9aa0ad;
+    --accent: #e34a3a;
+    --own: #24303f;
+    --ok: #4caf7d;
+    --warn: #d8a33a;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+    max-width: 46rem;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+
+header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+}
+
+h1::before {
+    content: "🐼 ";
+}
+
+.status {
+    margin-left: auto;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    border: 1px solid var(--line);
+    color: var(--muted);
+}
+
+.status--online {
+    color: var(--ok);
+    border-color: currentcolor;
+}
+
+.status--connecting {
+    color: var(--warn);
+    border-color: currentcolor;
+}
+
+.panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: flex-end;
+    padding: 1rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 0.6rem;
+}
+
+label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    flex: 1 1 10rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+input {
+    padding: 0.55rem 0.7rem;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 0.4rem;
+}
+
+input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+button {
+    padding: 0.55rem 1.1rem;
+    font: inherit;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 0.4rem;
+    cursor: pointer;
+}
+
+button:hover {
+    filter: brightness(1.1);
+}
+
+.link {
+    background: none;
+    color: var(--muted);
+    padding: 0;
+    text-decoration: underline;
+}
+
+.room-label {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0 0 0.5rem;
+}
+
+#messages {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0.75rem;
+    height: 22rem;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 0.6rem;
+}
+
+#messages li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.45rem 0.6rem;
+    margin-bottom: 0.4rem;
+    border-radius: 0.4rem;
+    background: var(--bg);
+}
+
+#messages li.own {
+    background: var(--own);
+}
+
+.meta {
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.body {
+    /* Messages are user input: wrap hard so a long unbroken string cannot stretch the layout. */
+    overflow-wrap: anywhere;
+}
+
+#send {
+    display: flex;
+    gap: 0.5rem;
+}
+
+#send input {
+    flex: 1;
+}
+
+.error {
+    color: var(--accent);
+    font-size: 0.85rem;
+    margin: 0.5rem 0;
+}

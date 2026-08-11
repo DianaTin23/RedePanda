@@ -16,11 +16,13 @@
 }
 
 :8080 {
-	# ---- API proxy: strip the /api prefix ------------------------------------------------
-	# Caddy streams text/event-stream unbuffered on its own, so SSE needs no extra directives
-	# here. The backend hostname comes from the environment, with the in-cluster service name
-	# as the default.
-	handle_path /api/* {
+	# ---- API proxy -----------------------------------------------------------------------
+	# The /api prefix is passed through rather than stripped, so the backend answers on the
+	# same paths whether it is reached through this proxy or port-forwarded directly for
+	# debugging. Caddy streams text/event-stream unbuffered on its own, so SSE needs no extra
+	# directives here. The backend address comes from the environment, defaulting to the
+	# in-cluster service name.
+	handle /api/* {
 		reverse_proxy {$BACKEND_HOST:redepanda-backend:8080}
 	}
 

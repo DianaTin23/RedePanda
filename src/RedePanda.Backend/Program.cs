@@ -53,12 +53,17 @@ var app = builder.Build();
 // There is deliberately no /metrics endpoint. The backend pushes over OTLP and never gets
 // scraped, which is the whole point of putting a collector in front of Prometheus.
 
-app.MapGet("/health/live", () => Results.Ok("live"));
+// Health is reachable twice on purpose: Kubernetes probes hit the pod directly on /health/*,
+// while a browser reaches it through the frontend proxy, which only forwards /api/*.
+foreach (var prefix in new[] { "", "/api" })
+{
+    app.MapGet($"{prefix}/health/live", () => Results.Ok("live"));
 
-app.MapGet("/health/ready", async (BrokerReadiness readiness, CancellationToken ct) =>
-    await readiness.IsReadyAsync(ct)
-        ? Results.Ok("ready")
-        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+    app.MapGet($"{prefix}/health/ready", async (BrokerReadiness readiness, CancellationToken ct) =>
+        await readiness.IsReadyAsync(ct)
+            ? Results.Ok("ready")
+            : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+}
 
 app.MapPost("/api/messages", async (
     SendMessageRequest request,

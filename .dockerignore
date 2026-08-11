@@ -1,0 +1,29 @@
+# This file must sit at the build context root, which for the backend image is the repository
+# root. Excluding bin/ and obj/ is not just about image size: copying the host's obj/ into the
+# build would overwrite the restore performed inside the container with an asset file that
+# points at host paths, and `dotnet publish --no-restore` then fails on missing packages.
+**/bin/
+**/obj/
+
+**/.vs/
+**/.vscode/
+**/.idea/
+.git/
+.github/
+.direnv/
+/result
+
+deploy/
+scripts/
+tests/
+RedePanda-kafka-docker/
+src/RedePanda.ChatClient/
+src/RedePanda.Frontend/
+
+*.md
+*.png
+**/Dockerfile
+.dockerignore
+.envrc
+flake.nix
+flake.lock

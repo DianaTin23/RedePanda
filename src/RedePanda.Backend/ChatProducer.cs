@@ -30,19 +30,27 @@ public sealed class ChatProducer : IDisposable
     /// The producer's configuration, separate from the constructor so it can be asserted on
     /// without a broker in the picture.
     /// </summary>
-    internal static ProducerConfig BuildConfig(BackendOptions options) => new()
+    internal static ProducerConfig BuildConfig(BackendOptions options)
     {
-        BootstrapServers = options.BootstrapServers,
-        Acks = Acks.Leader,
+        var config = new ProducerConfig
+        {
+            BootstrapServers = options.BootstrapServers,
+            Acks = Acks.Leader,
 
-        // Without this, librdkafka's five-minute default applies and the POST behind it holds the
-        // browser's composer open for the whole of it. See BackendOptions.ProduceTimeoutMs.
-        MessageTimeoutMs = options.ProduceTimeoutMs,
+            // Without this, librdkafka's five-minute default applies and the POST behind it holds
+            // the browser's composer open for the whole of it. See BackendOptions.ProduceTimeoutMs.
+            MessageTimeoutMs = options.ProduceTimeoutMs,
 
-        // Strictly below the message timeout: at or above it, one in-flight request would spend
-        // the entire budget and the retry the message timeout exists to allow would never happen.
-        RequestTimeoutMs = options.ProduceTimeoutMs / 2,
-    };
+            // Strictly below the message timeout: at or above it, one in-flight request would
+            // spend the entire budget and the retry the message timeout allows would never happen.
+            RequestTimeoutMs = options.ProduceTimeoutMs / 2,
+        };
+
+        // A no-op against the plaintext broker in the chart; the whole of TLS and SASL against
+        // anything else. See RedePanda.Contracts.KafkaSecurity.
+        KafkaSecurity.ApplyTo(config);
+        return config;
+    }
 
     /// <summary>
     /// How a failed produce is reported to the browser. A timeout means the request was never

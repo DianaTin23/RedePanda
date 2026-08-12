@@ -6,4 +6,12 @@
         <RootNamespace>RedePanda.Contracts</RootNamespace>
     </PropertyGroup>
 
+    <ItemGroup>
+        <!-- The one dependency this project has, and it is here rather than duplicated in the
+             backend and the console client because ClientConfig is the shared base of the
+             producer, consumer and admin configurations: KafkaSecurity maps onto it once for all
+             five client sites. Version pinned in Directory.Packages.props. -->
+        <PackageReference Include="Confluent.Kafka" />
+    </ItemGroup>
+
 </Project>

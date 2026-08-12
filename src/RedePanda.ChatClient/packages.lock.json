@@ -17,7 +17,10 @@
         "contentHash": "DzG2YcqWPT3Ly91aeDYsgsVcJXlOMiK9oqyRdPvQz9ZMbcV8Ob0rQA6fNUQ4sarmzFk4phqwPlVQxtZDGLP69w=="
       },
       "redepanda.contracts": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Confluent.Kafka": "[2.15.0, )"
+        }
       }
     }
   }

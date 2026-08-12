@@ -92,6 +92,7 @@ internal static class Program
     private static async Task<bool> TryCreateTopicAsync(string bootstrap, string topic)
     {
         var adminConfig = new AdminClientConfig { BootstrapServers = bootstrap };
+        KafkaSecurity.ApplyTo(adminConfig);
         using var adminClient = new AdminClientBuilder(adminConfig).Build();
 
         try

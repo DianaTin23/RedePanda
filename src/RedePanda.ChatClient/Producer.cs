@@ -16,6 +16,10 @@ public sealed class Producer : IDisposable
             Acks = Acks.Leader,
         };
 
+        // The console client talks to the same broker as the backend and therefore needs the same
+        // credentials; see RedePanda.Contracts.KafkaSecurity.
+        KafkaSecurity.ApplyTo(config);
+
         _producer = new ProducerBuilder<string, string>(config).Build();
         _topic = topic;
     }

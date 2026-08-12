@@ -23,6 +23,8 @@ public sealed class Consumer : IDisposable
             EnableAutoCommit = false,
         };
 
+        KafkaSecurity.ApplyTo(config);
+
         _consumer = new ConsumerBuilder<string, string>(config).Build();
         _consumer.Subscribe(topic);
     }

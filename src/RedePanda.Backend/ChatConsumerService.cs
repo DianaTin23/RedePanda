@@ -65,6 +65,10 @@ public sealed class ChatConsumerService(
             EnableAutoCommit = false,
         };
 
+        // A no-op against the plaintext broker in the chart; the whole of TLS and SASL against
+        // anything else. See RedePanda.Contracts.KafkaSecurity.
+        KafkaSecurity.ApplyTo(config);
+
         _consumer = new ConsumerBuilder<string, string>(config)
             .SetErrorHandler((_, error) =>
             {

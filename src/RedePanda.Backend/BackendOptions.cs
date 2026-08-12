@@ -76,9 +76,48 @@ public sealed record BackendOptions
             HistorySize = ReadInt("CHAT_HISTORY_SIZE", DefaultHistorySize, allowZero: true),
             ProduceTimeoutMs = ReadInt("PRODUCE_TIMEOUT_MS", DefaultProduceTimeoutMs),
 
-            // Supplied via fieldRef in the Deployment; the machine name keeps it useful locally.
-            PodName = Read("POD_NAME", Environment.MachineName),
+            PodName = ResolvePodName(
+                Environment.GetEnvironmentVariable("POD_NAME"),
+                Environment.GetEnvironmentVariable("KUBERNETES_SERVICE_HOST"),
+                Environment.MachineName,
+                Environment.ProcessId),
         };
+    }
+
+    /// <summary>
+    /// The pod's identity, and with it the consumer group id. Two replicas that share a group id
+    /// do not share the load, they silence each other: Kafka gives the single partition to one of
+    /// them and every browser attached to the others waits in a room that never updates.
+    /// <para>
+    /// In a cluster the name comes from a <c>fieldRef</c> on <c>metadata.name</c>, which the API
+    /// server guarantees to be unique in the namespace. A missing value there is a broken
+    /// Deployment, not a situation to paper over with a fallback — so it throws, and the pod
+    /// crash-loops with a message instead of joining the fan-out and quietly breaking it.
+    /// </para>
+    /// <para>
+    /// Outside a cluster the same collision is reachable by running the backend twice on one
+    /// machine, which is exactly how the fan-out gets tried locally. The process id separates the
+    /// two while keeping the name readable in <c>rpk group list</c>.
+    /// </para>
+    /// </summary>
+    internal static string ResolvePodName(
+        string? podName, string? kubernetesServiceHost, string machineName, int processId)
+    {
+        if (!string.IsNullOrWhiteSpace(podName))
+        {
+            return podName;
+        }
+
+        // Set by the kubelet in every pod, and by nothing else.
+        if (!string.IsNullOrWhiteSpace(kubernetesServiceHost))
+        {
+            throw new InvalidOperationException(
+                "POD_NAME is not set, but this process is running in Kubernetes. It must come " +
+                "from a fieldRef on metadata.name: without it every replica would share one " +
+                "consumer group, and all but one of them would stop receiving messages.");
+        }
+
+        return $"{machineName}-{processId}";
     }
 
     private static string Read(string key, string fallback)

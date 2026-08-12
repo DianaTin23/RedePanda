@@ -1,4 +1,11 @@
 name: redpanda-chat
+
+# Nur der Broker läuft hier, und das ist Absicht: der schnellste Weg in Abschnitt 4 der README
+# startet Backend und Frontend direkt auf dem Host. Es gibt hier also keinen Container, dem man ein
+# POD_NAME mitgeben könnte -- und auch keinen, der eines bräuchte. Ein Backend außerhalb von
+# Kubernetes leitet seine Consumer-GroupId aus Maschinenname *und Prozess-ID* ab; genau das hält
+# zwei lokal gestartete Instanzen an diesem einen Broker in zwei Gruppen. Siehe
+# BackendOptions.ResolvePodName.
 services:
   redpanda:
     # Pinned by digest, not just by tag, so local development and the Helm chart agree on one

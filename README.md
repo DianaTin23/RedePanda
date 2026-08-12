@@ -429,7 +429,7 @@ Alle Einstellungen kommen aus Umgebungsvariablen; im Cluster aus einer ConfigMap
 | `CHAT_HISTORY_SIZE` | `200` (`0` = alles im Topic) | Backend |
 | `PRODUCE_TIMEOUT_MS` | `10000` | Backend (Producer, `message.timeout.ms`) |
 | `ASPNETCORE_URLS` | `http://+:8080` | Backend |
-| `POD_NAME` | (fieldRef) | Backend (Consumer-GroupId) |
+| `POD_NAME` | im Cluster Pflicht (fieldRef), lokal `MachineName-PID` | Backend (Consumer-GroupId) |
 | `LOG_LEVEL` | `Information` | Backend |
 | `BACKEND_HOST` | `redepanda-backend:8080` | Frontend (Caddyfile) |
 | `FRONTEND_LOG_LEVEL` | `INFO` | Frontend (Caddy: Access-Log **und** Runtime-Log) |
@@ -445,9 +445,18 @@ als `LOG_LEVEL` (`Information`). Das ist Caddys Vokabular, nicht das von .NET, u
 .NET-Schreibweise beim Start zurück, statt still auf einen Default zurückzufallen. Die beiden
 Variablen zu vereinheitlichen hieße, eine der beiden Laufzeiten anzulügen.
 
-Die ersten sieben liest das Backend **explizit** in `BackendOptions` aus, statt sich auf das
-`Section__Key`-Autobinding von ASP.NET zu verlassen — nur so stimmen die schlichten Namen aus
-dieser Tabelle mit dem Code überein.
+Alle Variablen bis einschließlich `LOG_LEVEL` liest das Backend **explizit** in `BackendOptions`
+aus, statt sich auf das `Section__Key`-Autobinding von ASP.NET zu verlassen — nur so stimmen die
+schlichten Namen aus dieser Tabelle mit dem Code überein.
+
+`POD_NAME` ist dabei die einzige Variable ohne brauchbaren Default: die Consumer-GroupId wird
+daraus gebildet, und zwei Replicas in *einer* Gruppe teilen sich nicht die Last, sie legen
+einander still — Kafka gibt die eine Partition an genau einen Pod, alle Browser an den übrigen
+sähen einen Raum, der nie mehr etwas anzeigt. Im Cluster kommt der Name aus einem `fieldRef` auf
+`metadata.name` (pro Namespace garantiert eindeutig); fehlt er dort, startet der Pod **nicht**,
+statt die Gruppe stillschweigend zu kollidieren. Außerhalb von Kubernetes gibt es keinen
+`fieldRef`, dafür aber denselben Fehlerfall — zweimal `dotnet run` auf einer Maschine —, weshalb
+der lokale Default die Prozess-ID enthält.
 
 Die `OTEL_*`-Variablen sind dagegen in der OpenTelemetry-Spezifikation genormt und werden vom
 SDK selbst gelesen. Sie werden im Code **bewusst nicht** nachgebaut: zwei Wahrheiten wären

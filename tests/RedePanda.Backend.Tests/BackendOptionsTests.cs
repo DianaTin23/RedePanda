@@ -42,4 +42,68 @@ public class BackendOptionsTests
     {
         Assert.True(BackendOptions.DefaultHistorySize > 0);
     }
+
+    /// <summary>The supplied name is used verbatim, so the group id keeps naming its pod.</summary>
+    [Fact]
+    public void ThePodNameFromTheEnvironmentWins()
+    {
+        var resolved = BackendOptions.ResolvePodName(
+            "redepanda-backend-abc", kubernetesServiceHost: "10.96.0.1",
+            machineName: "some-host", processId: 1234);
+
+        Assert.Equal("redepanda-backend-abc", resolved);
+    }
+
+    /// <summary>
+    /// The failure mode the tests above never covered. In a cluster POD_NAME comes from a
+    /// fieldRef, and <c>metadata.name</c> is unique per namespace — so the only way to reach this
+    /// branch is a Deployment that lost the fieldRef. Falling back to the machine name there would
+    /// give every pod on one node the same group id, Kafka would hand the partition to exactly one
+    /// of them, and every browser on the others would sit in a silent room. That is a failure
+    /// nobody sees in a log; a crash-looping pod is.
+    /// </summary>
+    [Fact]
+    public void AMissingPodNameInAClusterIsFatal()
+    {
+        var failure = Assert.Throws<InvalidOperationException>(() =>
+            BackendOptions.ResolvePodName(
+                podName: null, kubernetesServiceHost: "10.96.0.1",
+                machineName: "some-node", processId: 1234));
+
+        Assert.Contains("POD_NAME", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Blank counts as missing: an empty env var is what an unset ConfigMap key produces, and it
+    /// would otherwise become a group id of "redepanda-backend-".
+    /// </summary>
+    [Fact]
+    public void AnEmptyPodNameInAClusterIsFatalToo()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            BackendOptions.ResolvePodName(
+                podName: "   ", kubernetesServiceHost: "10.96.0.1",
+                machineName: "some-node", processId: 1234));
+    }
+
+    /// <summary>
+    /// Outside a cluster there is no fieldRef to demand, and the same collision is reachable by
+    /// running the backend twice on one machine against one broker — the ordinary way to try the
+    /// fan-out locally. The process id is what separates the two.
+    /// </summary>
+    [Fact]
+    public void TwoLocalProcessesDoNotShareAConsumerGroup()
+    {
+        var first = TestOptions.Create() with
+        {
+            PodName = BackendOptions.ResolvePodName(null, null, "dev-laptop", 1234),
+        };
+        var second = TestOptions.Create() with
+        {
+            PodName = BackendOptions.ResolvePodName(null, null, "dev-laptop", 5678),
+        };
+
+        Assert.NotEqual(first.ConsumerGroupId, second.ConsumerGroupId);
+        Assert.Contains("dev-laptop", first.ConsumerGroupId, StringComparison.Ordinal);
+    }
 }

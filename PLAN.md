@@ -24,7 +24,7 @@ unten sind entsprechend angepasst. Die Architektur selbst hat gehalten.
 | B8 | „`using OpenTelemetry;` nicht vergessen" | Richtig, aber nicht ausreichend — zusätzlich `OpenTelemetry.Resources` und `OpenTelemetry.Metrics` |
 | B9 | Caddy (2, 4.5) vs. nginx (Phase 1, 4.1, 12-Factor) | Widerspruch. Entschieden: **Caddy**. Abschnitt 4.1 ist damit gegenstandslos |
 
-Kleinere Korrekturen: `Confluent.Kafka` 2.15.0 hat **kein** `net9.0`-Asset (löst auf `net8.0`
+Kleinere Korrekturen: `Confluent.Kafka` 2.15.0 hat **kein** `net10.0`-Asset (löst auf `net8.0`
 auf — Base-Image muss glibc bleiben); `EnableAutoCommit = false` gegen Consumer-Group-Müll;
 `HostOptions.ShutdownTimeout` (25 s) und `terminationGracePeriodSeconds` (45 s) dürfen nicht
 beide auf dem Default 30 s stehen; der Collector braucht explizit
@@ -35,6 +35,29 @@ ohne Cluster — dafür `kubeconform`.
 Empirisch bestätigt wurde außerdem der gesamte Abschnitt 4.7: die vier Instrumente kommen als
 `redepanda_messages_sent_total`, `redepanda_messages_received_total`, `redepanda_kafka_errors_total`
 und `redepanda_active_connections` an — ohne `_total_total`, ohne `_ratio`.
+
+---
+
+## ⚠ Nachtrag 12.08.2026 — Concurrency ist nicht mehr latent
+
+Eine externe Durchsicht hat den Faktor „Concurrency" als *teilweise umgesetzt* eingestuft: der
+schwierige Teil sei richtig gelöst, aber unbewiesen — `replicas: 1`, kein HPA, kein PDB. Das stimmte.
+Schlimmer: die Begründung in E5 enthielt einen sachlichen Fehler, der genau die Maßnahme
+ausgeschlossen hat, die hier fällig war. E5 unten ist entsprechend umgeschrieben.
+
+| # | Stand im Plan | Tatsächlich |
+|---|---|---|
+| C1 | „Ein Browser hängt immer nur an einem Pod ⇒ Skalierung bringt für die Demo nichts" (E5) | Nur die erste Hälfte stimmt. Die SSE-`id` ist der **Kafka-Offset** und damit brokerweit gültig, nicht podspezifisch: ein Browser, der auf einer *anderen* Replica wieder aufsetzt, schickt denselben `Last-Event-ID` und bekommt genau das, was er verpasst hat. Sticky Sessions oder `sessionAffinity` braucht dieses Design deshalb **nie**. Skalierung bringt sehr wohl etwas — sie war nur nie eingeschaltet. |
+| C2 | Verlauf unbegrenzt (`CHAT_HISTORY_SIZE=0`) | Bei einer Replica eine vertretbare Wette auf die Retention. Bei mehreren ist es ein Puffer **pro Pod**, der mit dem Topic wächst, und ein HPA vervielfacht ihn genau dann, wenn ohnehin Last herrscht. Default jetzt 200 pro Raum. |
+| C3 | „SIGTERM: Consumer `Close()`, Producer `Flush()`" reicht (Phase 4) | Für Kafka ja, für die offenen SSE-Verbindungen nicht. Kestrel hält laufende Antworten bis zum Shutdown-Timeout (25 s) offen, und der Stream schickt in dieser Zeit munter weiter Heartbeats: der Browser sieht eine kerngesunde Verbindung zu einem Pod, der längst geht, und wechselt deshalb nicht auf die bereitstehende zweite Replica. Behoben, indem `ApplicationStopping` den Stream beendet. Vorher unsichtbar, weil bei einer Replica ohnehin alles wegfiel. |
+| C4 | Frontend-Reconnect ist durch `Last-Event-ID` abgedeckt (Phase 2) | Nur auf dem Pfad, auf dem `EventSource` selbst neu verbindet. Auf dem *fatalen* Pfad baut `app.js` ein neues `EventSource` — und kein JS-API kann daran einen Header setzen. Der Server sah einen Erstbesucher und spielte den ganzen Raum noch einmal ein. Der Client filtert jetzt zusätzlich nach der SSE-`id`. |
+
+Dazugekommen sind: `strategy: RollingUpdate` mit `maxUnavailable: 0` (Readiness heißt hier „Topic bis
+zum Ende gelesen", der alte Pod darf also erst gehen, wenn der neue einen kompletten Raum ausliefern
+kann), ein `preStop`-Sleep von 5 s gegen das Rennen zwischen Endpoint-Entfernung und SIGTERM, ein
+PodDisruptionBudget mit `maxUnavailable: 1` (nicht `minAvailable`, siehe Kommentar im Template) und
+ein optionaler HPA. Der bleibt per Default **aus**, weil kind und Docker Desktop keinen
+metrics-server mitbringen und ein HPA auf `<unknown>/70%` schlechter aussieht als keiner.
 
 ---
 
@@ -74,7 +97,7 @@ ist: hier diskutieren, nicht während der Implementierung umschwenken.
 | E2 | **Redpanda als eigenes StatefulSet im Chart**, nicht das offizielle Chart | Wir haben in `RedePanda-kafka-docker/docker-compose.yml` bereits eine funktionierende Flag-Kombination (`--mode=dev-container --smp=1`). Die übernehmen wir 1:1. Das offizielle Chart ist auf Produktionscluster ausgelegt und zieht mehr Ressourcen und Konfiguration nach, als wir demonstrieren wollen. |
 | E3 | **Konsolenclient bleibt erhalten** | Ist bestehende Arbeit und belegt in der Demo schön, dass Backend und Client wirklich dasselbe Kafka-Topic teilen. Er wird nur auf Env-Konfiguration umgestellt, sonst nicht angefasst. |
 | E4 | **Ein Topic, Raum als Feld + Kafka-Key** | Einfacher zu deployen (ein Init-Job) und die Raumtrennung filtert das Backend serverseitig. Key = `Room` sichert die Reihenfolge pro Raum, falls das Topic je mehr Partitionen bekommt. |
-| E5 | **Backend läuft mit 1 Replica**, Skalierung nur dokumentiert | Mehrere Replicas funktionieren mit unserem Consumer-Design (siehe E6) tatsächlich, aber ein Browser hängt immer nur an einem Pod. Wir zeigen es als bewusste Grenze im README statt es halb zu bauen. |
+| E5 | **Backend läuft mit 2 Replicas**, dazu PDB, Rollout-Strategie und optionaler HPA | ~~1 Replica, Skalierung nur dokumentiert~~ — siehe Nachtrag C1. Mehrere Replicas funktionieren nicht nur (E6), sie funktionieren *nachweisbar*: die SSE-`id` ist der Kafka-Offset, gilt also replicaübergreifend, und der Wiedereinstieg auf einem anderen Pod ist derselbe Codepfad wie der auf demselben. Der HPA bleibt per Default aus, weil kind und Docker Desktop keinen metrics-server mitbringen. |
 | E6 | **Consumer-GroupId bleibt pro Pod eindeutig** | `Consumer.cs:25` macht das heute schon richtig (`"kchat-" + Guid`). Beim Umbau **nicht** auf eine feste Group-ID vereinheitlichen — sonst bekäme bei mehreren Replicas jede Nachricht nur ein Pod und die anderen Browser sehen nichts. Im Backend nehmen wir statt des GUID den Pod-Namen (deterministisch, besser zu debuggen). |
 | E7 | **Prometheus minimal selbst deployen**, nicht kube-prometheus-stack | Ein Deployment + ConfigMap mit `static_configs`; einziges Scrape-Ziel ist `redepanda-otel-collector:8889`. Der Stack würde 20 Minuten Cluster-Ressourcen fressen für Features (Operator, ServiceMonitor-CRDs, Alertmanager), die wir nicht zeigen. Der Collector macht ServiceMonitors ohnehin überflüssig, weil er die einzige Scrape-Quelle ist. |
 | E9 | **OpenTelemetry-SDK + Collector statt `prometheus-net`** | Das Backend kennt Prometheus nicht mehr, sondern nur einen OTLP-Endpunkt aus einer Env-Variable — das ist 12-Factor „Backing Services" im Reinformat, dieselbe Argumentation wie bei Redpanda. Der Collector ist der austauschbare Teil: das Monitoring-Backend lässt sich ohne Backend-Rebuild wechseln. Zusätzlich ist OpenTelemetry seit 11.05.2026 CNCF *graduated*, also eine weitere bewertbare CNCF-Technologie statt einer Community-Library. Preis: ein Pod und ein Hop mehr, ca. +4–6 h Aufwand. |
@@ -170,8 +193,14 @@ Ziel: **alles deployed, nichts kann Chat.** Erst wenn das steht, kommt Logik daz
 ### Phase 2 — Chat-Funktionalität (18.–23.08.)
 
 - [x] `ChatProducer` (Singleton) — Produce mit `Key = Room`
-- [x] `ChatConsumerService : BackgroundService` — GroupId aus `POD_NAME`, `AutoOffsetReset.Latest`
+- [x] `ChatConsumerService : BackgroundService` — GroupId aus `POD_NAME`, `AutoOffsetReset.Earliest`
+      (nachgezogen: war `Latest`, siehe Chatverlauf unten)
 - [x] `ChatBroadcaster` — In-Memory-Fan-out an alle offenen SSE-Verbindungen, Raumfilter
+- [x] **Chatverlauf** (nachträglich ergänzt, ursprünglich unter „Nicht geplant"): der Consumer liest
+      den Topic beim Start von vorn und füllt `ChatHistory` pro Raum; `GET /api/stream` schickt den
+      Puffer als erste Frames. Jedes Datenframe trägt den Kafka-Offset als SSE-`id`, `Last-Event-ID`
+      macht aus dem Reconnect eine Fortsetzung statt einer Wiederholung. `/health/ready` bleibt
+      `503`, bis der Topic einmal bis zum Ende gelesen ist.
 - [x] `POST /api/messages` — validiert, setzt `Timestamp` serverseitig, produziert
 - [x] `GET /api/stream?room=X` — `text/event-stream`, Heartbeat alle 15s
 - [x] `GET /health/ready` — prüft Broker-Metadaten (Ergebnis ~5s cachen)
@@ -291,13 +320,34 @@ Was bei Caddy stattdessen zählt — alles drei nachgemessen:
     auto_https off
     admin off          # sonst offener :2019
     persist_config off # sonst schreibt Caddy nach /config und startet read-only nicht
+
+    log {              # Caddys RUNTIME-Log — NICHT die Access-Logs, siehe unten
+        output stdout
+        format json
+    }
 }
 :8080 {
+    log {              # ERST das erzeugt Access-Logs. Default wäre stderr
+        output stdout
+        format json
+    }
     handle /api/* { reverse_proxy {$BACKEND_HOST:redepanda-backend:8080} }
-    handle /healthz { respond "ok" 200 }
+    handle /healthz { log_skip; respond "ok" 200 }
     handle { root * /usr/share/caddy; try_files {path} /index.html; file_server }
 }
 ```
+
+(Die `handle`-Einzeiler mit `;` sind hier Kurzschreibweise fürs Lesen — Caddyfile kennt kein
+Semikolon als Trenner. Der echte Stand steht in `src/RedePanda.Frontend/Caddyfile`.)
+
+⚠ **Nachgetragen (12.08.):** `log` im globalen Block konfiguriert einen *benannten Logger* für
+Caddys eigene Prozessereignisse. Access-Logs entstehen ausschließlich aus einem `log` **im
+Site-Block** — ohne das schreibt der HTTP-Server keine einzige Request-Zeile. Der Fehler ist
+lautlos: `caddy validate` läuft durch, im Container ist das Runtime-Log ohnehin schon JSON, und
+`kubectl logs` zeigt Startzeilen, der Pod wirkt also nicht stumm. Nachweisbar nur über
+`caddy adapt`: unter `apps.http.servers.srv0` muss ein `logs`-Objekt stehen. Ein site-lokales
+`log` schreibt außerdem per Default nach **stderr**, `output stdout` muss dastehen. `log_skip` am
+`/healthz` hält die Probes (2 × alle 10 s) aus dem Log.
 
 Dazu im Image `setcap -r /usr/bin/caddy` (sonst passt `cap-drop=ALL` nicht zum Binary, das
 `CAP_NET_BIND_SERVICE` trägt) und `XDG_DATA_HOME=/data` — Caddy räumt beim Start seinen
@@ -312,8 +362,8 @@ sich nginx mit `host not found in upstream`.
 **4.2 Images landen nicht im Cluster.** Lokal gebaute Images kennt der Cluster nicht →
 `ImagePullBackOff`. Deshalb `imagePullPolicy: IfNotPresent` **und** explizit laden:
 ```bash
-kind load docker-image redepanda-backend:dev redepanda-frontend:dev      # kind
-minikube image load redepanda-backend:dev redepanda-frontend:dev         # minikube
+kind load docker-image redepanda-backend:$TAG redepanda-frontend:$TAG    # kind
+minikube image load redepanda-backend:$TAG redepanda-frontend:$TAG       # minikube
 ```
 Docker Desktop mit aktiviertem Kubernetes braucht das nicht. Alle drei Wege ins README.
 
@@ -376,6 +426,11 @@ PVC gehört root, und er kann sein Datenverzeichnis dann nicht beschreiben. Das 
 einem *frischen* Cluster auf — also beim Probelauf in Phase 5.
 
 Image mit fester Version pinnen (`v26.2.1`), nicht `:latest` wie in der Compose-Datei.
+
+Nachtrag: eine feste Version reicht nicht — ein Tag lässt sich auf anderen Inhalt umhängen.
+Chart und Compose-Datei pinnen den Broker inzwischen zusätzlich per Digest und beziehen ihn
+von `docker.io/redpandadata` statt über den Pull-Through-Proxy `docker.redpanda.com`, dessen
+anonymes Rate-Limit ein Nachprüfen des Digests verhindert.
 Und: der Broker-Pod ist der einzige **ohne** `readOnlyRootFilesystem` — `rpk redpanda start`
 schreibt bei jedem Start nach `/etc/redpanda/redpanda.yaml`.
 
@@ -470,7 +525,7 @@ Zwei weitere Effekte, die beim ersten PromQL-Versuch für Verwirrung sorgen:
 1. **Gruppenmitglieder** ← harte Anforderung, kommt nach ganz oben
 2. Projektziel und Architekturdiagramm
 3. Kommunikationswege Frontend ↔ Backend ↔ Redpanda
-4. Voraussetzungen (Docker, .NET 9 SDK, kubectl, Helm, lokaler Cluster)
+4. Voraussetzungen (Docker, .NET 10 SDK, kubectl, Helm, lokaler Cluster)
 5. Lokal ohne Kubernetes (Compose + Konsolenclient)
 6. Images bauen und in den Cluster laden
 7. Installation mit Helm
@@ -494,13 +549,13 @@ Ehrlichkeit war in der Aufgabenstellung ausdrücklich erwünscht, deshalb die dr
 | Faktor | Umsetzung | Einschränkung |
 |---|---|---|
 | Codebase | ein Git-Repo, ein Deployment-Chart | — |
-| Dependencies | NuGet explizit; Frontend bewusst ohne Build-Tooling (Vanilla JS) | — |
+| Dependencies | NuGet zentral deklariert und per `packages.lock.json` inklusive transitiver Pakete festgenagelt, Restore nur gegen nuget.org; alle Registry-Images per Digest gepinnt; Frontend bewusst ohne Build-Tooling (Vanilla JS) | — |
 | Config | ausschließlich Env-Variablen, im Cluster aus ConfigMap | — |
 | Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, das Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide als angehängte Ressourcen, beide ohne Codeänderung austauschbar | — |
-| Build, Release, Run | Docker-Build → Helm-Release → Container-Start getrennt | manuell, kein CI (laut Aufgabe erlaubt) |
-| Processes | kein lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | Chatverlauf lebt nur im Kafka-Topic |
+| Build, Release, Run | drei getrennte Stufen mit identifizierbarem Release: unveränderlicher Image-Tag (`appVersion`+Commit) und generierte Release-Datei, damit `helm rollback` wirklich zurückrollt | keine Registry: alte Images liegen nur im Image-Store der Node. Kein CI (laut Aufgabe erlaubt) |
+| Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut |
 | Port Binding | Backend `:8080`, Frontend `:8080` (Caddy), kein externer Webserver nötig | — |
-| Concurrency | Consumer-GroupId pro Pod ⇒ echte Fan-out-Skalierung möglich | mit 1 Replica getestet, siehe E5 |
+| Concurrency | Consumer-GroupId pro Pod ⇒ echter Fan-out; Default 2 Replicas, PDB, Rollout ohne Unterbrechung, HPA optional | HPA braucht metrics-server (per Default aus); auf einem Ein-Node-Cluster bleibt `topologySpreadConstraints` wirkungslos |
 | Disposability | SIGTERM-Handling, Consumer/Producer sauber geschlossen | — |
 | Dev/Prod Parity | identische Images lokal und im Cluster | Redpanda läuft im `dev-container`-Modus, einzelner Broker |
 | Logs | stdout/stderr, keine Logdateien | Logs laufen bewusst **nicht** über OTLP; der Collector verarbeitet nur Metriken (E10) |
@@ -555,14 +610,22 @@ Bewusst außen vor, damit der Pflichtteil sicher fertig wird:
 Argo CD, **Traces und Logs über OTLP** (der Collector könnte beides — wir aktivieren bewusst
 nur die Metrics-Pipeline, siehe E10; Jaeger/Tempo als Trace-Backend entfällt damit ebenfalls),
 **OpenTelemetry Operator / Auto-Instrumentation per Sidecar-Injection** (wir instrumentieren
-manuell im Code), Service Mesh, Cloud-Deployment, Authentifizierung, persistenter
-Chatverlauf mit Nachladen, Ingress (Port-Forward reicht für die Demo).
+manuell im Code), Service Mesh, Cloud-Deployment, Authentifizierung, Ingress (Port-Forward reicht
+für die Demo).
 
-**Nur bei echtem Zeitüberschuss:** Grafana-Dashboard, Verlauf der letzten N Nachrichten
-beim Betreten eines Raums, mehrere Backend-Replicas real testen, **Trace-Pipeline im
+Der **Chatverlauf** stand hier ebenfalls — er ist inzwischen umgesetzt, siehe Phase 2. Eigene
+Persistenz hat er weiterhin nicht: die Quelle ist der Topic, und weiter zurück als dessen Retention
+reicht kein Raum.
+
+„Mehrere Backend-Replicas real testen" stand hier ebenfalls unter „Nur bei echtem Zeitüberschuss" —
+das war die falsche Schublade. Es ist inzwischen umgesetzt, siehe Nachtrag C1–C4.
+
+**Nur bei echtem Zeitüberschuss:** Grafana-Dashboard, **Trace-Pipeline im
 vorhandenen Collector aktivieren** (ein Receiver-/Exporter-Block plus
 `service.pipelines.traces` — der billigste Zusatzpunkt, den wir noch hätten; zeigt, dass der
-Collector eine Architekturentscheidung mit Ausbaupfad ist und kein Overhead).
+Collector eine Architekturentscheidung mit Ausbaupfad ist und kein Overhead), und den HPA gegen
+`redepanda_active_connections` statt gegen CPU laufen lassen — dafür bräuchte es allerdings
+prometheus-adapter oder KEDA, also eine ganze Komponente mehr.
 
 ---
 

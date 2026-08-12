@@ -6,7 +6,22 @@ metadata:
     {{- include "redepanda.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
 spec:
+  # Two, for the same reason the backend runs two -- and with more force. Every SSE stream in the
+  # system is proxied through this deployment, so a single Caddy pod would make the backend's
+  # redundancy unobservable: one evicted node, and every browser loses its connection regardless of
+  # how many backend replicas were ready. Caddy holds no state, so the second replica costs 10m CPU.
   replicas: {{ .Values.frontend.replicas }}
+
+  # Same shape as the backend's: never below the configured count during a deploy, one pod at a
+  # time. Readiness here is cheap and local (Caddy answering its own /healthz), so this is about
+  # not dropping streams mid-rollout rather than about waiting on a backing service.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  minReadySeconds: 5
+
   selector:
     matchLabels:
       {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
@@ -22,6 +37,20 @@ spec:
         {{- . | nindent 8 }}
       {{- end }}
     spec:
+      # Covers the preStop hook as well as the signal: 5s of drain plus Caddy's own graceful
+      # shutdown of in-flight requests, with slack before SIGKILL. Shorter than the backend's 45s
+      # because nothing here has to leave a consumer group or flush a producer.
+      terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds }}
+
+      # Prefers one replica per node without ever refusing to schedule -- same trade-off, and the
+      # same one-node caveat, as the backend. See the comment there.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 14 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -56,6 +85,17 @@ spec:
               port: http
             initialDelaySeconds: 3
             periodSeconds: 10
+          lifecycle:
+            # Endpoint removal and SIGTERM are dispatched in parallel, so without this a browser
+            # can still be routed here after Caddy has begun shutting down -- and for an SSE
+            # stream that is a dropped connection rather than one retried request. Same reasoning
+            # and the same 5s as the backend; see backend.yaml for why this is an exec and not
+            # lifecycle.preStop.sleep.
+            #
+            # /bin/sleep is busybox in the alpine base image this is built on.
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -92,3 +132,24 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "redepanda.fullname" . }}-frontend
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  # maxUnavailable rather than minAvailable, and rendered unconditionally, for exactly the reasons
+  # spelled out on the backend's budget.
+  maxUnavailable: 1
+
+  # Deliberately *without* the backend's unhealthyPodEvictionPolicy: AlwaysAllow. That field is
+  # there because backend readiness depends on Redpanda, so a broker outage marks every replica
+  # NotReady and would wedge an unrelated node drain. Caddy's /healthz depends on nothing outside
+  # its own pod: a NotReady frontend is a genuinely broken frontend, and the default policy
+  # refusing to evict the last one is then the correct answer rather than an obstacle.
+  selector:
+    matchLabels:
+      {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}

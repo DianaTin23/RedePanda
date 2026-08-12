@@ -121,7 +121,7 @@ backend:
     minReplicas: 2
 
     # An upper bound from arithmetic, not a guess: 4 x 100m + Redpanda 200m + collector 50m +
-    # Prometheus 50m + frontend 10m = 710m. Fits on a one-CPU node.
+    # Prometheus 50m + 2 x frontend 10m = 720m. Fits on a one-CPU node.
     maxReplicas: 4
 
     # Percent of the CPU **request** above, not of the limit and not of the node.
@@ -138,7 +138,16 @@ frontend:
   image:
     repository: redepanda-frontend
     tag: ""
-  replicas: 1
+  # Zwei, aus demselben Grund wie beim Backend -- und mit mehr Nachdruck: *jeder* SSE-Stream läuft
+  # durch dieses Deployment. Mit einem einzigen Caddy-Pod wäre die Redundanz des Backends nicht
+  # beobachtbar, weil ein einziger geräumter Node trotzdem jeden Browser trennt. Caddy hält keinen
+  # Zustand, die zweite Replica kostet 10m CPU.
+  replicas: 2
+
+  # 5s preStop + Caddys eigener Shutdown offener Requests, mit Puffer vor SIGKILL. Kürzer als die
+  # 45s des Backends: hier muss weder eine Consumer-Group verlassen noch ein Producer geflusht
+  # werden.
+  terminationGracePeriodSeconds: 30
 
   # Caddy's level, for the access log and its own runtime log alike: DEBUG, INFO, WARN or ERROR.
   # Deliberately spelled differently from backend.logLevel above — that one is .NET's vocabulary

@@ -1,6 +1,5 @@
-using System.Threading.Channels;
+using System.Globalization;
 using Confluent.Kafka;
-using Microsoft.AspNetCore.Http.Features;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using RedePanda.Backend;
@@ -94,66 +93,36 @@ app.MapPost("/api/messages", async (
     return Results.Accepted();
 });
 
-app.MapGet("/api/stream", async (
+app.MapGet("/api/stream", IResult (
     HttpContext context,
     string? room,
-    ChatBroadcaster broadcaster,
-    CancellationToken ct) =>
+    ChatBroadcaster broadcaster) =>
 {
     if (string.IsNullOrWhiteSpace(room))
     {
-        await Results.BadRequest(new { error = "Query parameter 'room' is required." })
-            .ExecuteAsync(context);
-        return;
+        return Results.BadRequest(new { error = "Query parameter 'room' is required." });
     }
 
-    // .NET 9 has no TypedResults.ServerSentEvents — that arrived in ASP.NET Core 10 — so the
-    // response is shaped by hand. This mirrors what the built-in result does.
-    var response = context.Response;
-    response.ContentType = "text/event-stream";
-    response.Headers.CacheControl = "no-cache,no-store";
-    response.Headers.Pragma = "no-cache";
-    response.Headers.ContentEncoding = "identity";
+    // ServerSentEvents sets Content-Type, Cache-Control, Pragma and Content-Encoding itself and
+    // disables response buffering. This header is an nginx-specific hint it does not know about,
+    // and it only matters when a buffering proxy sits in front — Caddy streams SSE unbuffered.
+    context.Response.Headers["X-Accel-Buffering"] = "no";
 
-    // Only relevant when a buffering proxy sits in front. Caddy streams SSE unbuffered anyway.
-    response.Headers["X-Accel-Buffering"] = "no";
+    // EventSource resends the id of the last frame it saw whenever it reconnects on its own, which
+    // is what the frontend relies on after a pod restart. Anything unparseable is treated as a
+    // fresh connection: replaying the room again is the harmless answer, dropping it is not.
+    var lastEventId =
+        long.TryParse(
+            context.Request.Headers["Last-Event-ID"].ToString(),
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out var seen)
+            ? seen
+            : -1;
 
-    context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
-    await response.Body.FlushAsync(ct);
-
-    using var subscription = broadcaster.Subscribe(room.Trim());
-
-    try
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            // Wait for a message, but never longer than the heartbeat interval: a comment line
-            // keeps idle connections alive through proxies and reveals dead peers to us.
-            using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            heartbeat.CancelAfter(TimeSpan.FromSeconds(15));
-
-            try
-            {
-                var message = await subscription.Reader.ReadAsync(heartbeat.Token);
-                await response.WriteAsync(
-                    $"data: {ChatMessageSerializer.Serialize(message)}\n\n", ct);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                await response.WriteAsync(": ping\n\n", ct);
-            }
-
-            await response.Body.FlushAsync(ct);
-        }
-    }
-    catch (OperationCanceledException)
-    {
-        // The browser went away, or the process is shutting down. Both are normal.
-    }
-    catch (ChannelClosedException)
-    {
-        // Subscription was completed during shutdown.
-    }
+    return TypedResults.ServerSentEvents(
+        ChatStream.Create(
+            broadcaster, room.Trim(), ChatStream.DefaultHeartbeatInterval, lastEventId));
 });
 
 app.Run();

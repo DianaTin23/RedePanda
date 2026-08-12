@@ -9,14 +9,28 @@ namespace RedePanda.Backend;
 /// The pod consumes under its own group id, so it sees every message rather than a share of the
 /// partitions. That is what makes more than one backend replica possible at all.
 /// </para>
+/// <para>
+/// It starts at the earliest retained offset, so the first thing it does is rebuild the chat
+/// history from the topic. Only once every assigned partition has reported EOF is the pod
+/// considered ready; see <see cref="BrokerReadiness.MarkHistoryLoaded"/>.
+/// </para>
 /// </summary>
 public sealed class ChatConsumerService(
     BackendOptions options,
     ChatBroadcaster broadcaster,
     ChatMetrics metrics,
+    BrokerReadiness readiness,
     ILogger<ChatConsumerService> logger) : BackgroundService
 {
     private IConsumer<string, string>? _consumer;
+
+    /// <summary>Partitions that have been read to the end at least once.</summary>
+    private readonly HashSet<TopicPartition> _caughtUp = [];
+
+    /// <summary>
+    /// False while the topic is being replayed. Only ever touched from the consume loop.
+    /// </summary>
+    private bool _historyLoaded;
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -36,8 +50,15 @@ public sealed class ChatConsumerService(
             BootstrapServers = options.BootstrapServers,
             GroupId = options.ConsumerGroupId,
 
-            // Only messages produced from now on; the topic is not a backlog to replay at startup.
-            AutoOffsetReset = AutoOffsetReset.Latest,
+            // The topic *is* the chat history: every pod incarnation replays it from the start and
+            // rebuilds the per-room buffer that browsers are served on join. What a room shows is
+            // therefore whatever the broker still retains.
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+
+            // Turns "no more records for now" into an actual Consume result. Without it there is no
+            // way to tell the replay from the live tail, and the pod could never report itself
+            // ready at the right moment.
+            EnablePartitionEof = true,
 
             // Each pod incarnation invents a new group id, so committing would leave offset
             // records behind in the broker for the whole retention period for no benefit.
@@ -63,6 +84,13 @@ public sealed class ChatConsumerService(
                 try
                 {
                     var result = _consumer.Consume(stoppingToken);
+
+                    if (result is not null && result.IsPartitionEOF)
+                    {
+                        NoteCaughtUp(result.TopicPartition);
+                        continue;
+                    }
+
                     if (result?.Message?.Value is not { } payload)
                     {
                         continue;
@@ -75,8 +103,16 @@ public sealed class ChatConsumerService(
                         continue;
                     }
 
-                    broadcaster.Publish(message);
-                    metrics.RecordMessageReceived();
+                    broadcaster.Publish(message, result.Offset.Value);
+
+                    // Replayed messages are deliberately not counted. They were counted when they
+                    // were first consumed, and counting them again would make
+                    // redepanda_messages_received_total jump by the whole retention on every pod
+                    // restart — the counter is meant to track the live chat, not our own backfill.
+                    if (_historyLoaded)
+                    {
+                        metrics.RecordMessageReceived();
+                    }
                 }
                 catch (ConsumeException e)
                 {
@@ -90,6 +126,33 @@ public sealed class ChatConsumerService(
         {
             // Normal shutdown.
         }
+    }
+
+    /// <summary>
+    /// Records that one partition has been read to its end, and releases the readiness gate once
+    /// every assigned partition has.
+    /// </summary>
+    private void NoteCaughtUp(TopicPartition partition)
+    {
+        if (_historyLoaded)
+        {
+            return;
+        }
+
+        _caughtUp.Add(partition);
+
+        // Read from the consumer rather than remembered from an assignment handler: this is the
+        // set librdkafka is actually feeding us, and an empty one means nothing is assigned yet.
+        var assignment = _consumer!.Assignment;
+        if (assignment.Count == 0 || !assignment.All(_caughtUp.Contains))
+        {
+            return;
+        }
+
+        _historyLoaded = true;
+        readiness.MarkHistoryLoaded();
+        logger.LogInformation(
+            "Replayed topic {Topic} to the end; the pod is ready to serve history", options.Topic);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)

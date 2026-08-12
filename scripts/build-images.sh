@@ -88,6 +88,11 @@ fi
 BACKEND="redepanda-backend:${VERSION}"
 FRONTEND="redepanda-frontend:${VERSION}"
 
+# The console client, and the image the chart's topic Job runs with --ensure-topic. It carries one
+# tag with the other two on purpose: the admin process must be the same build as the application
+# it administers, which is the whole point of it no longer being a shell script in a foreign image.
+CHATCLIENT="redepanda-chatclient:${VERSION}"
+
 # ---- Build ----------------------------------------------------------------------------------
 
 # Prefer podman when both are present: on this project's dev machines `docker` is often a
@@ -102,11 +107,13 @@ else
 fi
 
 echo "==> Building ${VERSION} with ${ENGINE}"
-# The backend's context is the repository root because it references RedePanda.Contracts.
+# The backend and the chat client build from the repository root because both reference
+# RedePanda.Contracts. Only the frontend has a context of its own.
 "${ENGINE}" build -f "${REPO_ROOT}/src/RedePanda.Backend/Dockerfile" -t "${BACKEND}" "${REPO_ROOT}"
+"${ENGINE}" build -f "${REPO_ROOT}/src/RedePanda.ChatClient/Dockerfile" -t "${CHATCLIENT}" "${REPO_ROOT}"
 "${ENGINE}" build -t "${FRONTEND}" "${REPO_ROOT}/src/RedePanda.Frontend"
 
-echo "==> Built ${BACKEND} and ${FRONTEND}"
+echo "==> Built ${BACKEND}, ${CHATCLIENT} and ${FRONTEND}"
 
 # ---- Release file ---------------------------------------------------------------------------
 
@@ -130,6 +137,9 @@ backend:
   image:
     tag: "${VERSION}"
 frontend:
+  image:
+    tag: "${VERSION}"
+chatClient:
   image:
     tag: "${VERSION}"
 EOF
@@ -170,16 +180,18 @@ if [[ -n "${LOAD_INTO}" ]]; then
                 TMP="$(mktemp -d)"
                 trap 'rm -rf "${TMP}"' EXIT
                 podman save -o "${TMP}/backend.tar" "${BACKEND}"
+                podman save -o "${TMP}/chatclient.tar" "${CHATCLIENT}"
                 podman save -o "${TMP}/frontend.tar" "${FRONTEND}"
                 kind load image-archive "${TMP}/backend.tar" --name "${CLUSTER_NAME}"
+                kind load image-archive "${TMP}/chatclient.tar" --name "${CLUSTER_NAME}"
                 kind load image-archive "${TMP}/frontend.tar" --name "${CLUSTER_NAME}"
             else
-                kind load docker-image "${BACKEND}" "${FRONTEND}" --name "${CLUSTER_NAME}"
+                kind load docker-image "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}" --name "${CLUSTER_NAME}"
             fi
             ;;
         minikube)
             echo "==> Loading into minikube profile '${MINIKUBE_PROFILE}'"
-            minikube image load "${BACKEND}" "${FRONTEND}" -p "${MINIKUBE_PROFILE}"
+            minikube image load "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}" -p "${MINIKUBE_PROFILE}"
             ;;
         *)
             echo "Unknown --load target '${LOAD_INTO}'. Use 'kind' or 'minikube'." >&2

@@ -49,6 +49,7 @@ fi
 collect_pins() {
     grep -rhoE '[a-zA-Z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}' \
         "${REPO_ROOT}/src/RedePanda.Backend/Dockerfile" \
+        "${REPO_ROOT}/src/RedePanda.ChatClient/Dockerfile" \
         "${REPO_ROOT}/src/RedePanda.Frontend/Dockerfile" \
         "${REPO_ROOT}/deploy/helm/redepanda/values.yaml" \
         "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.yml" \

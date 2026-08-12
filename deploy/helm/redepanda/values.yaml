@@ -43,7 +43,12 @@ frontend:
 
 # ---- Redpanda broker --------------------------------------------------------------------------
 redpanda:
-  image: docker.redpanda.com/redpandadata/redpanda:v26.2.1
+  # docker.io rather than docker.redpanda.com: the latter is a pull-through proxy in front of
+  # this same repository, and it rate-limits anonymous manifest reads hard enough that the
+  # digest cannot be resolved or re-checked reliably. Pointing at the origin keeps the pin
+  # verifiable. RedePanda-kafka-docker/docker-compose.yml was moved with it so local
+  # development and the chart still agree on one image.
+  image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
 
   # Service name kept short because it is baked into REDPANDA_BOOTSTRAP_SERVERS defaults and
   # into the broker's own advertised address.
@@ -64,7 +69,7 @@ otelCollector:
 
   # Core distribution, not contrib: core already contains the prometheus exporter and the
   # health_check extension. otelcol-k8s would be wrong -- it has no prometheus exporter at all.
-  image: otel/opentelemetry-collector:0.158.0
+  image: docker.io/otel/opentelemetry-collector:0.158.0@sha256:5b97e6e3550ec6e48a71dba6f6304d349a293af8df4ee1f51da67be94fce2ecd
   logLevel: info
 
   # Set to "detailed" to have every received metric logged while debugging the pipeline.
@@ -81,7 +86,7 @@ otelCollector:
 # own would come up with nothing to scrape. The chart refuses that combination.
 prometheus:
   enabled: true
-  image: quay.io/prometheus/prometheus:v3.13.2
+  image: quay.io/prometheus/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
 
   # 5s rather than the usual 15s so counters visibly move during the demo.
   scrapeInterval: 5s

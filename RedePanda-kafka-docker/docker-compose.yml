@@ -1,8 +1,9 @@
 name: redpanda-chat
 services:
   redpanda:
-    # Pinned rather than :latest so local development and the Helm chart agree on one version.
-    image: docker.redpanda.com/redpandadata/redpanda:v26.2.1
+    # Pinned by digest, not just by tag, so local development and the Helm chart agree on one
+    # exact image. Keep this in sync with redpanda.image in deploy/helm/redepanda/values.yaml.
+    image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
     container_name: redpanda-0
     command:
       - redpanda

@@ -40,6 +40,9 @@
             # `kubectl apply --dry-run=client` cannot do this: it still needs an API server to
             # resolve resource kinds, so it fails with "connection refused" when none is running.
             pkgs.kubeconform
+            # Reads a registry manifest without pulling the image, which is how
+            # scripts/check-digests.sh resolves the digests that the Dockerfiles and the chart pin.
+            pkgs.skopeo
           ];
 
           DOTNET_CLI_TELEMETRY_OPTOUT = 1;

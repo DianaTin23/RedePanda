@@ -22,6 +22,12 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+# ...except deploy/releases, which holds the release manifests -- the one thing here that must
+# be tracked. The directory itself has to be un-excluded: git cannot re-include a file whose
+# parent directory is excluded, so a `!deploy/releases/*.yaml` on its own would do nothing.
+!deploy/releases/
+# A build from an unclean tree is not a release and is not committed. The tag says so too.
+deploy/releases/*-dirty.*.yaml
 x64/
 x86/
 [Ww][Ii][Nn]32/

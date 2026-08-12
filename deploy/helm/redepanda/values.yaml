@@ -1,8 +1,36 @@
 # Default values for the redepanda chart.
-# Every image is pinned; nothing here uses a floating tag.
+#
+# Every image pulled from a registry is pinned by digest, not just by tag: a tag can be moved
+# to different content, a digest cannot. The tag is kept alongside it so the version stays
+# readable. The two locally built redepanda-* images are the exception and are explained where
+# they are defined. scripts/check-digests.sh reports when an upstream tag has moved off its
+# digest.
+#
+# This file alone does not describe a deployable release: the two image tags are deliberately
+# empty and are supplied by a generated release file. See the `release` block below.
 
 nameOverride: ""
 fullnameOverride: ""
+
+# ---- Release identity -------------------------------------------------------------------------
+# Filled in by deploy/releases/<version>.yaml, which scripts/build-images.sh generates alongside
+# the images. Keeping it out of this file is the point: a release is a named artifact produced by
+# a build, not a value someone edits by hand between deployments.
+#
+#   ./scripts/build-images.sh --load kind
+#   helm upgrade --install redepanda ./deploy/helm/redepanda \
+#     -n redepanda -f deploy/releases/<version>.yaml --description "release <version>"
+#
+# version is what ends up in the app.kubernetes.io/version label on every object, so
+# `kubectl get pods -L app.kubernetes.io/version` names the running release.
+release:
+  version: ""
+  gitSha: ""
+  builtAt: ""
+  # True when the images were built from an unclean working tree. Such a build is reproducible
+  # only by accident and is not committed as a release; the flag keeps that visible in-cluster
+  # rather than only in the tag.
+  dirty: false
 
 # Locally built images are not in any registry, so the kubelet must not try to fetch them.
 # IfNotPresent rather than Never: Never fails outright with ErrImageNeverPull on Docker
@@ -16,9 +44,25 @@ chat:
   replicationFactor: 1
   maxMessageLength: 500
 
+  # Nachrichten, die ein Raum beim Betreten nachliefert. 0 = alles, was im Topic liegt: das Backend
+  # liest den Topic beim Start von vorn und hält den Verlauf im Speicher. Begrenzt wird er dann nur
+  # durch die Retention des Brokers — ein Wert > 0 ist die Notbremse, falls das zu viel wird.
+  historySize: 0
+
 # ---- Backend ----------------------------------------------------------------------------------
 backend:
-  image: redepanda-backend:dev
+  # No digest, unlike the third-party images below: this is built locally by
+  # scripts/build-images.sh and never pulled from a registry, so a digest would guard against a
+  # registry moving content that no registry ever serves. Pinning one would also break
+  # imagePullPolicy: IfNotPresent, which matches on the tag.
+  #
+  # What the digest does for the images below, the tag does here: build-images.sh derives it from
+  # the chart's appVersion and the git commit and never reuses it, so one tag means one build.
+  # The empty default is intentional -- the chart refuses to render without a release file rather
+  # than quietly deploying whatever a mutable name happens to point at today.
+  image:
+    repository: redepanda-backend
+    tag: ""
 
   # One replica by design. More replicas do work — each pod consumes under its own group id and
   # therefore sees every message — but a browser's SSE connection is pinned to a single pod, so
@@ -35,7 +79,10 @@ backend:
 
 # ---- Frontend ---------------------------------------------------------------------------------
 frontend:
-  image: redepanda-frontend:dev
+  # Locally built, not pulled, tag supplied by the release file — see backend.image above.
+  image:
+    repository: redepanda-frontend
+    tag: ""
   replicas: 1
   resources:
     requests: { cpu: 10m, memory: 32Mi }

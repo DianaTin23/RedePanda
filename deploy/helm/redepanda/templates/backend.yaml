@@ -19,6 +19,9 @@ spec:
         # Roll the pods when the configuration changes; without this a helm upgrade that only
         # edits the ConfigMap leaves the old values running.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # Which build this pod is running, for anyone holding a `kubectl describe` and no
+        # access to the shell history of whoever deployed it.
+        {{- include "redepanda.releaseAnnotations" . | nindent 8 }}
         # There are deliberately NO prometheus.io/scrape annotations here. The backend pushes
         # over OTLP and exposes no /metrics endpoint.
     spec:
@@ -36,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: backend
-          image: {{ .Values.backend.image | quote }}
+          image: {{ include "redepanda.image" (dict "ctx" . "component" "backend") | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http

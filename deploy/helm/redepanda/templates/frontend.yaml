@@ -15,6 +15,12 @@ spec:
       labels:
         {{- include "redepanda.labels" . | nindent 8 }}
         app.kubernetes.io/component: frontend
+      {{- with include "redepanda.releaseAnnotations" . }}
+      # Which build this pod is running. Guarded by `with` because, unlike the backend, this
+      # pod template has no other annotation to keep the key from rendering empty.
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -24,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: caddy
-          image: {{ .Values.frontend.image | quote }}
+          image: {{ include "redepanda.image" (dict "ctx" . "component" "frontend") | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http

@@ -54,7 +54,8 @@
             echo "  topics:  rpk topic list -X brokers=localhost:19092"
             echo "  chat:    REDPANDA_BOOTSTRAP_SERVERS=localhost:19092 \\"
             echo "           dotnet run --project src/RedePanda.ChatClient -- --nick alice"
-            echo "  chart:   helm lint deploy/helm/redepanda"
+            echo "  build:   ./scripts/build-images.sh --load kind"
+            echo "  chart:   helm template redepanda deploy/helm/redepanda -f deploy/releases/<version>.yaml"
           '';
         };
       });

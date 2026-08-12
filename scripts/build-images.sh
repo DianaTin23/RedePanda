@@ -1,29 +1,94 @@
 #!/usr/bin/env bash
-# Builds both application images and, optionally, loads them into a local cluster.
+# Builds both application images under an immutable version tag and writes the release file
+# that deploys them. Optionally loads the images into a local cluster.
 #
 #   ./scripts/build-images.sh                  # build only
 #   ./scripts/build-images.sh --load kind      # build, then load into kind
 #   ./scripts/build-images.sh --load minikube  # build, then load into minikube
+#   ./scripts/build-images.sh --release        # refuse to build from an unclean working tree
 #
 # Docker Desktop with Kubernetes enabled needs no load step: it shares one image store.
+#
+# The tag is derived, never chosen: <appVersion from Chart.yaml>-g<short sha>, e.g.
+# 0.1.0-g103b98b. It is never reused, so one tag names exactly one build -- which is what makes
+# `helm rollback` restore an actual image rather than the same mutable name it started from.
 set -euo pipefail
 
-TAG="${IMAGE_TAG:-dev}"
-BACKEND="redepanda-backend:${TAG}"
-FRONTEND="redepanda-frontend:${TAG}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CHART_DIR="${REPO_ROOT}/deploy/helm/redepanda"
+RELEASE_DIR="${REPO_ROOT}/deploy/releases"
 
 LOAD_INTO=""
+REQUIRE_CLEAN=0
 CLUSTER_NAME="${CLUSTER_NAME:-kind}"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --load) LOAD_INTO="${2:-}"; shift 2 ;;
-        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+        --release) REQUIRE_CLEAN=1; shift ;;
+        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# ---- Version --------------------------------------------------------------------------------
+
+# appVersion is quoted in Chart.yaml; the pattern tolerates it either way.
+APP_VERSION="$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+    "${CHART_DIR}/Chart.yaml")"
+if [[ -z "${APP_VERSION}" ]]; then
+    echo "Could not read appVersion from ${CHART_DIR}/Chart.yaml" >&2
+    exit 2
+fi
+
+if ! git -C "${REPO_ROOT}" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "Not a git repository, so no commit can identify this build." >&2
+    echo "Set IMAGE_TAG=<something> to build anyway; the result is not a release." >&2
+    exit 2
+fi
+
+GIT_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+VERSION="${APP_VERSION}-g$(git -C "${REPO_ROOT}" rev-parse --short=7 HEAD)"
+DIRTY=false
+
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
+    DIRTY=true
+    # A plain "-dirty" suffix would be mutable all over again: every edit would land under the
+    # same tag. Hashing the uncommitted content instead keeps one tag to one tree. `git diff
+    # HEAD` covers modifications and deletions; the file list adds the contents of untracked
+    # files, which no diff against HEAD can see.
+    DIRTY_HASH="$({
+        git -C "${REPO_ROOT}" diff HEAD
+        git -C "${REPO_ROOT}" ls-files -mo --exclude-standard -z \
+            | (cd "${REPO_ROOT}" && xargs -0 -r sha256sum)
+    } | sha256sum | cut -c1-7)"
+    VERSION="${VERSION}-dirty.${DIRTY_HASH}"
+fi
+
+# Escape hatch, for building outside the release path entirely (a scratch image to poke at, a
+# tag someone else's tooling expects). It bypasses the version derivation, so say so.
+if [[ -n "${IMAGE_TAG:-}" ]]; then
+    echo "!! IMAGE_TAG is set: building '${IMAGE_TAG}' instead of '${VERSION}'."
+    echo "!! No release file is written and the result identifies no commit."
+    VERSION="${IMAGE_TAG}"
+fi
+
+if [[ "${DIRTY}" == true ]]; then
+    if [[ "${REQUIRE_CLEAN}" -eq 1 ]]; then
+        echo "Refusing to cut a release from an unclean working tree." >&2
+        echo "Commit or stash first, then re-run. Without --release this builds anyway." >&2
+        git -C "${REPO_ROOT}" status --short >&2
+        exit 1
+    fi
+    echo "!! Working tree is dirty -- this build is NOT a reproducible release."
+    echo "!! The tag names the uncommitted content, but nothing in git does."
+fi
+
+BACKEND="redepanda-backend:${VERSION}"
+FRONTEND="redepanda-frontend:${VERSION}"
+
+# ---- Build ----------------------------------------------------------------------------------
 
 # Prefer podman when both are present: on this project's dev machines `docker` is often a
 # podman shim anyway, and being explicit avoids surprises about which store the image lands in.
@@ -36,39 +101,107 @@ else
     exit 1
 fi
 
-echo "==> Building with ${ENGINE}"
+echo "==> Building ${VERSION} with ${ENGINE}"
 # The backend's context is the repository root because it references RedePanda.Contracts.
 "${ENGINE}" build -f "${REPO_ROOT}/src/RedePanda.Backend/Dockerfile" -t "${BACKEND}" "${REPO_ROOT}"
 "${ENGINE}" build -t "${FRONTEND}" "${REPO_ROOT}/src/RedePanda.Frontend"
 
 echo "==> Built ${BACKEND} and ${FRONTEND}"
 
-[[ -z "${LOAD_INTO}" ]] && exit 0
+# ---- Release file ---------------------------------------------------------------------------
 
-case "${LOAD_INTO}" in
-    kind)
-        if [[ "${ENGINE}" == "podman" ]]; then
-            # `kind load docker-image` reads the *Docker* store, which podman does not populate.
-            # Going through an archive is the supported route for a podman-built image.
-            echo "==> Loading into kind cluster '${CLUSTER_NAME}' via image archive"
-            TMP="$(mktemp -d)"
-            trap 'rm -rf "${TMP}"' EXIT
-            podman save -o "${TMP}/backend.tar" "${BACKEND}"
-            podman save -o "${TMP}/frontend.tar" "${FRONTEND}"
-            kind load image-archive "${TMP}/backend.tar" --name "${CLUSTER_NAME}"
-            kind load image-archive "${TMP}/frontend.tar" --name "${CLUSTER_NAME}"
-        else
-            kind load docker-image "${BACKEND}" "${FRONTEND}" --name "${CLUSTER_NAME}"
-        fi
-        ;;
-    minikube)
-        echo "==> Loading into minikube profile '${MINIKUBE_PROFILE}'"
-        minikube image load "${BACKEND}" "${FRONTEND}" -p "${MINIKUBE_PROFILE}"
-        ;;
-    *)
-        echo "Unknown --load target '${LOAD_INTO}'. Use 'kind' or 'minikube'." >&2
-        exit 2
-        ;;
-esac
+RELEASE_FILE=""
+if [[ -z "${IMAGE_TAG:-}" ]]; then
+    mkdir -p "${RELEASE_DIR}"
+    RELEASE_FILE="${RELEASE_DIR}/${VERSION}.yaml"
+    cat > "${RELEASE_FILE}" <<EOF
+# Generated by scripts/build-images.sh -- do not edit.
+#
+# This file is the release: it names the exact images a build produced. Passing it to helm is
+# what binds that build to the chart's configuration, and it is what a later \`helm rollback\`
+# restores. Commit it, unless the version says dirty.
+release:
+  version: "${VERSION}"
+  gitSha: "${GIT_SHA}"
+  builtAt: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  dirty: ${DIRTY}
 
-echo "==> Images are available inside the cluster"
+backend:
+  image:
+    tag: "${VERSION}"
+frontend:
+  image:
+    tag: "${VERSION}"
+EOF
+    echo "==> Wrote ${RELEASE_FILE#"${REPO_ROOT}/"}"
+fi
+
+# ---- Rendered manifest -------------------------------------------------------------------------
+
+# Only for a real release. deploy/k8s/rendered.yaml is the Helm-free deployment path, so it has
+# to name one concrete version -- and a dirty build has no business overwriting a committed
+# artifact with images that exist on exactly one machine.
+if [[ "${REQUIRE_CLEAN}" -eq 1 && -n "${RELEASE_FILE}" ]]; then
+    if command -v helm >/dev/null 2>&1; then
+        RENDERED="${REPO_ROOT}/deploy/k8s/rendered.yaml"
+        {
+            echo "# Generated by scripts/build-images.sh --release. Do not edit."
+            echo "# Release ${VERSION}, rendered from deploy/releases/${VERSION}.yaml."
+            echo "#"
+            echo "# The Helm-free path: kubectl apply -f deploy/k8s/rendered.yaml"
+            helm template redepanda "${CHART_DIR}" -f "${RELEASE_FILE}"
+        } > "${RENDERED}"
+        echo "==> Wrote ${RENDERED#"${REPO_ROOT}/"}"
+    else
+        echo "!! helm not on PATH: deploy/k8s/rendered.yaml still names the previous release."
+    fi
+fi
+
+# ---- Load into a local cluster ---------------------------------------------------------------
+
+if [[ -n "${LOAD_INTO}" ]]; then
+    case "${LOAD_INTO}" in
+        kind)
+            if [[ "${ENGINE}" == "podman" ]]; then
+                # `kind load docker-image` reads the *Docker* store, which podman does not
+                # populate. Going through an archive is the supported route for a podman-built
+                # image.
+                echo "==> Loading into kind cluster '${CLUSTER_NAME}' via image archive"
+                TMP="$(mktemp -d)"
+                trap 'rm -rf "${TMP}"' EXIT
+                podman save -o "${TMP}/backend.tar" "${BACKEND}"
+                podman save -o "${TMP}/frontend.tar" "${FRONTEND}"
+                kind load image-archive "${TMP}/backend.tar" --name "${CLUSTER_NAME}"
+                kind load image-archive "${TMP}/frontend.tar" --name "${CLUSTER_NAME}"
+            else
+                kind load docker-image "${BACKEND}" "${FRONTEND}" --name "${CLUSTER_NAME}"
+            fi
+            ;;
+        minikube)
+            echo "==> Loading into minikube profile '${MINIKUBE_PROFILE}'"
+            minikube image load "${BACKEND}" "${FRONTEND}" -p "${MINIKUBE_PROFILE}"
+            ;;
+        *)
+            echo "Unknown --load target '${LOAD_INTO}'. Use 'kind' or 'minikube'." >&2
+            exit 2
+            ;;
+    esac
+    echo "==> Images are available inside the cluster"
+fi
+
+# ---- What to run next -------------------------------------------------------------------------
+
+if [[ -n "${RELEASE_FILE}" ]]; then
+    # --description is the only per-revision field helm lets a value reach: `helm history` reads
+    # its APP VERSION column from Chart.yaml, which is identical on every revision and therefore
+    # useless for telling two releases apart.
+    cat <<EOF
+
+Deploy this release:
+
+  helm upgrade --install redepanda ${CHART_DIR#"${REPO_ROOT}/"} \\
+    -n redepanda --create-namespace --wait --timeout 10m \\
+    -f ${RELEASE_FILE#"${REPO_ROOT}/"} \\
+    --description "release ${VERSION}"
+EOF
+fi

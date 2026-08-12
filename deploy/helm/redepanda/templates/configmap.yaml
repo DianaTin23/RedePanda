@@ -17,6 +17,7 @@ data:
   REDPANDA_BOOTSTRAP_SERVERS: {{ include "redepanda.bootstrapServers" . | quote }}
   REDPANDA_TOPIC: {{ .Values.chat.topic | quote }}
   MAX_MESSAGE_LENGTH: {{ .Values.chat.maxMessageLength | quote }}
+  CHAT_HISTORY_SIZE: {{ .Values.chat.historySize | quote }}
   LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
   ASPNETCORE_URLS: "http://+:8080"
 {{- if .Values.otelCollector.enabled }}

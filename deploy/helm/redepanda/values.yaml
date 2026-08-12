@@ -44,10 +44,26 @@ chat:
   replicationFactor: 1
   maxMessageLength: 500
 
-  # Nachrichten, die ein Raum beim Betreten nachliefert. 0 = alles, was im Topic liegt: das Backend
-  # liest den Topic beim Start von vorn und hält den Verlauf im Speicher. Begrenzt wird er dann nur
-  # durch die Retention des Brokers — ein Wert > 0 ist die Notbremse, falls das zu viel wird.
-  historySize: 0
+  # Obergrenze für eine einzelne Nachricht im Producer (librdkafka `message.timeout.ms`). Dessen
+  # Default sind 300 000 ms — fünf Minuten —, und der Producer sitzt hier im Request-Pfad eines
+  # POST: gegen einen nicht erreichbaren Broker hinge der Browser samt Eingabefeld fünf Minuten an
+  # einer Antwort, die nach wenigen Sekunden feststeht.
+  #
+  # 10 s überstehen eine Leader-Wahl oder einen Broker-Neustart und sind kurz genug, dass jemand
+  # eine Fehlermeldung sieht statt eines eingefrorenen Fensters.
+  produceTimeoutMs: 10000
+
+  # Nachrichten, die ein Raum beim Betreten nachliefert. Begrenzt, und bewusst nicht mehr 0: diesen
+  # Puffer hält *jede* Replica im eigenen Speicher. Unbegrenzt wächst er mit der Retention des
+  # Brokers, und der HPA weiter unten vervielfacht ihn genau dann, wenn die Pods ohnehin unter Last
+  # stehen.
+  #
+  # 200 Nachrichten sind im schlechtesten Fall (500 Zeichen je Nachricht) rund 240 KB pro Raum —
+  # auch bei 100 Räumen weit unter dem Memory-Limit von 512Mi. Begrenzt wird damit der Speicher,
+  # nicht die Startzeit: der Consumer liest den Topic weiterhin von vorn, bevor der Pod ready wird.
+  #
+  # 0 bleibt zulässig und heißt weiterhin „alles, was im Topic liegt".
+  historySize: 200
 
 # ---- Backend ----------------------------------------------------------------------------------
 backend:
@@ -64,18 +80,57 @@ backend:
     repository: redepanda-backend
     tag: ""
 
-  # One replica by design. More replicas do work — each pod consumes under its own group id and
-  # therefore sees every message — but a browser's SSE connection is pinned to a single pod, so
-  # the demo gains nothing from scaling. See the README.
-  replicas: 1
+  # Two replicas, not one. Every pod consumes under its own group id and therefore sees every
+  # message; and the SSE `id` is the **Kafka offset**, which is the broker's and not any one pod's.
+  # A browser that resumes on a *different* replica sends the same Last-Event-ID and gets exactly
+  # what it missed.
+  #
+  # That is why the Service needs neither sticky sessions nor sessionAffinity — and why the second
+  # replica here is real work rather than a claim. Delete one pod during the demo: the windows on
+  # the other one notice nothing at all.
+  #
+  # Ignored while backend.autoscaling.enabled is true: the Deployment then omits the field so that
+  # Helm and the autoscaler do not fight over it.
+  replicas: 2
   logLevel: Information
 
-  # The host's shutdown timeout is set to 25s in code. These two must not be equal, or SIGKILL
-  # races the application's own graceful-shutdown deadline.
+  # 5s preStop + the application's own 25s shutdown timeout = 30s. The grace period covers the hook
+  # as well as the signal, so 45s leaves 15s of slack before SIGKILL.
   terminationGracePeriodSeconds: 45
+
+  # The CPU request is Kubernetes' scheduling floor — and, once the autoscaler below runs, the
+  # **denominator** of its target utilisation. Hence 100m rather than the 50m that were enough for a
+  # one-pod demo: at 50m, 70% is 35m, which an idle ASP.NET Core pod with GC and a 5-second metric
+  # export already brushes against — the HPA would sit at maxReplicas from the first second.
+  #
+  # Still no CPU limit, as everywhere else in this chart. It would not change the HPA's arithmetic
+  # (utilisation is measured against the request, not the limit) and CFS throttling would cap the
+  # very signal the HPA reads: an overloaded pod would report as merely busy.
   resources:
-    requests: { cpu: 50m, memory: 128Mi }
+    requests: { cpu: 100m, memory: 128Mi }
     limits: { memory: 512Mi }
+
+  # Off by default, and that is a decision rather than an oversight: an HPA needs metrics-server,
+  # which neither kind nor Docker Desktop ships. Without it the object exists, reads `<unknown>/70%`
+  # forever and never scales — which looks more broken than shipping no autoscaler at all. The
+  # README has the two commands that turn it on.
+  autoscaling:
+    enabled: false
+
+    # Never below the baseline the PodDisruptionBudget and the rollout strategy are written for.
+    minReplicas: 2
+
+    # An upper bound from arithmetic, not a guess: 4 x 100m + Redpanda 200m + collector 50m +
+    # Prometheus 50m + frontend 10m = 710m. Fits on a one-CPU node.
+    maxReplicas: 4
+
+    # Percent of the CPU **request** above, not of the limit and not of the node.
+    targetCPUUtilizationPercentage: 70
+
+    # Kubernetes defaults to 300s. Right for production, longer than the whole demo — shortened for
+    # the same reason as the metric export interval and the scrape interval: a number nobody sees
+    # move demonstrates nothing.
+    scaleDownStabilizationSeconds: 60
 
 # ---- Frontend ---------------------------------------------------------------------------------
 frontend:
@@ -84,6 +139,13 @@ frontend:
     repository: redepanda-frontend
     tag: ""
   replicas: 1
+
+  # Caddy's level, for the access log and its own runtime log alike: DEBUG, INFO, WARN or ERROR.
+  # Deliberately spelled differently from backend.logLevel above — that one is .NET's vocabulary
+  # (`Information`), this one is Caddy's, and Caddy rejects the .NET spelling at startup rather
+  # than falling back to a default.
+  logLevel: INFO
+
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }

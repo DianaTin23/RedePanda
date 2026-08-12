@@ -17,13 +17,7 @@ public sealed class ChatProducer : IDisposable
         _metrics = metrics;
         _logger = logger;
 
-        var config = new ProducerConfig
-        {
-            BootstrapServers = options.BootstrapServers,
-            Acks = Acks.Leader,
-        };
-
-        _producer = new ProducerBuilder<string, string>(config)
+        _producer = new ProducerBuilder<string, string>(BuildConfig(options))
             .SetErrorHandler((_, error) =>
             {
                 _metrics.RecordKafkaError();
@@ -31,6 +25,36 @@ public sealed class ChatProducer : IDisposable
             })
             .Build();
     }
+
+    /// <summary>
+    /// The producer's configuration, separate from the constructor so it can be asserted on
+    /// without a broker in the picture.
+    /// </summary>
+    internal static ProducerConfig BuildConfig(BackendOptions options) => new()
+    {
+        BootstrapServers = options.BootstrapServers,
+        Acks = Acks.Leader,
+
+        // Without this, librdkafka's five-minute default applies and the POST behind it holds the
+        // browser's composer open for the whole of it. See BackendOptions.ProduceTimeoutMs.
+        MessageTimeoutMs = options.ProduceTimeoutMs,
+
+        // Strictly below the message timeout: at or above it, one in-flight request would spend
+        // the entire budget and the retry the message timeout exists to allow would never happen.
+        RequestTimeoutMs = options.ProduceTimeoutMs / 2,
+    };
+
+    /// <summary>
+    /// How a failed produce is reported to the browser. A timeout means the request was never
+    /// answered either way, which is a gateway *timeout*; anything the broker actively refused is
+    /// a bad gateway.
+    /// </summary>
+    internal static int StatusCodeFor(Error error) => error.Code switch
+    {
+        ErrorCode.Local_MsgTimedOut or ErrorCode.Local_TimedOut =>
+            StatusCodes.Status504GatewayTimeout,
+        _ => StatusCodes.Status502BadGateway,
+    };
 
     /// <summary>Produces one message, keyed by room so per-room ordering survives repartitioning.</summary>
     public async Task ProduceAsync(ChatMessage message, CancellationToken cancellationToken)

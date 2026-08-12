@@ -8,14 +8,30 @@
 	admin off
 	persist_config off
 
-	# Access logs to stdout as JSON; the platform collects them (12-Factor "Logs").
+	# Caddy's own runtime log — startup, config load, TLS-storage sweep, upstream dial errors.
+	# To stdout instead of the default stderr, so it shares one stream with everything else; the
+	# platform collects it (12-Factor "Logs").
+	#
+	# This does NOT configure access logs. `log` in the global block names a logger for Caddy's
+	# process events; request entries only exist when `log` appears inside a site block, and the
+	# omission is silent — `caddy validate` passes either way. See the site block below.
 	log {
 		output stdout
 		format json
+		level {$FRONTEND_LOG_LEVEL:INFO}
 	}
 }
 
 :8080 {
+	# ---- Access log ----------------------------------------------------------------------
+	# One JSON line per request, to stdout. This block is what actually enables request
+	# logging: a site-level `log` defaults to stderr, so `output stdout` has to be spelled out.
+	log {
+		output stdout
+		format json
+		level {$FRONTEND_LOG_LEVEL:INFO}
+	}
+
 	# ---- API proxy -----------------------------------------------------------------------
 	# The /api prefix is passed through rather than stripped, so the backend answers on the
 	# same paths whether it is reached through this proxy or port-forwarded directly for
@@ -28,6 +44,10 @@
 
 	# ---- Probe --------------------------------------------------------------------------
 	handle /healthz {
+		# Liveness and readiness poll this every 10s each. Their entries would outnumber real
+		# traffic several times over, so they stay out of the access log — the probes still
+		# run, they just do not narrate.
+		log_skip
 		respond "ok" 200
 	}
 

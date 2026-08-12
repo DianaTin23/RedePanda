@@ -35,13 +35,26 @@ internal static class ChatStream
     /// The offset from the client's <c>Last-Event-ID</c> header, or <c>-1</c> for a fresh
     /// connection. Everything up to and including it is left out of the replay.
     /// </param>
+    /// <param name="shutdown">
+    /// <c>IHostApplicationLifetime.ApplicationStopping</c>. Kestrel holds in-flight responses open
+    /// until the host's shutdown timeout, and this stream would happily go on heartbeating for all
+    /// 25 s of it — so the browser sees a perfectly healthy connection to a pod that is already
+    /// leaving, and never reconnects to the replica standing ready next to it. Ending here instead
+    /// turns a rolling update into a blip.
+    /// </param>
     internal static async IAsyncEnumerable<SseItem<string>> Create(
         ChatBroadcaster broadcaster,
         string room,
         TimeSpan heartbeatInterval,
         long lastEventId = -1,
+        CancellationToken shutdown = default,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        // One token for "this browser went away" and "this pod is going away": every line below
+        // treats them the same, and only one of them arrives on the request.
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(ct, shutdown);
+        var token = stopping.Token;
+
         // Disposed when the framework disposes the enumerator, which is what drops the subscriber
         // out of the active-connection metric once the browser goes away.
         using var subscription = broadcaster.Subscribe(room, lastEventId);
@@ -59,12 +72,12 @@ internal static class ChatStream
             yield return Data(record);
         }
 
-        while (!ct.IsCancellationRequested)
+        while (!token.IsCancellationRequested)
         {
             ChatRecord? record = null;
             var finished = false;
 
-            using (var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            using (var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 heartbeat.CancelAfter(heartbeatInterval);
 
@@ -72,13 +85,14 @@ internal static class ChatStream
                 {
                     record = await subscription.Reader.ReadAsync(heartbeat.Token);
                 }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
                 {
                     // Heartbeat interval elapsed with no message; fall through and emit a ping.
                 }
                 catch (OperationCanceledException)
                 {
-                    // The browser went away, or the process is shutting down. Both are normal.
+                    // The browser went away, or the host is stopping. Both are normal, and both
+                    // mean this stream is over.
                     finished = true;
                 }
                 catch (ChannelClosedException)

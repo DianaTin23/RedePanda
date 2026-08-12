@@ -21,13 +21,45 @@ public sealed record BackendOptions
     public required string PodName { get; init; }
 
     /// <summary>
+    /// How long a single message may spend inside the producer before it is given up on.
+    /// <para>
+    /// This is librdkafka's <c>message.timeout.ms</c>, whose default is <b>300 000</b> — five
+    /// minutes. That default is written for a background pipeline, and this producer sits in the
+    /// request path of an HTTP POST: against an unreachable broker the browser would hold an open
+    /// request, with its composer waiting on it, for five minutes before learning what the first
+    /// few seconds already decided.
+    /// </para>
+    /// </summary>
+    public required int ProduceTimeoutMs { get; init; }
+
+    /// <summary>
+    /// Long enough to survive a leader election or a broker restart, short enough that a user
+    /// sees an error rather than a frozen composer.
+    /// </summary>
+    public const int DefaultProduceTimeoutMs = 10_000;
+
+    /// <summary>
     /// Messages kept per room and replayed to a browser on join, or <c>0</c> for everything the
-    /// topic still holds. Zero is the default: the history is then bounded by the broker's
-    /// retention alone, which is what makes a room look like a real chat after a redeploy — at the
-    /// price of a buffer that grows with the topic. The limit exists for the day that price is
-    /// too high.
+    /// topic still holds.
+    /// <para>
+    /// Bounded by default, and no longer <c>0</c>: this buffer lives in the memory of <b>every</b>
+    /// replica. Unbounded it grows with the broker's retention, and an autoscaler then multiplies
+    /// it by the replica count exactly when the pods are already under load. Zero stays legal and
+    /// still means "everything the topic holds".
+    /// </para>
     /// </summary>
     public required int HistorySize { get; init; }
+
+    /// <summary>
+    /// Roughly a screenful of scrollback. At the maximum message length that is about 240 KB per
+    /// room, two orders of magnitude below the 512Mi the chart gives the pod — and it stays that
+    /// way however many replicas the autoscaler decides to run.
+    /// <para>
+    /// It bounds memory, not startup time: the consumer still replays the whole topic before the
+    /// pod reports ready.
+    /// </para>
+    /// </summary>
+    public const int DefaultHistorySize = 200;
 
     /// <summary>Consumer group id. Unique per pod on purpose: each pod then receives every
     /// message (fan-out) instead of the pods splitting the partitions between them, which is
@@ -41,7 +73,8 @@ public sealed record BackendOptions
             BootstrapServers = Read("REDPANDA_BOOTSTRAP_SERVERS", "redpanda:9092"),
             Topic = Read("REDPANDA_TOPIC", "redepanda-chat"),
             MaxMessageLength = ReadInt("MAX_MESSAGE_LENGTH", Contracts.ChatMessage.DefaultMaxTextLength),
-            HistorySize = ReadInt("CHAT_HISTORY_SIZE", 0, allowZero: true),
+            HistorySize = ReadInt("CHAT_HISTORY_SIZE", DefaultHistorySize, allowZero: true),
+            ProduceTimeoutMs = ReadInt("PRODUCE_TIMEOUT_MS", DefaultProduceTimeoutMs),
 
             // Supplied via fieldRef in the Deployment; the machine name keeps it useful locally.
             PodName = Read("POD_NAME", Environment.MachineName),

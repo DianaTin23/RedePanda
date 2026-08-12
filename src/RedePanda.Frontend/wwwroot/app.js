@@ -26,6 +26,11 @@ const MAX_RETRIES = 8;
 const RETRY_BASE_MS = 1000;
 const RETRY_CAP_MS = 15000;
 
+// Deliberately above the backend's own PRODUCE_TIMEOUT_MS (10 s), so the normal case is the server
+// answering 504 and saying why. This is the backstop for the case the server cannot answer at all —
+// a frontend pod that has lost the backend — where nothing else would ever settle the promise.
+const SEND_TIMEOUT_MS = 15000;
+
 const els = {
     join: document.getElementById("join"),
     nickname: document.getElementById("nickname"),
@@ -61,6 +66,17 @@ let dayKey = "";
 // Distinguishes "connecting for the first time" from "the connection dropped", which is the
 // state the pod-delete demo is about.
 let hasConnected = false;
+
+// The highest Kafka offset already rendered. Every data frame carries its offset as the SSE id, and
+// within a room those only ever grow: the room is the Kafka record key, so all of a room's messages
+// land on the same partition (see ChatRecord in the backend).
+//
+// When EventSource reconnects by itself it resends that id as Last-Event-ID and the server replays
+// only what came after it. The other reconnect path cannot: connect() builds a brand-new
+// EventSource, no JS API can put a header on one, and the server therefore sees a first-time client
+// and replays the whole room. Filtering here is what stops that arriving as a second copy of the
+// conversation — and it holds for both paths, whichever pod the reconnect lands on.
+let lastOffset = -1;
 
 // Reconnect state. A pending retry is `retryTimer !== null`, an exhausted budget is `gaveUp`, and
 // a live or connecting stream is `source !== null` — those three are mutually exclusive.
@@ -255,6 +271,10 @@ function resetMessages() {
     els.jump.hidden = true;
     group = null;
     dayKey = "";
+
+    // Offsets belong to the topic, not to a room: the next room's messages can carry lower ones
+    // than the last rendered here, and without this reset they would be filtered away as seen.
+    lastOffset = -1;
 }
 
 // ---- State -------------------------------------------------------------------------------------
@@ -314,6 +334,20 @@ function connect() {
     };
 
     stream.onmessage = (event) => {
+        // Advanced before rendering and regardless of whether rendering works out: the frame has
+        // been consumed either way, and one we could not parse is not one to try again.
+        //
+        // A frame without an id yields NaN and counts as new — the safe direction, and heartbeats
+        // never get here anyway because they carry the `ping` event type.
+        const offset = Number.parseInt(event.lastEventId, 10);
+        if (Number.isInteger(offset)) {
+            if (offset <= lastOffset) {
+                return;
+            }
+
+            lastOffset = offset;
+        }
+
         try {
             addMessage(JSON.parse(event.data));
         } catch {
@@ -427,6 +461,7 @@ els.send.addEventListener("submit", async (event) => {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ room, nickname, text }),
+            signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
         });
 
         if (!response.ok) {

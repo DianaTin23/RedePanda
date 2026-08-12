@@ -40,6 +40,10 @@ spec:
             # the in-cluster service name as its default, so this is belt and braces.
             - name: BACKEND_HOST
               value: "{{ include "redepanda.fullname" . }}-backend:8080"
+            # Same mechanism: substituted into the Caddyfile before parsing. Governs the access
+            # log and Caddy's own runtime log.
+            - name: FRONTEND_LOG_LEVEL
+              value: {{ .Values.frontend.logLevel | quote }}
           livenessProbe:
             httpGet:
               path: /healthz

@@ -97,6 +97,26 @@ public class ChatHistoryTests
         Assert.Equal(["mittlere", "neueste"], backlog.Select(r => r.Message.Text));
     }
 
+    /// <summary>
+    /// Not a tautology: this runs the shipped default through the trim in <c>Append</c>. Every
+    /// replica holds this buffer, so putting it back to 0 breaks a test instead of quietly
+    /// multiplying the memory cost by the replica count.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultKeepsTheBufferBounded()
+    {
+        var history = new ChatHistory(BackendOptions.DefaultHistorySize);
+        for (var offset = 0; offset < BackendOptions.DefaultHistorySize + 50; offset++)
+        {
+            history.Append(Record(offset, "general", $"nachricht {offset}"));
+        }
+
+        var backlog = history.Snapshot("general", afterOffset: -1);
+
+        Assert.Equal(BackendOptions.DefaultHistorySize, backlog.Count);
+        Assert.Equal($"nachricht {BackendOptions.DefaultHistorySize + 49}", backlog[^1].Message.Text);
+    }
+
     [Fact]
     public void TheLimitAppliesPerRoomAndNotAcrossThem()
     {

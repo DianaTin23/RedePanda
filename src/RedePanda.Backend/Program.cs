@@ -87,7 +87,7 @@ app.MapPost("/api/messages", async (
     catch (ProduceException<string, string> e)
     {
         logger.LogError("Produce failed: {Reason}", e.Error.Reason);
-        return Results.StatusCode(StatusCodes.Status502BadGateway);
+        return Results.StatusCode(ChatProducer.StatusCodeFor(e.Error));
     }
 
     return Results.Accepted();
@@ -96,7 +96,8 @@ app.MapPost("/api/messages", async (
 app.MapGet("/api/stream", IResult (
     HttpContext context,
     string? room,
-    ChatBroadcaster broadcaster) =>
+    ChatBroadcaster broadcaster,
+    IHostApplicationLifetime lifetime) =>
 {
     if (string.IsNullOrWhiteSpace(room))
     {
@@ -120,9 +121,17 @@ app.MapGet("/api/stream", IResult (
             ? seen
             : -1;
 
+    // ApplicationStopping, because RequestAborted alone never fires on a rolling update: the
+    // browser is still there and the connection is still good. Without it the stream keeps
+    // heartbeating from a terminating pod for the whole 25s shutdown timeout, and the browser has
+    // no reason to move to the replica that is already ready.
     return TypedResults.ServerSentEvents(
         ChatStream.Create(
-            broadcaster, room.Trim(), ChatStream.DefaultHeartbeatInterval, lastEventId));
+            broadcaster,
+            room.Trim(),
+            ChatStream.DefaultHeartbeatInterval,
+            lastEventId,
+            lifetime.ApplicationStopping));
 });
 
 app.Run();

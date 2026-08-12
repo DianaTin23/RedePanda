@@ -1,0 +1,48 @@
+{{- if .Values.backend.autoscaling.enabled }}
+{{- /*
+Off by default, and that is the decision rather than an oversight. An HPA needs metrics-server,
+which neither kind nor Docker Desktop ships. Without it the object exists, reads `<unknown>/70%`
+forever and never scales -- which looks more broken than shipping no autoscaler at all. The README
+has the install commands; `kubectl top pods -n redepanda` is the check that they worked.
+
+Its own file rather than a block in backend.yaml, matching the *-configmap.yaml pattern: a
+conditional, separately switchable concern, where the file existing at all maps onto the toggle.
+*/ -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "redepanda.fullname" . }}-backend
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "redepanda.fullname" . }}-backend
+
+  # Never below the baseline the PodDisruptionBudget and the rollout strategy are written for: at one
+  # replica maxSurge has nothing to surge against and maxUnavailable: 0 cannot be honoured.
+  minReplicas: {{ .Values.backend.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.backend.autoscaling.maxReplicas }}
+
+  # CPU, because the backend has no /metrics endpoint by design -- it pushes over OTLP -- so the only
+  # metric a plain HPA can reach is the kubelet's. The interesting number would be
+  # redepanda_active_connections per pod, but reading that would need prometheus-adapter or KEDA: a
+  # whole extra component to autoscale a demo. The path stays open, it is just not this release.
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          # Percentage of the CPU *request* (backend.resources.requests.cpu), not of the limit and
+          # not of the node. That is why the request is 100m -- see values.yaml.
+          type: Utilization
+          averageUtilization: {{ .Values.backend.autoscaling.targetCPUUtilizationPercentage }}
+
+  # Fast up, slow down. Scale-up deliberately keeps the Kubernetes default (no stabilisation window)
+  # -- spelling out a default would be noise; only the asymmetry is worth writing down.
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.backend.autoscaling.scaleDownStabilizationSeconds }}
+{{- end }}

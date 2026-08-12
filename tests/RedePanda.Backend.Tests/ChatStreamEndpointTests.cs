@@ -203,6 +203,49 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
         Assert.Equal("verpasst", ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
     }
 
+    /// <summary>
+    /// The half of the resume contract the browser cannot fulfil. After a <em>fatal</em>
+    /// EventSource error the frontend opens a brand-new EventSource, and no JS API can put
+    /// <c>Last-Event-ID</c> on one — so the server sees a first-time client and replays the whole
+    /// room. The frontend drops what it has already rendered by comparing SSE ids, which only works
+    /// if they arrive strictly increasing. That precondition is what this pins.
+    /// </summary>
+    [Fact]
+    public async Task AFreshConnectionReplaysTheRoomWithStrictlyIncreasingIds()
+    {
+        using var client = _factory.CreateClient();
+        using var abort = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        Publish("ohne-header", "erste", offset: 30);
+        Publish("ohne-header", "zweite", offset: 31);
+        Publish("ohne-header", "dritte", offset: 32);
+
+        // No Last-Event-ID at all: exactly what a new EventSource sends.
+        var connection = await Connect(client, "ohne-header", abort.Token, "on a fresh connection");
+        using var response = connection.Response;
+        using var reader = connection.Reader;
+
+        Assert.Equal($"event: {ChatStream.HeartbeatEventType}", connection.FirstLine);
+        Assert.Equal("data: ", await ReadLineWithin(reader, abort.Token, "priming frame truncated"));
+        Assert.Equal(string.Empty, await ReadLineWithin(reader, abort.Token, "priming frame truncated"));
+
+        var ids = new List<long>();
+        foreach (var expected in new[] { "erste", "zweite", "dritte" })
+        {
+            var frame = await ReadFrameWithin(
+                reader, abort.Token, $"the replayed message '{expected}' never arrived");
+
+            var id = Assert.Single(frame, line => line.StartsWith("id: ", StringComparison.Ordinal));
+            ids.Add(long.Parse(id["id: ".Length..]));
+
+            var data = Assert.Single(frame, line => line.StartsWith("data: ", StringComparison.Ordinal));
+            Assert.Equal(expected, ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
+        }
+
+        Assert.Equal([30L, 31L, 32L], ids);
+        Assert.Equal(ids.Order(), ids);
+    }
+
     private void Publish(string room, string text, long offset) =>
         _factory.Services
             .GetRequiredService<ChatBroadcaster>()

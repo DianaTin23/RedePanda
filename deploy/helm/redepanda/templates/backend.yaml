@@ -6,7 +6,31 @@ metadata:
     {{- include "redepanda.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  # Omitted while an HPA owns this field. Otherwise every `helm upgrade` would write the number from
+  # values.yaml back, the autoscaler would correct it again immediately, and the pod count would
+  # oscillate between the two.
   replicas: {{ .Values.backend.replicas }}
+  {{- end }}
+
+  # Never below the configured count during a deploy. Readiness here means "replayed the topic to
+  # the end", so a new pod only joins the Service once it can serve a complete room — and with
+  # maxUnavailable: 0 the old pod is not allowed to leave until that has happened.
+  #
+  # maxSurge as an absolute 1 rather than a percentage: it rolls one pod at a time whatever the
+  # autoscaler has done to the replica count, which is the cautious choice when readiness depends on
+  # a broker round trip.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  # A pod counts as available only once it has been Ready for this long. Readiness is a one-way
+  # latch after the replay, so this only guards against a single probe succeeding against a pod that
+  # is about to lose the broker again. Cheap: 5s per pod on a rollout.
+  minReadySeconds: 5
+
   selector:
     matchLabels:
       {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
@@ -28,6 +52,18 @@ spec:
       # Longer than the 25s shutdown timeout the application configures for itself, so the
       # consumer can leave its group and the producer can flush before SIGKILL.
       terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      # Prefers one replica per node, and never refuses to schedule for it. A hard constraint
+      # (DoNotSchedule, or requiredDuringScheduling anti-affinity) would leave the second replica
+      # Pending forever on the one-node kind and Docker Desktop clusters this chart is aimed at — a
+      # worse outcome than no spreading at all. Provably inert on one node, correct on more, and the
+      # README says which of those the demo actually exercises.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "backend") | nindent 14 }}
       securityContext:
         runAsNonRoot: true
         # Matches APP_UID in the .NET base image. Must be numeric: the kubelet rejects images
@@ -73,6 +109,22 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 6
+          lifecycle:
+            # Endpoint removal and SIGTERM are dispatched in parallel, and kube-proxy needs a moment
+            # to stop steering new connections here. Sleeping first means no browser is handed to a
+            # pod that is already on its way out.
+            #
+            # exec, and deliberately not the newer lifecycle.preStop.sleep: that field is only
+            # honoured from Kubernetes 1.30 and is silently pruned below it, so an older cluster
+            # would get no drain at all and say nothing about it. This is an execve of GNU
+            # coreutils' sleep, not a shell — the Debian-based aspnet base image is fixed by
+            # librdkafka anyway, and readOnlyRootFilesystem blocks writes, not execs.
+            #
+            # Budget against terminationGracePeriodSeconds: 45 — the grace period covers the hook as
+            # well as the signal, so 5s here plus the host's own 25s shutdown timeout is 30s.
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -89,6 +141,10 @@ metadata:
     {{- include "redepanda.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
+  # No sessionAffinity, on purpose. It would be the reflex for an SSE service and it is exactly
+  # wrong here: the SSE event id is the Kafka offset, which every replica agrees on, so a browser
+  # reconnecting onto a different pod resumes correctly by itself. Pinning clients to pods would
+  # only make a rollout worse.
   type: ClusterIP
   selector:
     {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
@@ -96,3 +152,31 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "redepanda.fullname" . }}-backend
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  # maxUnavailable, not minAvailable. They are the same thing at exactly two replicas and behave
+  # very differently either side of it:
+  #   * at replicas: 1, minAvailable: 1 permits zero disruptions and `kubectl drain` hangs forever —
+  #     and on a single-node cluster that is the only kind of drain there is.
+  #   * once the HPA has scaled out, minAvailable: 1 would allow every pod but one to be evicted at
+  #     once. maxUnavailable: 1 keeps n-1 serving, whatever n turns out to be.
+  #
+  # Rendered unconditionally for the same reason: at one replica it is a harmless no-op, and gating
+  # it would mean a `kubectl scale` or `--set backend.replicas=3` silently lost the guarantee.
+  maxUnavailable: 1
+
+  # Readiness here depends on the broker. If Redpanda is down, every backend pod is NotReady, the
+  # budget is exhausted, and the default policy would refuse to evict pods that are useless anyway —
+  # wedging a node drain on an unrelated outage.
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+  selector:
+    matchLabels:
+      {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}

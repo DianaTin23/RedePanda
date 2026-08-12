@@ -30,6 +30,28 @@ public class ChatStreamTests
     private static ChatMessage Message(string room, string text) =>
         new(room, "alice", text, DateTimeOffset.UtcNow);
 
+    /// <summary>
+    /// The stream as a browser drives it: a request token, and a host that is staying put.
+    /// <para>
+    /// Only <see cref="ShutdownEndsTheStreamSoTheBrowserReconnectsElsewhere"/> is about the other
+    /// token, so it calls <see cref="ChatStream.Create"/> directly. Everything else says so here
+    /// once instead of carrying an explicit <c>CancellationToken.None</c> through eight call sites.
+    /// </para>
+    /// </summary>
+    private static IAsyncEnumerable<SseItem<string>> Stream(
+        ChatBroadcaster broadcaster,
+        string room,
+        TimeSpan heartbeatInterval,
+        CancellationToken ct,
+        long lastEventId = -1) =>
+        ChatStream.Create(
+            broadcaster,
+            room,
+            heartbeatInterval,
+            lastEventId,
+            shutdown: CancellationToken.None,
+            ct: ct);
+
     /// <summary>Advances the stream, failing with <paramref name="because"/> if it stalls.</summary>
     private static async Task<bool> MoveNextWithin(
         IAsyncEnumerator<SseItem<string>> stream, TimeSpan timeout, string because)
@@ -53,8 +75,7 @@ public class ChatStreamTests
         var broadcaster = CreateBroadcaster();
         using var cts = new CancellationTokenSource();
 
-        await using var stream = ChatStream
-            .Create(broadcaster, "general", NoHeartbeatDuringThisTest, ct: cts.Token)
+        await using var stream = Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token)
             .GetAsyncEnumerator(cts.Token);
 
         Assert.True(
@@ -77,8 +98,8 @@ public class ChatStreamTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var items = new List<SseItem<string>>();
-        await foreach (var item in ChatStream.Create(
-                           broadcaster, "general", TimeSpan.FromMilliseconds(50), ct: cts.Token))
+        await foreach (var item in Stream(
+                           broadcaster, "general", TimeSpan.FromMilliseconds(50), cts.Token))
         {
             items.Add(item);
             if (items.Count == 3)
@@ -99,8 +120,7 @@ public class ChatStreamTests
         var broadcaster = CreateBroadcaster();
         using var cts = new CancellationTokenSource();
 
-        await using var stream = ChatStream
-            .Create(broadcaster, "general", NoHeartbeatDuringThisTest, ct: cts.Token)
+        await using var stream = Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token)
             .GetAsyncEnumerator(cts.Token);
 
         // Consuming the priming item first is what guarantees the subscription exists; the stream
@@ -136,8 +156,7 @@ public class ChatStreamTests
         broadcaster.Publish(Message("general", "erste"), offset: 0);
         broadcaster.Publish(Message("general", "zweite"), offset: 1);
 
-        await using var stream = ChatStream
-            .Create(broadcaster, "general", NoHeartbeatDuringThisTest, ct: cts.Token)
+        await using var stream = Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token)
             .GetAsyncEnumerator(cts.Token);
 
         // The priming heartbeat still comes first — it is what flushes the response headers.
@@ -168,8 +187,7 @@ public class ChatStreamTests
         var broadcaster = CreateBroadcaster();
         using var cts = new CancellationTokenSource();
 
-        await using var stream = ChatStream
-            .Create(broadcaster, "general", NoHeartbeatDuringThisTest, ct: cts.Token)
+        await using var stream = Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token)
             .GetAsyncEnumerator(cts.Token);
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
@@ -195,9 +213,9 @@ public class ChatStreamTests
         broadcaster.Publish(Message("general", "gesehen"), offset: 4);
         broadcaster.Publish(Message("general", "verpasst"), offset: 5);
 
-        await using var stream = ChatStream
-            .Create(broadcaster, "general", NoHeartbeatDuringThisTest, lastEventId: 4, ct: cts.Token)
-            .GetAsyncEnumerator(cts.Token);
+        await using var stream =
+            Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token, lastEventId: 4)
+                .GetAsyncEnumerator(cts.Token);
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
 
@@ -225,8 +243,7 @@ public class ChatStreamTests
         var broadcaster = CreateBroadcaster();
         using var cts = new CancellationTokenSource();
 
-        await using var stream = ChatStream
-            .Create(broadcaster, "general", NoHeartbeatDuringThisTest, ct: cts.Token)
+        await using var stream = Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token)
             .GetAsyncEnumerator(cts.Token);
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
@@ -255,8 +272,7 @@ public class ChatStreamTests
         using var cts = new CancellationTokenSource();
         Assert.Equal(0, broadcaster.Count);
 
-        var stream = ChatStream
-            .Create(broadcaster, "general", NoHeartbeatDuringThisTest, ct: cts.Token)
+        var stream = Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token)
             .GetAsyncEnumerator(cts.Token);
 
         // The subscription is taken on first enumeration, not at Create.
@@ -264,6 +280,66 @@ public class ChatStreamTests
         Assert.Equal(1, broadcaster.Count);
 
         await stream.DisposeAsync();
+        Assert.Equal(0, broadcaster.Count);
+    }
+
+    /// <summary>
+    /// What a rolling update depends on. Kestrel holds in-flight responses open until the host's
+    /// 25s shutdown timeout, and a stream that keeps heartbeating through it looks perfectly healthy
+    /// to the browser — which therefore never reconnects to the replica that is ready and waiting.
+    /// The stream has to end when the host says it is stopping, even though the request itself was
+    /// never cancelled.
+    /// </summary>
+    [Fact]
+    public async Task ShutdownEndsTheStreamSoTheBrowserReconnectsElsewhere()
+    {
+        var broadcaster = CreateBroadcaster();
+        using var request = new CancellationTokenSource();
+        using var shutdown = new CancellationTokenSource();
+
+        await using var stream = ChatStream
+            .Create(
+                broadcaster,
+                "general",
+                NoHeartbeatDuringThisTest,
+                shutdown: shutdown.Token,
+                ct: request.Token)
+            .GetAsyncEnumerator(request.Token);
+
+        Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
+        Assert.Equal(1, broadcaster.Count);
+
+        // Park the stream where a real one spends its life: waiting on a quiet room with the next
+        // heartbeat far off. Cancelling before this would catch the iterator suspended at the
+        // priming yield, where the loop condition alone ends it — and prove nothing about the wait,
+        // which is the only state a pod is ever actually in when SIGTERM arrives.
+        var pending = stream.MoveNextAsync().AsTask();
+        Assert.False(pending.IsCompleted, "The stream never reached its wait.");
+
+        await shutdown.CancelAsync();
+
+        var winner = await Task.WhenAny(pending, Task.Delay(Promptly, CancellationToken.None));
+        var endedOnShutdown = ReferenceEquals(winner, pending);
+
+        if (!endedOnShutdown)
+        {
+            // Unblock the in-flight MoveNextAsync before the enumerator is disposed: disposing with
+            // one still pending throws NotSupportedException, which would bury the actual failure.
+            await request.CancelAsync();
+            await pending;
+        }
+
+        Assert.True(
+            endedOnShutdown,
+            $"The stream was still waiting {Promptly.TotalSeconds}s after the host started "
+            + "stopping. A browser on this pod would sit on a dying connection instead of "
+            + "reconnecting to the replica that is already ready.");
+
+        // Ends rather than yielding another heartbeat. RequestAborted was never triggered — that is
+        // the whole point: the browser is still there and the connection is still good.
+        Assert.False(await pending, "The stream yielded another frame after the host began stopping.");
+
+        Assert.False(request.IsCancellationRequested);
         Assert.Equal(0, broadcaster.Count);
     }
 
@@ -277,8 +353,8 @@ public class ChatStreamTests
 
         // A browser navigating away cancels RequestAborted mid-wait. That must end the enumeration
         // normally rather than surface as an unhandled OperationCanceledException.
-        await foreach (var _ in ChatStream.Create(
-                           broadcaster, "general", TimeSpan.FromMilliseconds(50), ct: cts.Token))
+        await foreach (var _ in Stream(
+                           broadcaster, "general", TimeSpan.FromMilliseconds(50), cts.Token))
         {
             if (++seen == 2)
             {

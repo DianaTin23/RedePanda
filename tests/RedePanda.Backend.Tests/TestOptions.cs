@@ -20,5 +20,6 @@ internal static class TestOptions
         MaxMessageLength = ChatMessage.DefaultMaxTextLength,
         PodName = "test",
         HistorySize = historySize,
+        ProduceTimeoutMs = BackendOptions.DefaultProduceTimeoutMs,
     };
 }

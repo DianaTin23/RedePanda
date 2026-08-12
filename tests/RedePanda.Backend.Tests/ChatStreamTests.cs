@@ -258,7 +258,14 @@ public class ChatStreamTests
 
         Assert.False(ReferenceEquals(winner, moved), "A message leaked in from another room.");
 
+        // Cancelling ends the stream, which is what finally completes the MoveNextAsync left
+        // pending above — and it has to be awaited before `await using` disposes the enumerator.
+        // Disposing an async iterator with a MoveNextAsync still in flight throws
+        // NotSupportedException, which under load is what this test did: it is the only one here
+        // that deliberately leaves a MoveNext outstanding, and it was failing on its own race
+        // rather than on anything about the stream.
         await cts.CancelAsync();
+        Assert.False(await moved, "Cancelling the request must end the stream, not yield a frame.");
     }
 
     /// <summary>

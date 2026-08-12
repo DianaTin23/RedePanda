@@ -159,8 +159,51 @@ frontend:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }
 
+# ---- Chat client / Admin-Prozess --------------------------------------------------------------
+# Dasselbe Image, dasselbe Repository, derselbe Build wie Backend und Frontend -- der Topic-Job
+# unten führt es mit `--ensure-topic` aus. Genau das ist Faktor XII: ein Admin-Prozess läuft im
+# selben Code und derselben Konfiguration wie die Anwendung, nicht als Shell-Skript in einem
+# fremden Image. Tag wie oben aus der Release-Datei.
+chatClient:
+  image:
+    repository: redepanda-chatclient
+    tag: ""
+
 # ---- Redpanda broker --------------------------------------------------------------------------
 redpanda:
+  # Auf false wird *kein* Broker deployt und die Anwendung zeigt auf `external.bootstrapServers`.
+  # Das ist die Probe darauf, dass Redpanda wirklich ein austauschbarer Backing Service ist und
+  # nicht nur ein mitgeliefertes StatefulSet: ohne diesen Schalter bliebe die Behauptung in
+  # Abschnitt 11 der README unbelegt.
+  enabled: true
+
+  external:
+    # Pflicht, sobald enabled: false -- sonst bricht das Chart beim Rendern ab, statt ein Backend
+    # zu deployen, das gegen einen Service läuft, den niemand deployt hat.
+    bootstrapServers: ""
+
+  # Der mitgelieferte Broker spricht Plaintext auf einem Cluster-internen Service. Jeder andere --
+  # verwaltetes Redpanda, ein gemeinsam genutztes Kafka -- braucht TLS, Zugangsdaten oder beides.
+  # Ohne das hier wäre „ohne Codeänderung austauschbar" nur für genau einen Broker wahr.
+  auth:
+    # Plaintext, Ssl, SaslPlaintext oder SaslSsl. Die Schreibweise aus den Broker-Dokus
+    # (`SASL_SSL`) wird ebenfalls akzeptiert.
+    securityProtocol: Plaintext
+
+    # Pflicht bei einem SASL-Protokoll: Plain, ScramSha256, ScramSha512 (auch `SCRAM-SHA-512`).
+    saslMechanism: ""
+
+    # Name eines *bestehenden* Secrets mit den Schlüsseln `username` und `password`. Bewusst ein
+    # Verweis und kein Wert: Zugangsdaten in values.yaml landen in `helm get values`, im
+    # Shell-Verlauf und in jedem Repo, das die Datei enthält. Bei einem SASL-Protokoll ohne dieses
+    # Feld bricht das Chart ab.
+    existingSecret: ""
+
+    # Optional, nur bei TLS: Secret mit dem Schlüssel `ca.crt` für eine private CA. Ohne das
+    # benutzt librdkafka den System-Truststore, was für ein öffentlich vertrauenswürdiges
+    # Zertifikat das Richtige ist.
+    caSecret: ""
+
   # docker.io rather than docker.redpanda.com: the latter is a pull-through proxy in front of
   # this same repository, and it rate-limits anonymous manifest reads hard enough that the
   # digest cannot be resolved or re-checked reliably. Pointing at the origin keeps the pin

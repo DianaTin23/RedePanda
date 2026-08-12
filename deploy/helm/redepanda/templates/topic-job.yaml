@@ -26,53 +26,35 @@ spec:
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
-        runAsUser: 101
-        runAsGroup: 101
+        # APP_UID from the .NET base image, numeric because runAsNonRoot rejects a named USER.
+        runAsUser: 1654
+        runAsGroup: 1654
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: create-topic
-          image: {{ .Values.redpanda.image | quote }}
+          # The application's own image, running its own --ensure-topic mode. It used to be
+          # `rpk` in the Redpanda image driven by a thirty-line shell script: a second codebase
+          # and a second configuration source for a task that belongs to this application.
+          # 12-Factor XII asks for an admin process that ships and runs with the app, and this is
+          # what that costs -- one image, already built by the same script as the other two.
+          image: {{ include "redepanda.image" (dict "ctx" . "component" "chatClient") | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["--ensure-topic"]
+          envFrom:
+            # The same ConfigMap the backend reads, in full and unedited. Nothing about the broker
+            # or the topic is restated here, so the two cannot drift apart.
+            - configMapRef:
+                name: {{ include "redepanda.fullname" . }}-config
           env:
-            - name: REDPANDA_TOPIC
-              value: {{ .Values.chat.topic | quote }}
-            # rpk writes its scratch config under $HOME; point that at the writable emptyDir.
-            - name: HOME
-              value: /tmp
-          command: [/bin/sh, -ec]
-          args:
-            - |
-              # `rpk cluster health` speaks the Admin API on 9644 -- it has no --brokers flag,
-              # and pointing it at 9092 makes it fail with "unknown flag". Waiting on the exit
-              # code rather than grepping the output keeps this robust across rpk versions.
-              healthy=0
-              for i in $(seq 1 60); do
-                if rpk cluster health -X admin.hosts={{ include "redepanda.adminHost" . }} --exit-when-healthy >/dev/null 2>&1; then
-                  healthy=1
-                  break
-                fi
-                echo "waiting for the broker to become healthy ($i/60)"
-                sleep 3
-              done
-
-              if [ "$healthy" != "1" ]; then
-                echo "broker did not become healthy within 180s" >&2
-                exit 1
-              fi
-
-              # `rpk topic create` exits 1 when the topic already exists, so a plain call would
-              # fail the hook on every single helm upgrade. Verified against Redpanda v26.2.1.
-              if rpk topic create "$REDPANDA_TOPIC" \
-                   -p {{ .Values.chat.partitions }} \
-                   -r {{ .Values.chat.replicationFactor }} \
-                   -X brokers={{ include "redepanda.bootstrapServers" . }}; then
-                echo "created topic $REDPANDA_TOPIC"
-              else
-                # Confirm it exists rather than swallowing every possible failure.
-                rpk topic describe "$REDPANDA_TOPIC" -X brokers={{ include "redepanda.bootstrapServers" . }} >/dev/null
-                echo "topic $REDPANDA_TOPIC already exists"
-              fi
+            {{- include "redepanda.saslEnv" (dict "ctx" .) | nindent 12 }}
+            # The Job runs as a post-install hook, so the broker may still be starting; and against
+            # an external broker there may be nothing else to wait on at all. --ensure-topic polls
+            # for metadata until this budget is spent. It is a *metadata* request rather than
+            # `rpk cluster health`, which needs the Admin API on 9644 -- a port a managed broker
+            # has no reason to expose.
+            - name: TOPIC_WAIT_SECONDS
+              value: "180"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -81,9 +63,20 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.redpanda.auth.caSecret }}
+            - name: broker-ca
+              mountPath: /etc/redepanda/ca
+              readOnly: true
+            {{- end }}
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
       volumes:
+        # The .NET runtime wants a writable temp directory; the root filesystem is read-only.
         - name: tmp
           emptyDir: {}
+        {{- if .Values.redpanda.auth.caSecret }}
+        - name: broker-ca
+          secret:
+            secretName: {{ .Values.redpanda.auth.caSecret | quote }}
+        {{- end }}

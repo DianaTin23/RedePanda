@@ -1,3 +1,10 @@
+{{- /*
+The bundled broker, and nothing of it is rendered when redpanda.enabled is false: the
+application then talks to redpanda.external.bootstrapServers, and a broker nobody uses would
+still claim a PersistentVolume and a gigabyte of memory. This switch is what makes "austauschbarer
+Backing Service" something the chart can actually do rather than something the README asserts.
+*/ -}}
+{{- if .Values.redpanda.enabled -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -110,6 +117,10 @@ spec:
       port: 9092
       targetPort: kafka
     - name: admin
-      # Needed by the topic job: `rpk cluster health` talks to the Admin API, never to 9092.
+      # Redpanda's Admin API. Nothing in this chart speaks it any more -- the topic job uses the
+      # Kafka protocol on 9092 like every other client, which is also what lets it work against a
+      # managed broker that exposes no admin port. Kept because `rpk cluster health` from a shell
+      # is still the ordinary way to look at a broker by hand.
       port: 9644
       targetPort: admin
+{{- end -}}

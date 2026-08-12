@@ -5,6 +5,14 @@ at template time with a clear message rather than deploying a Prometheus that sc
 {{- if and .Values.prometheus.enabled (not .Values.otelCollector.enabled) -}}
 {{- fail "prometheus.enabled requires otelCollector.enabled: the collector is Prometheus' only scrape target." -}}
 {{- end -}}
+{{- /*
+Credentials are a reference to a Secret, never a value in values.yaml -- which ends up in
+`helm get values`, in a shell history and in whatever repository holds the file. Failing here
+costs one command; a deployment that authenticates against nothing costs an incident.
+*/ -}}
+{{- if and (include "redepanda.saslEnabled" .) (not .Values.redpanda.auth.existingSecret) -}}
+{{- fail "redpanda.auth.securityProtocol uses SASL, so redpanda.auth.existingSecret must name a Secret with the keys username and password." -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,8 +27,27 @@ data:
   MAX_MESSAGE_LENGTH: {{ .Values.chat.maxMessageLength | quote }}
   CHAT_HISTORY_SIZE: {{ .Values.chat.historySize | quote }}
   PRODUCE_TIMEOUT_MS: {{ .Values.chat.produceTimeoutMs | quote }}
+
+  # Read by the topic Job, which runs the chat client's --ensure-topic mode. They live here rather
+  # than as env: entries on the Job so that it needs nothing but an envFrom -- one configuration
+  # source for the application and for the admin process that prepares it.
+  CHAT_PARTITIONS: {{ .Values.chat.partitions | quote }}
+  CHAT_REPLICATION_FACTOR: {{ .Values.chat.replicationFactor | quote }}
   LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
   ASPNETCORE_URLS: "http://+:8080"
+
+  # How the clients reach the broker. Everything except the credentials belongs here: a protocol
+  # and a mechanism are configuration, a username and a password are not, and mixing them would
+  # put secrets into an object designed to be read freely. They come from a Secret instead; see
+  # the env: block on the backend Deployment.
+  REDPANDA_SECURITY_PROTOCOL: {{ .Values.redpanda.auth.securityProtocol | quote }}
+{{- with .Values.redpanda.auth.saslMechanism }}
+  REDPANDA_SASL_MECHANISM: {{ . | quote }}
+{{- end }}
+{{- if .Values.redpanda.auth.caSecret }}
+  # The private CA, from the Secret mounted at this path by the pods that speak Kafka.
+  REDPANDA_SSL_CA_LOCATION: "/etc/redepanda/ca/ca.crt"
+{{- end }}
 {{- if .Values.otelCollector.enabled }}
 
   # OTEL_* are specified by OpenTelemetry and read by the SDK itself. They are deliberately not

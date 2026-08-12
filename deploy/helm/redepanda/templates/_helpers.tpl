@@ -30,12 +30,54 @@ stable name keeps those readable and matching the documentation.
 {{- .Values.redpanda.serviceName -}}
 {{- end -}}
 
+{{/*
+Where every client looks for the broker: the bundled one, or whatever redpanda.external names
+when this chart deploys none. Empty is a hard error rather than a default, for the same reason
+an empty image tag is: the alternative is a backend that comes up and fails every connection
+against a Service nobody deployed.
+*/}}
 {{- define "redepanda.bootstrapServers" -}}
+{{- if .Values.redpanda.enabled -}}
 {{- printf "%s:9092" (include "redepanda.brokerService" .) -}}
+{{- else if .Values.redpanda.external.bootstrapServers -}}
+{{- .Values.redpanda.external.bootstrapServers -}}
+{{- else -}}
+{{- fail "redpanda.enabled is false, so redpanda.external.bootstrapServers must name the broker to use." -}}
+{{- end -}}
 {{- end -}}
 
-{{- define "redepanda.adminHost" -}}
-{{- printf "%s:9644" (include "redepanda.brokerService" .) -}}
+{{/*
+Whether the configured protocol authenticates over SASL, i.e. whether the credentials from
+redpanda.auth.existingSecret have to be mounted into the pods. Underscores are stripped so the
+spelling from the broker documentation (SASL_SSL) matches here as well as in the application.
+*/}}
+{{- define "redepanda.saslEnabled" -}}
+{{- $protocol := .Values.redpanda.auth.securityProtocol | replace "_" "" | lower -}}
+{{- if or (eq $protocol "saslssl") (eq $protocol "saslplaintext") -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The SASL credentials, as environment variables from the referenced Secret. Rendered into both
+pod templates that speak Kafka, which is why it is a helper rather than eight duplicated lines.
+Call as (dict "ctx" .).
+*/}}
+{{- define "redepanda.saslEnv" -}}
+{{- with .ctx -}}
+{{- if include "redepanda.saslEnabled" . }}
+- name: REDPANDA_SASL_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.redpanda.auth.existingSecret | quote }}
+      key: username
+- name: REDPANDA_SASL_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.redpanda.auth.existingSecret | quote }}
+      key: password
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "redepanda.collectorService" -}}

@@ -88,6 +88,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- /* Credentials from a Secret, never from the ConfigMap above. No-op without SASL. */}}
+            {{- include "redepanda.saslEnv" (dict "ctx" .) | nindent 12 }}
 {{- if .Values.otelCollector.enabled }}
             # Expanded by the kubelet from POD_NAME above. This is what makes the Prometheus
             # "instance" label the pod name; the application never sets the resource in code.
@@ -130,8 +132,20 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          {{- if .Values.redpanda.auth.caSecret }}
+          volumeMounts:
+            - name: broker-ca
+              mountPath: /etc/redepanda/ca
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- if .Values.redpanda.auth.caSecret }}
+      volumes:
+        - name: broker-ca
+          secret:
+            secretName: {{ .Values.redpanda.auth.caSecret | quote }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

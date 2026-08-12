@@ -61,9 +61,9 @@
         <div class="chat__inner">
             <p id="empty" class="empty">
                 <strong>Noch nichts gesagt.</strong>
-                Neue Nachrichten aus diesem Raum erscheinen hier, sobald sie geschrieben werden.
-                Ältere Nachrichten werden bewusst nicht nachgeladen — das Backend liest den
-                Topic ab dem aktuellen Ende.
+                In diesem Raum liegt nichts im Topic, was sich nachladen ließe. Sobald jemand
+                schreibt, erscheint es hier — und wer den Raum später betritt, bekommt den
+                Verlauf mitgeliefert, solange der Broker ihn vorhält.
             </p>
             <ol id="messages" class="messages" aria-live="polite" aria-relevant="additions"></ol>
         </div>
@@ -73,7 +73,10 @@
 </main>
 
 <footer id="composer" class="composer" hidden>
-    <p id="banner" class="banner" hidden></p>
+    <p id="banner" class="banner" hidden>
+        <span id="banner-text"></span>
+        <button type="button" id="reconnect" class="banner__action" hidden>Erneut verbinden</button>
+    </p>
     <p id="error" class="error" role="alert" hidden></p>
 
     <form id="send" class="send">

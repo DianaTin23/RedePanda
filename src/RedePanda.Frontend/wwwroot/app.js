@@ -19,6 +19,13 @@ const NEAR_BOTTOM_PX = 80;
 
 const THEME_KEY = "redepanda.theme";
 
+// Reconnect budget for the case EventSource gives up on (see connect()). Delays grow 1, 2, 4, 8 and
+// then stay at the cap, so eight attempts span roughly 75 seconds — long enough for a rescheduled
+// backend pod to become ready, short enough that a genuinely dead backend does not retry forever.
+const MAX_RETRIES = 8;
+const RETRY_BASE_MS = 1000;
+const RETRY_CAP_MS = 15000;
+
 const els = {
     join: document.getElementById("join"),
     nickname: document.getElementById("nickname"),
@@ -31,6 +38,8 @@ const els = {
     jump: document.getElementById("jump"),
     composer: document.getElementById("composer"),
     banner: document.getElementById("banner"),
+    bannerText: document.getElementById("banner-text"),
+    reconnect: document.getElementById("reconnect"),
     error: document.getElementById("error"),
     send: document.getElementById("send"),
     sendButton: document.querySelector(".send__button"),
@@ -52,6 +61,12 @@ let dayKey = "";
 // Distinguishes "connecting for the first time" from "the connection dropped", which is the
 // state the pod-delete demo is about.
 let hasConnected = false;
+
+// Reconnect state. A pending retry is `retryTimer !== null`, an exhausted budget is `gaveUp`, and
+// a live or connecting stream is `source !== null` — those three are mutually exclusive.
+let retryTimer = null;
+let retryAttempt = 0;
+let gaveUp = false;
 
 const timeFormat = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
 const dateFormat = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" });
@@ -255,11 +270,14 @@ function setStatus(state, label) {
     els.sendButton.disabled = !connected;
 
     // The first connect needs no banner; the pill already says "verbinde…". A banner here means
-    // an established connection dropped, which is exactly what the pod-delete demo produces.
-    els.banner.hidden = connected || !hasConnected;
-    els.banner.textContent = state === "connecting"
-        ? "Verbindung unterbrochen — es wird automatisch neu verbunden."
-        : "Keine Verbindung zum Backend.";
+    // either an established connection dropped — exactly what the pod-delete demo produces — or
+    // that we ran out of retries, in which case it carries the only way back and must show even
+    // when the very first connect never succeeded.
+    els.banner.hidden = connected || !(hasConnected || gaveUp);
+    els.reconnect.hidden = !gaveUp;
+    els.bannerText.textContent = gaveUp
+        ? "Keine Verbindung zum Backend."
+        : "Verbindung unterbrochen — es wird automatisch neu verbunden.";
 }
 
 function showError(message) {
@@ -277,15 +295,25 @@ function updateCounter() {
 // ---- Network -----------------------------------------------------------------------------------
 
 function connect() {
-    source = new EventSource(`${API}/stream?room=${encodeURIComponent(room)}`);
+    // Held locally as well so every handler can tell whether it belongs to the current stream: a
+    // handler of one we already closed must not write the status of the one that replaced it.
+    const stream = new EventSource(`${API}/stream?room=${encodeURIComponent(room)}`);
+    source = stream;
 
-    source.onopen = () => {
+    stream.onopen = () => {
+        if (source !== stream) {
+            return;
+        }
+
+        // A stream that actually opened earns a fresh budget.
+        retryAttempt = 0;
+        gaveUp = false;
         hasConnected = true;
         setStatus("online", "verbunden");
         els.text.focus();
     };
 
-    source.onmessage = (event) => {
+    stream.onmessage = (event) => {
         try {
             addMessage(JSON.parse(event.data));
         } catch {
@@ -293,13 +321,72 @@ function connect() {
         }
     };
 
-    // EventSource reconnects on its own; this only reflects that in the UI.
-    source.onerror = () => {
-        setStatus(
-            source.readyState === EventSource.CLOSED ? "offline" : "connecting",
-            source.readyState === EventSource.CLOSED ? "getrennt" : "verbinde neu…",
-        );
+    stream.onerror = () => {
+        if (source !== stream) {
+            return;
+        }
+
+        // Two different failures arrive through this one handler:
+        //
+        // An established stream that just ends leaves readyState at CONNECTING, and EventSource
+        // retries by itself — there is nothing to do but say so.
+        if (stream.readyState !== EventSource.CLOSED) {
+            setStatus("connecting", "verbinde neu…");
+            return;
+        }
+
+        // CLOSED means the retry reached a server and got an answer that was not an SSE stream —
+        // with the backend pod gone, Caddy's reverse_proxy answers 502. The spec calls that fatal:
+        // EventSource will never try again, so from here the reconnect is ours to drive.
+        scheduleReconnect();
     };
+}
+
+/** Closes the dead stream and books the next attempt, or gives up once the budget runs out. */
+function scheduleReconnect() {
+    source?.close();
+    source = null;
+
+    if (retryAttempt >= MAX_RETRIES) {
+        gaveUp = true;
+        setStatus("offline", "getrennt");
+        return;
+    }
+
+    // Jitter keeps a room full of tabs from hitting the new pod in one synchronised burst.
+    const delay = Math.min(RETRY_BASE_MS * 2 ** retryAttempt, RETRY_CAP_MS);
+    retryAttempt += 1;
+
+    setStatus("connecting", "verbinde neu…");
+    retryTimer = setTimeout(() => retryNow(), delay * (0.75 + Math.random() * 0.5));
+}
+
+/**
+ * The single way back onto the stream — used by the backoff timer, the button, and the events that
+ * mean a wait has become pointless. `fresh` marks a signal that justifies a new budget: the user
+ * asking, or the network coming back. Without it an exhausted budget stays exhausted.
+ */
+function retryNow({ fresh = false } = {}) {
+    if (!room || source !== null) {
+        // Not in a room, or a stream is already live or connecting.
+        return;
+    }
+
+    if (!fresh && retryTimer === null) {
+        return;
+    }
+
+    // No-op for a timer that has already fired, which is how we get here in the common case.
+    clearTimeout(retryTimer);
+    retryTimer = null;
+
+    if (fresh) {
+        retryAttempt = 0;
+    }
+
+    gaveUp = false;
+    setStatus("connecting", "verbinde neu…");
+    connect();
 }
 
 // ---- Wiring ------------------------------------------------------------------------------------
@@ -311,6 +398,9 @@ els.join.addEventListener("submit", (event) => {
     if (!nickname || !room) {
         return;
     }
+
+    retryAttempt = 0;
+    gaveUp = false;
 
     els.currentRoom.textContent = room;
     els.roomChip.hidden = false;
@@ -356,6 +446,19 @@ els.text.addEventListener("input", updateCounter);
 
 els.jump.addEventListener("click", () => scrollToEnd(true));
 
+els.reconnect.addEventListener("click", () => retryNow({ fresh: true }));
+
+// Both of these mean waiting out the rest of the backoff has stopped making sense. Coming back
+// online is new information about the network, so it also revives a budget we had already spent;
+// a tab merely being looked at again is not, and only shortens a wait that is already pending.
+window.addEventListener("online", () => retryNow({ fresh: true }));
+
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+        retryNow();
+    }
+});
+
 els.chat.addEventListener("scroll", () => {
     if (isNearBottom()) {
         els.jump.hidden = true;
@@ -366,6 +469,14 @@ els.leave.addEventListener("click", () => {
     source?.close();
     source = null;
     hasConnected = false;
+
+    // A retry booked before leaving must not reopen the stream behind the join screen. Clearing
+    // the room is what makes retryNow() refuse for good, whatever else may still call it.
+    clearTimeout(retryTimer);
+    retryTimer = null;
+    retryAttempt = 0;
+    gaveUp = false;
+    room = "";
 
     resetMessages();
     els.text.value = "";

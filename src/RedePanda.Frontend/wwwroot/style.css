@@ -644,6 +644,24 @@ input:disabled {
     border: 1px solid var(--warn);
 }
 
+/* Only appears once the automatic retries are spent, so it is the one way back and sits at the far
+   end of the banner. Outlined rather than filled: it borrows the banner's colour instead of
+   competing with the send button for the eye. */
+.banner__action {
+    flex: none;
+    margin-inline-start: auto;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.8125rem;
+    white-space: nowrap;
+    border-color: currentcolor;
+}
+
+/* Fills with the banner's own colour rather than introducing another one. */
+.banner__action:hover {
+    color: var(--warn-bg);
+    background: var(--warn);
+}
+
 /* A thick leading rule, not colour alone, is what separates an error from the banner above it. */
 .error {
     color: var(--danger);

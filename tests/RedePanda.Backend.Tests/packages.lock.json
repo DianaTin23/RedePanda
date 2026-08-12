@@ -510,7 +510,10 @@
         }
       },
       "redepanda.contracts": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Confluent.Kafka": "[2.15.0, )"
+        }
       },
       "Confluent.Kafka": {
         "type": "CentralTransitive",

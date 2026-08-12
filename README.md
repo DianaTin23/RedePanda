@@ -155,8 +155,10 @@ Der schnellste Weg, den Chat zu sehen — nur Redpanda im Container, alles ander
 cd RedePanda-kafka-docker
 docker compose --env-file env.local up -d
 
-# 2. Topic anlegen
-rpk topic create redepanda-chat -p 1 -r 1 -X brokers=127.0.0.1:19092
+# 2. Topic anlegen -- derselbe Admin-Prozess, den im Cluster der Helm-Hook ausführt.
+#    (`rpk topic create redepanda-chat -p 1 -r 1 -X brokers=127.0.0.1:19092` tut dasselbe.)
+REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 \
+dotnet run --project src/RedePanda.ChatClient -- --ensure-topic
 
 # 3. Backend starten
 REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 \
@@ -305,10 +307,53 @@ Die Spalte `DESCRIPTION` kommt aus `--description` im Deploy-Befehl. `APP VERSIO
 | `chat.topic` | `redepanda-chat` | Topicname für Backend, Client und Init-Job |
 | `chat.maxMessageLength` | `500` | maximale Nachrichtenlänge |
 | `chat.historySize` | `200` | Nachrichten pro Raum im Speicher **jedes** Pods; `0` = alles, was im Topic liegt |
+| `chat.produceTimeoutMs` | `10000` | Obergrenze für das Senden einer Nachricht; darüber antwortet das Backend mit 504 |
+| `frontend.replicas` | `2` | Caddy-Pods. Jeder SSE-Stream läuft hier durch, deshalb wie beim Backend nicht 1 |
+| `redpanda.enabled` | `true` | Deployt den Broker mit. `false` ⇒ kein Broker im Chart, siehe unten |
+| `redpanda.external.bootstrapServers` | `""` | Pflicht bei `redpanda.enabled=false` |
+| `redpanda.auth.securityProtocol` | `Plaintext` | `Ssl`, `SaslPlaintext`, `SaslSsl` — auch in der Schreibweise `SASL_SSL` |
+| `redpanda.auth.existingSecret` | `""` | Secret mit `username`/`password`. Pflicht bei einem SASL-Protokoll |
+| `redpanda.auth.caSecret` | `""` | Secret mit `ca.crt` für eine private CA (nur bei TLS) |
 
 Prometheus ohne Collector ist sinnlos — der Collector ist das einzige Scrape-Ziel. Diese
 Kombination bricht das Rendern bewusst mit einer klaren Meldung ab, statt einen Prometheus zu
 installieren, der ins Leere scrapt.
+
+### Gegen einen fremden Broker deployen
+
+Das ist die Probe auf „austauschbarer Backing Service": ohne diesen Schalter wäre Redpanda kein
+Backing Service, sondern ein Bestandteil der Anwendung.
+
+```bash
+# Kein Broker im Chart, dafür ein vorhandener anderswo:
+helm upgrade --install redepanda ./deploy/helm/redepanda -n redepanda \
+  -f deploy/releases/<version>.yaml \
+  --set redpanda.enabled=false \
+  --set redpanda.external.bootstrapServers=kafka.example.com:9093
+
+# Mit Authentifizierung. Die Zugangsdaten kommen aus einem Secret, das man selbst anlegt --
+# nicht über --set, weil Werte in `helm get values` und in der Shell-History landen:
+kubectl -n redepanda create secret generic broker-creds \
+  --from-literal=username=chat --from-literal=password=…
+
+helm upgrade --install redepanda ./deploy/helm/redepanda -n redepanda \
+  -f deploy/releases/<version>.yaml \
+  --set redpanda.enabled=false \
+  --set redpanda.external.bootstrapServers=kafka.example.com:9093 \
+  --set redpanda.auth.securityProtocol=SASL_SSL \
+  --set redpanda.auth.saslMechanism=SCRAM-SHA-512 \
+  --set redpanda.auth.existingSecret=broker-creds
+```
+
+Für eine private CA kommt `--set redpanda.auth.caSecret=<Secret mit ca.crt>` dazu; ohne das
+benutzt librdkafka den System-Truststore, was für ein öffentlich vertrauenswürdiges Zertifikat
+das Richtige ist. Backend, Konsolenclient und Topic-Job lesen dieselben Variablen — der Job
+wartet dabei auf *Metadaten* statt auf `rpk cluster health`, weil ein verwalteter Broker keinen
+Grund hat, Redpandas Admin-Port zu veröffentlichen.
+
+Zwei Fehler brechen bewusst schon beim Rendern ab, statt als Pod zu erscheinen, der jede
+Verbindung scheitern lässt: `redpanda.enabled=false` ohne Adresse, und ein SASL-Protokoll ohne
+`existingSecret`.
 
 ### HPA einschalten (braucht metrics-server)
 
@@ -425,9 +470,17 @@ Alle Einstellungen kommen aus Umgebungsvariablen; im Cluster aus einer ConfigMap
 |---|---|---|
 | `REDPANDA_BOOTSTRAP_SERVERS` | `redpanda:9092` | Backend, Konsolenclient |
 | `REDPANDA_TOPIC` | `redepanda-chat` | Backend, Konsolenclient, Topic-Job |
+| `REDPANDA_SECURITY_PROTOCOL` | `Plaintext` | Backend, Konsolenclient, Topic-Job |
+| `REDPANDA_SASL_MECHANISM` | — (Pflicht bei SASL) | dieselben drei |
+| `REDPANDA_SASL_USERNAME` | aus dem Secret (Pflicht bei SASL) | dieselben drei |
+| `REDPANDA_SASL_PASSWORD` | aus dem Secret (Pflicht bei SASL) | dieselben drei |
+| `REDPANDA_SSL_CA_LOCATION` | — (nur bei privater CA) | dieselben drei |
 | `MAX_MESSAGE_LENGTH` | `500` | Backend |
 | `CHAT_HISTORY_SIZE` | `200` (`0` = alles im Topic) | Backend |
 | `PRODUCE_TIMEOUT_MS` | `10000` | Backend (Producer, `message.timeout.ms`) |
+| `CHAT_PARTITIONS` | `1` | Topic-Job |
+| `CHAT_REPLICATION_FACTOR` | `1` | Topic-Job |
+| `TOPIC_WAIT_SECONDS` | `180` | Topic-Job (Warten auf den Broker) |
 | `ASPNETCORE_URLS` | `http://+:8080` | Backend |
 | `POD_NAME` | im Cluster Pflicht (fieldRef), lokal `MachineName-PID` | Backend (Consumer-GroupId) |
 | `LOG_LEVEL` | `Information` | Backend |
@@ -445,9 +498,16 @@ als `LOG_LEVEL` (`Information`). Das ist Caddys Vokabular, nicht das von .NET, u
 .NET-Schreibweise beim Start zurück, statt still auf einen Default zurückzufallen. Die beiden
 Variablen zu vereinheitlichen hieße, eine der beiden Laufzeiten anzulügen.
 
-Alle Variablen bis einschließlich `LOG_LEVEL` liest das Backend **explizit** in `BackendOptions`
-aus, statt sich auf das `Section__Key`-Autobinding von ASP.NET zu verlassen — nur so stimmen die
-schlichten Namen aus dieser Tabelle mit dem Code überein.
+Die Anwendungsvariablen bis einschließlich `LOG_LEVEL` liest das Backend **explizit** in
+`BackendOptions` aus, statt sich auf das `Section__Key`-Autobinding von ASP.NET zu verlassen — nur
+so stimmen die schlichten Namen aus dieser Tabelle mit dem Code überein.
+
+Die fünf Verbindungsvariablen (`REDPANDA_SECURITY_PROTOCOL` bis `REDPANDA_SSL_CA_LOCATION`) liest
+dagegen `KafkaSecurity` in `RedePanda.Contracts` — einmal für alle fünf Kafka-Clients im Repo,
+weil `ClientConfig` die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration ist.
+Ohne Konfiguration ändert die Klasse nichts; unvollständig konfiguriert bricht sie beim Start ab
+und nennt die fehlende Variable. Zugangsdaten stehen dabei **nie** in der ConfigMap: sie kommen
+über `secretKeyRef` aus einem Secret, das man selbst anlegt (Schlüssel `username`, `password`).
 
 `POD_NAME` ist dabei die einzige Variable ohne brauchbaren Default: die Consumer-GroupId wird
 daraus gebildet, und zwei Replicas in *einer* Gruppe teilen sich nicht die Last, sie legen
@@ -531,16 +591,16 @@ Exporter-Block; der Ausbaupfad steht offen.
 |---|---|---|
 | Codebase | ein Git-Repo, ein Deployment-Chart | — |
 | Dependencies | NuGet zentral deklariert und per `packages.lock.json` inklusive transitiver Pakete festgenagelt, Restore nur gegen nuget.org; alle Registry-Images per Digest gepinnt; Frontend bewusst ohne Build-Tooling (Vanilla JS) | — |
-| Config | ausschließlich Env-Variablen, im Cluster aus ConfigMap | — |
-| Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide ohne Codeänderung austauschbar | — |
+| Config | ausschließlich Env-Variablen, im Cluster aus ConfigMap; Zugangsdaten getrennt davon aus einem Secret (`redpanda.auth.existingSecret`), nie aus `values.yaml` | kein Live-Reload: eine geänderte ConfigMap rollt die Pods über die `checksum/config`-Annotation, sie wird nicht im laufenden Prozess nachgelesen |
+| Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide ohne Codeänderung austauschbar. Für Redpanda gilt das auch für das Chart: `redpanda.enabled=false` deployt keinen Broker, und TLS/SASL sind über `redpanda.auth` konfigurierbar (siehe Abschnitt 7) | die SASL/TLS-Pfade sind gegen die Konfiguration und die Fehlerfälle getestet, aber **nicht** gegen einen echten authentifizierten Broker vorgeführt: der mitgelieferte läuft weiterhin ohne Auth |
 | Build, Release, Run | drei getrennte Stufen mit identifizierbarem Release: unveränderlicher Image-Tag + Release-Datei, `helm rollback` funktioniert (siehe unten) | keine Registry: alte Images leben nur im Image-Store der Node. Kein CI (laut Aufgabe erlaubt) |
 | Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut |
 | Port Binding | Backend `:8080`, Frontend `:8080`, kein externer Webserver nötig | — |
 | Concurrency | **Beide** Deployments laufen mit 2 Replicas, PodDisruptionBudget, `preStop`-Drain und Rollout ohne Unterbrechung (`maxUnavailable: 0`) — der SSE-Pfad ist damit von Caddy bis Kafka redundant, nicht nur an seinem hinteren Ende. Backend zusätzlich: Consumer-GroupId pro Pod ⇒ echter Fan-out, HPA optional, kein Sticky-Session-Bedarf, weil die SSE-`id` der brokerweite Kafka-Offset ist | HPA braucht metrics-server und ist deshalb per Default aus; auf einem Ein-Node-Cluster bleiben `topologySpreadConstraints` wirkungslos |
-| Disposability | SIGTERM: Consumer `Close()`, Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten; `preStop` 5 s + App-Timeout 25 s < Grace Period 45 s | — |
+| Disposability | SIGTERM: Consumer `Close()`, Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten; `preStop` 5 s + App-Timeout 25 s < Grace Period 45 s. Frontend analog mit 5 s `preStop` < 30 s Grace Period | — |
 | Dev/Prod Parity | identische Images lokal und im Cluster | Redpanda läuft im `dev-container`-Modus, einzelner Broker |
 | Logs | strukturiert (JSON) nach stdout, keine Logdateien: Backend über `AddJsonConsole`, Frontend als Caddy-Access-Log (eine Zeile pro Request, Probes ausgenommen) | Logs laufen bewusst **nicht** über OTLP. Die beiden JSON-Schemata sind nicht vereinheitlicht — Caddy loggt zap-artig (`ts`/`level`/`msg`/`request`), .NET mit `Timestamp`/`LogLevel`/`Category`. Ohne Aggregator kostet das nichts; mit einem wäre es das Erste, was auffällt |
-| Admin Processes | Topic-Anlage als Kubernetes-Job / Helm-Hook | — |
+| Admin Processes | Topic-Anlage als Kubernetes-Job / Helm-Hook, der **dasselbe Image und dieselbe ConfigMap** wie die Anwendung benutzt: der Konsolenclient mit `--ensure-topic`, aus demselben Build unter demselben Tag. Kein Shell-Skript in einem fremden Image, keine zweite Konfigurationsquelle | genau *ein* Admin-Prozess ist als Job modelliert. Für alles Weitere gibt es keinen vorbereiteten Pfad — der Konsolenclient läuft zwar als Image, wird aber nicht als Job ausgeliefert |
 
 ### Build, Release, Run im Einzelnen
 
@@ -548,7 +608,7 @@ Die drei Stufen sind strikt getrennt, und zwischen ihnen wird nichts von Hand an
 
 | Stufe | Wer | Ergebnis |
 |---|---|---|
-| **Build** | `./scripts/build-images.sh --release` | zwei Images unter `…:0.1.0-g103b98b` und `deploy/releases/0.1.0-g103b98b.yaml` |
+| **Build** | `./scripts/build-images.sh --release` | drei Images unter `…:0.1.0-g103b98b` (Backend, Frontend, Konsolenclient/Admin-Prozess) und `deploy/releases/0.1.0-g103b98b.yaml` |
 | **Release** | `helm upgrade -f deploy/releases/<version>.yaml` | eine Helm-Revision: dieser Build + diese Konfiguration, unveränderlich |
 | **Run** | kubelet | Container aus genau diesen Images |
 
@@ -681,6 +741,19 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 - [ ] `kubectl rollout restart deploy/redepanda-backend` während des Tippens → keine Lücke, keine
       Dublette, nie beide Pods gleichzeitig weg
 - [ ] `kubectl get pdb redepanda-backend` → `ALLOWED DISRUPTIONS` = 1
+- [ ] `kubectl get pods -l app.kubernetes.io/component=frontend` → **zwei** Pods; einen davon
+      löschen, während zwei Fenster streamen → keins der beiden verliert seinen Stream
+- [ ] `kubectl get pdb redepanda-frontend` → `ALLOWED DISRUPTIONS` = 1
+- [ ] `kubectl scale sts/redpanda --replicas=0`, dann eine Nachricht senden → binnen ~10 s eine
+      Fehlermeldung (HTTP 504), **nicht** ein Fenster, das minutenlang hängt. Danach wieder auf 1
+- [ ] `kubectl get job -o jsonpath='{..containers[0].image}'` → `redepanda-chatclient`, nicht das
+      Redpanda-Image; `helm upgrade` ein zweites Mal → der Job loggt „already exists" und wird
+      `Completed`
+- [ ] `kubectl exec deploy/redepanda-backend -- env | grep POD_NAME` → gesetzt. Zum Gegenprobieren
+      das `env:`-Feld aus dem Deployment entfernen → der Pod startet **nicht** und sagt, warum
+- [ ] Gegen einen fremden Broker: `--set redpanda.enabled=false --set
+      redpanda.external.bootstrapServers=…` → kein Broker-StatefulSet, Backend wird trotzdem
+      `Ready`, Topic-Job `Completed`
 - [ ] `scale --replicas=0` → Banner, Backoff und „Erneut verbinden" sind weiterhin vorführbar
 - [ ] Nur mit metrics-server: `kubectl top pods -n redepanda` liefert Zahlen und die HPA-`TARGETS`
       sind keine `<unknown>`
@@ -736,10 +809,17 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 ### Was in dieser Session *nicht* auf einem echten Cluster verifiziert wurde
 
 Ehrlichkeitshalber: auf dem Entwicklungsrechner war kein Cluster verfügbar (rootless Podman
-ohne `cpuset`-Delegation, kein kubectl-Kontext). Verifiziert wurden Build, Tests, beide Images,
-der komplette Chat gegen ein echtes Redpanda, der komplette Metrikpfad gegen einen echten
-OTel-Collector sowie `helm lint`, `helm template` und `kubeconform --strict` für alle drei
-Wertekombinationen.
+ohne `cpuset`-Delegation, kein kubectl-Kontext). Verifiziert wurden Build, Tests, alle drei
+Images, der komplette Chat gegen ein echtes Redpanda, der Admin-Prozess (`--ensure-topic`) gegen
+denselben Broker — aus dem Quellcode wie aus dem fertigen Image, im Neuanlage-, im
+Bereits-vorhanden- und im Broker-nicht-erreichbar-Fall —, der komplette Metrikpfad gegen einen
+echten OTel-Collector sowie `helm lint`, `helm template` und `kubeconform --strict` für alle
+Wertekombinationen inklusive externem Broker und SASL.
+
+Nicht verifiziert ist damit alles, was erst ein Scheduler zeigt: dass der `preStop`-Hook des
+Frontends greift, dass die PodDisruptionBudgets ein `kubectl drain` tatsächlich bremsen, dass der
+Topic-Job als Helm-Hook durchläuft, und dass SASL/TLS gegen einen echten authentifizierten Broker
+funktioniert. Die Abnahmeliste in Abschnitt 12 ist der Plan dafür.
 
 **Nicht** verifiziert und beim ersten echten Deployment zuerst zu prüfen: Pods erreichen
 `Ready`, der Topic-Job läuft durch, Prometheus-Target `UP`, `honor_labels`-Verhalten,
@@ -787,8 +867,8 @@ Fehlt es, loggt der Server keinen einzigen Request — egal was im globalen Bloc
 |---|---|
 | `ImagePullBackOff` | Images nicht in den Cluster geladen → Abschnitt 6 |
 | Broker `CrashLoopBackOff`, „Argument parse error" | `command:` überschreibt den Entrypoint. Muss `[rpk, redpanda, start]` sein |
-| Topic-Job läuft in den Timeout | `rpk cluster health` braucht `-X admin.hosts=redpanda:9644`, **nicht** `--brokers` |
-| `helm upgrade` scheitert am Topic-Job | `rpk topic create` beendet sich mit 1, wenn das Topic existiert — der Job fängt das ab |
+| Topic-Job läuft in den Timeout | Er wartet `TOPIC_WAIT_SECONDS` (180) auf Broker-**Metadaten**. Läuft das ab, ist der Broker nicht erreichbar — nicht der Job kaputt. Log des Job-Pods lesen: er nennt den letzten Fehler |
+| Topic-Job endet sofort mit „no such host" | `REDPANDA_BOOTSTRAP_SERVERS` aus der ConfigMap zeigt ins Leere. Bei `redpanda.enabled=false` ist das `redpanda.external.bootstrapServers` |
 | Prometheus startet nicht, „non-numeric user (nobody)" | `runAsUser: 65534` fehlt |
 | Broker startet, schreibt nicht | `fsGroup: 101` fehlt; frisches PVC gehört sonst root |
 | PromQL mit `instance=` ist leer | `instance` ist eine GUID → im Code wurde `AddService()` gesetzt und schlägt `OTEL_RESOURCE_ATTRIBUTES` |
@@ -802,10 +882,10 @@ Fehlt es, loggt der Server keinen einzigen Request — egal was im globalen Bloc
 ## Projektstruktur
 
 ```text
-src/RedePanda.Contracts/    ChatMessage + Validierung + Wire-Format (geteilt)
+src/RedePanda.Contracts/    ChatMessage + Validierung + Wire-Format + KafkaSecurity (geteilt)
 src/RedePanda.Backend/      ASP.NET Core: SSE, Kafka, OpenTelemetry
 src/RedePanda.Frontend/     Caddyfile + Vanilla-JS-Frontend (index.html, style.css, app.js, favicon.svg)
-src/RedePanda.ChatClient/   Konsolenclient
+src/RedePanda.ChatClient/   Konsolenclient und Admin-Prozess (`--ensure-topic`, siehe Abschnitt 11)
 tests/                      xUnit
 deploy/helm/redepanda/      Helm-Chart
 deploy/releases/            generierte Release-Dateien (Image-Tags + Commit pro Build)

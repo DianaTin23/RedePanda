@@ -41,7 +41,18 @@ public sealed class ChatProducer : IDisposable
             Value = ChatMessageSerializer.Serialize(message),
         };
 
-        await _producer.ProduceAsync(_options.Topic, record, cancellationToken);
+        // Delivery failures never reach the error handler above — librdkafka's error_cb only
+        // reports client-level events — so the counter has to be fed from here.
+        try
+        {
+            await _producer.ProduceAsync(_options.Topic, record, cancellationToken);
+        }
+        catch (ProduceException<string, string>)
+        {
+            _metrics.RecordKafkaError();
+            throw;
+        }
+
         _metrics.RecordMessageSent();
     }
 

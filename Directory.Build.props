@@ -1,0 +1,23 @@
+<Project>
+
+    <!-- Framework and language settings for every project in the repository.
+         Bump TargetFramework here, not in the individual .csproj files. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+    <!-- Directory.Packages.props pins the versions we ask for; it says nothing about the
+         transitive graph those packages drag in. The lock file records the whole resolved
+         graph, content hashes included, and is committed next to each project. A plain
+         `dotnet restore` rewrites it when a version changes there; a restore in locked mode
+         (what the container build runs) fails instead. That failure is the point: it is what
+         stops an image from silently picking up a different transitive package than the one
+         that was tested. -->
+    <PropertyGroup>
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    </PropertyGroup>
+
+</Project>

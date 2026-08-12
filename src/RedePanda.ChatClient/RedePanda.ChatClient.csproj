@@ -2,15 +2,12 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net9.0</TargetFramework>
         <RootNamespace>RedePanda.ChatClient</RootNamespace>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- No net9.0 asset ships in this package; it resolves lib/net8.0, which is supported. -->
-        <PackageReference Include="Confluent.Kafka" Version="2.15.0" />
+        <!-- Version pinned in Directory.Packages.props. -->
+        <PackageReference Include="Confluent.Kafka" />
     </ItemGroup>
 
     <ItemGroup>

@@ -1,5 +1,5 @@
 {
-  description = "RedePanda — .NET 9 terminal chat over Redpanda (Kafka-compatible)";
+  description = "RedePanda — .NET 10 terminal chat over Redpanda (Kafka-compatible)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -31,7 +31,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            pkgs.dotnet-sdk_9
+            pkgs.dotnet-sdk_10
             pkgs.redpanda-client # provides rpk
             pkgs.docker-compose
             pkgs.kubectl

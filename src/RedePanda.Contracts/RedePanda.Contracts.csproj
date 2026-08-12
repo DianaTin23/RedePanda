@@ -1,11 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <!-- TargetFramework, ImplicitUsings, Nullable and TreatWarningsAsErrors come from
+         Directory.Build.props at the repository root. -->
     <PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
         <RootNamespace>RedePanda.Contracts</RootNamespace>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     </PropertyGroup>
 
 </Project>

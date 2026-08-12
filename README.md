@@ -206,7 +206,24 @@ installieren, der ins Leere scrapt.
 5. **Prometheus** auf <http://localhost:9090>, Abfrage `redepanda_messages_sent_total` →
    steigt sichtbar mit.
 6. **Backend-Pod löschen** (`kubectl -n redepanda delete pod -l app.kubernetes.io/component=backend`)
-   → das Frontend zeigt kurz „verbinde neu…" und der Chat läuft weiter.
+   → das Frontend zeigt kurz „verbinde neu…", blendet einen Hinweis über dem Eingabefeld ein und
+   sperrt es, bis der Stream wieder steht. Danach läuft der Chat weiter.
+
+### Was im Frontend absichtlich so ist
+
+- **Kein Verlauf.** Der Consumer liest ab `AutoOffsetReset.Latest`, es gibt keinen History-Endpunkt.
+  Wer einen Raum betritt, sieht deshalb zuerst einen leeren Zustand, der genau das erklärt — die
+  Anwendung ist nicht kaputt, sie zeigt nur ab jetzt.
+- **Kein Build-Tooling, keine externen Requests.** Kein npm, kein CDN, keine Webfonts: das Frontend
+  besteht aus vier statischen Dateien, die Caddy ausliefert. Im Netzwerk-Tab tauchen nur diese
+  Dateien und `/api/...` auf — das ist die Grundlage für Punkt 3 oben und funktioniert auch in einem
+  Cluster ohne Internetzugang.
+- **Hell und dunkel.** Standardmäßig folgt die Oberfläche der Systemeinstellung; der Schalter oben
+  rechts erzwingt ein Schema und merkt es sich. Praktisch für Screenshots, ohne das Betriebssystem
+  umzustellen.
+- **Farbe pro Name.** Der Farbton wird aus dem Nickname gehasht; Helligkeit und Sättigung kommen aus
+  dem Theme, damit jeder erzeugte Farbton auf beiden Hintergründen lesbar bleibt. Eigene Nachrichten
+  erkennt man an Position und Label „(du)", nicht an der Farbe allein.
 
 ---
 
@@ -436,7 +453,7 @@ steht bewusst nicht im Service, und `port-forward svc/...` löst Ports über die
 ```text
 src/RedePanda.Contracts/    ChatMessage + Validierung + Wire-Format (geteilt)
 src/RedePanda.Backend/      ASP.NET Core: SSE, Kafka, OpenTelemetry
-src/RedePanda.Frontend/     Caddyfile + Vanilla-JS-Frontend
+src/RedePanda.Frontend/     Caddyfile + Vanilla-JS-Frontend (index.html, style.css, app.js, favicon.svg)
 src/RedePanda.ChatClient/   Konsolenclient
 tests/                      xUnit
 deploy/helm/redepanda/      Helm-Chart

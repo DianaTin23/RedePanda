@@ -1,36 +1,16 @@
-using System.Diagnostics.Metrics;
 using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
 
 /// <summary>
 /// Room isolation is the behaviour the whole demo turns on, and the connection count is what the
-/// active_connections metric reports, so both are pinned here.
+/// active_connections metric reports, so both are pinned here. The backlog handed to a joining
+/// subscriber is pinned alongside them: it travels the same room filter and must obey it.
 /// </summary>
 public class ChatBroadcasterTests
 {
-    /// <summary>Minimal stand-in so the tests need no DI container.</summary>
-    private sealed class TestMeterFactory : IMeterFactory
-    {
-        private readonly List<Meter> _meters = [];
-
-        public Meter Create(MeterOptions options)
-        {
-            var meter = new Meter(options.Name, options.Version, options.Tags, scope: this);
-            _meters.Add(meter);
-            return meter;
-        }
-
-        public void Dispose()
-        {
-            foreach (var meter in _meters)
-            {
-                meter.Dispose();
-            }
-        }
-    }
-
-    private static ChatBroadcaster CreateBroadcaster() => new(new TestMeterFactory());
+    private static ChatBroadcaster CreateBroadcaster(int historySize = 0) =>
+        new(TestOptions.Create(historySize), new TestMeterFactory());
 
     private static ChatMessage Message(string room, string text) =>
         new(room, "alice", text, DateTimeOffset.UtcNow);
@@ -41,10 +21,11 @@ public class ChatBroadcasterTests
         var broadcaster = CreateBroadcaster();
         using var subscription = broadcaster.Subscribe("general");
 
-        broadcaster.Publish(Message("general", "hallo"));
+        broadcaster.Publish(Message("general", "hallo"), offset: 0);
 
         Assert.True(subscription.Reader.TryRead(out var received));
-        Assert.Equal("hallo", received.Text);
+        Assert.Equal("hallo", received.Message.Text);
+        Assert.Equal(0, received.Offset);
     }
 
     [Fact]
@@ -53,7 +34,7 @@ public class ChatBroadcasterTests
         var broadcaster = CreateBroadcaster();
         using var subscription = broadcaster.Subscribe("general");
 
-        broadcaster.Publish(Message("andererraum", "geheim"));
+        broadcaster.Publish(Message("andererraum", "geheim"), offset: 0);
 
         Assert.False(subscription.Reader.TryRead(out _));
     }
@@ -65,7 +46,7 @@ public class ChatBroadcasterTests
         var broadcaster = CreateBroadcaster();
         using var subscription = broadcaster.Subscribe("general");
 
-        broadcaster.Publish(Message("General", "hallo"));
+        broadcaster.Publish(Message("General", "hallo"), offset: 0);
 
         Assert.False(subscription.Reader.TryRead(out _));
     }
@@ -77,10 +58,62 @@ public class ChatBroadcasterTests
         using var first = broadcaster.Subscribe("general");
         using var second = broadcaster.Subscribe("general");
 
-        broadcaster.Publish(Message("general", "an alle"));
+        broadcaster.Publish(Message("general", "an alle"), offset: 0);
 
         Assert.True(first.Reader.TryRead(out _));
         Assert.True(second.Reader.TryRead(out _));
+    }
+
+    [Fact]
+    public void JoiningASubscriberIsHandedWhatWasSaidBefore()
+    {
+        var broadcaster = CreateBroadcaster();
+        broadcaster.Publish(Message("general", "erste"), offset: 0);
+        broadcaster.Publish(Message("general", "zweite"), offset: 1);
+
+        using var subscription = broadcaster.Subscribe("general");
+
+        Assert.Equal(["erste", "zweite"], subscription.Backlog.Select(r => r.Message.Text));
+    }
+
+    [Fact]
+    public void TheBacklogCarriesOnlyTheSubscribersOwnRoom()
+    {
+        var broadcaster = CreateBroadcaster();
+        broadcaster.Publish(Message("general", "hallo"), offset: 0);
+        broadcaster.Publish(Message("andererraum", "geheim"), offset: 1);
+
+        using var subscription = broadcaster.Subscribe("general");
+
+        Assert.Equal("hallo", Assert.Single(subscription.Backlog).Message.Text);
+    }
+
+    /// <summary>
+    /// What a browser gets when EventSource reconnects with a <c>Last-Event-ID</c>: the part it
+    /// missed, and not the part it already rendered.
+    /// </summary>
+    [Fact]
+    public void ResumingFromAnOffsetLeavesOutWhatTheClientHasSeen()
+    {
+        var broadcaster = CreateBroadcaster();
+        broadcaster.Publish(Message("general", "gesehen"), offset: 7);
+        broadcaster.Publish(Message("general", "verpasst"), offset: 8);
+
+        using var subscription = broadcaster.Subscribe("general", afterOffset: 7);
+
+        Assert.Equal("verpasst", Assert.Single(subscription.Backlog).Message.Text);
+    }
+
+    [Fact]
+    public void AHistorySizeCapsWhatAJoiningSubscriberSees()
+    {
+        var broadcaster = CreateBroadcaster(historySize: 1);
+        broadcaster.Publish(Message("general", "alt"), offset: 0);
+        broadcaster.Publish(Message("general", "neu"), offset: 1);
+
+        using var subscription = broadcaster.Subscribe("general");
+
+        Assert.Equal("neu", Assert.Single(subscription.Backlog).Message.Text);
     }
 
     [Fact]
@@ -107,7 +140,7 @@ public class ChatBroadcasterTests
     {
         var broadcaster = CreateBroadcaster();
 
-        broadcaster.Publish(Message("leer", "niemand da"));
+        broadcaster.Publish(Message("leer", "niemand da"), offset: 0);
 
         Assert.Equal(0, broadcaster.Count);
     }

@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+using Microsoft.Extensions.Logging.Abstractions;
 using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
@@ -9,11 +11,80 @@ namespace RedePanda.Backend.Tests;
 /// </summary>
 public class ChatBroadcasterTests
 {
-    private static ChatBroadcaster CreateBroadcaster(int historySize = 0) =>
-        new(TestOptions.Create(historySize), new TestMeterFactory());
+    private static ChatBroadcaster CreateBroadcaster(int historySize = 0)
+    {
+        // One factory for both: the broadcaster's observable instrument and the counters in
+        // ChatMetrics belong to the same meter in the running application too.
+        var meterFactory = new TestMeterFactory();
+        return new ChatBroadcaster(
+            TestOptions.Create(historySize),
+            meterFactory,
+            new ChatMetrics(meterFactory),
+            NullLogger<ChatBroadcaster>.Instance);
+    }
 
     private static ChatMessage Message(string room, string text) =>
         new(room, "alice", text, DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// A browser that stops reading used to lose messages silently. The buffer dropped its oldest
+    /// entry to make room, nothing was logged, no metric moved, and the connection stayed open —
+    /// so the client had a hole in its history and no way to find out, because the offsets it did
+    /// receive still increased and its resume filter had nothing to catch.
+    /// <para>
+    /// Ending the stream is what makes the same overflow recoverable: <c>ChatStream</c> stops on a
+    /// completed channel, <c>EventSource</c> reconnects with <c>Last-Event-ID</c>, and the replay
+    /// covers exactly the gap. The assertion that matters is the first one in the loop — under the
+    /// old behaviour the oldest record was the one thrown away, so reading would have started at
+    /// offset 1.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ASubscriberThatFallsBehindIsCutOffRatherThanQuietlyLosingMessages()
+    {
+        var broadcaster = CreateBroadcaster();
+        using var subscription = broadcaster.Subscribe("general");
+
+        // One past what the buffer holds: every message up to the last one fits, and that last
+        // one has nowhere to go.
+        for (var offset = 0; offset <= ChatBroadcaster.SubscriberBufferSize; offset++)
+        {
+            broadcaster.Publish(Message("general", $"nachricht-{offset}"), offset);
+        }
+
+        for (var offset = 0; offset < ChatBroadcaster.SubscriberBufferSize; offset++)
+        {
+            var received = await subscription.Reader.ReadAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(offset, received.Offset);
+        }
+
+        // Not "no more messages for now" — the stream is over, which is the signal the browser
+        // needs in order to reconnect and ask for the rest.
+        await Assert.ThrowsAsync<ChannelClosedException>(
+            async () => await subscription.Reader.ReadAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// The cut must not become its own problem: a subscriber that has been ended and not yet
+    /// disposed still sits in the fan-out, and re-completing it once per message would log and
+    /// count on every publish for the rest of the connection's life.
+    /// </summary>
+    [Fact]
+    public void CuttingASubscriberOffHappensOnceAndNotPerMessage()
+    {
+        var broadcaster = CreateBroadcaster();
+        using var subscription = broadcaster.Subscribe("general");
+
+        for (var offset = 0; offset <= ChatBroadcaster.SubscriberBufferSize + 50; offset++)
+        {
+            broadcaster.Publish(Message("general", $"nachricht-{offset}"), offset);
+        }
+
+        // Still exactly one subscriber, still one completed channel: publishing past the cut is a
+        // no-op rather than a repeated event.
+        Assert.Equal(1, broadcaster.Count);
+        Assert.False(subscription.Reader.Completion.IsFaulted);
+    }
 
     [Fact]
     public void SubscriberReceivesMessagesForItsOwnRoom()

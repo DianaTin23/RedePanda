@@ -1,21 +1,27 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "redepanda.fullname" . }}-create-topic
+  # The revision suffix is what lets this be an ordinary resource instead of a hook. A Job's pod
+  # template is immutable, so a fixed name would make every `helm upgrade` fail with "field is
+  # immutable"; a new name per revision sidesteps that, and Helm prunes the previous revision's
+  # Job because it is no longer in the manifest it is reconciling against.
+  name: {{ include "redepanda.fullname" . }}-create-topic-{{ .Release.Revision }}
   labels:
     {{- include "redepanda.labels" . | nindent 4 }}
     app.kubernetes.io/component: topic-job
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    # before-hook-creation is what makes a rerun possible at all: a Job's pod template is
-    # immutable, so without deleting the previous Job first, every upgrade would fail with
-    # "field is immutable". hook-failed is included so a failed run does not linger -- hook
-    # resources are not part of the release and `helm uninstall` will not clean them up.
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+  # Deliberately NOT a helm.sh/hook. As a post-install hook this could never run: Helm runs
+  # post-install hooks only after `--wait` reports the release ready, and the backend is not ready
+  # until it has read the topic this Job creates. That is a deadlock with no way out -- the install
+  # sits at pending-install until the timeout expires, having created no Job at all.
+  #
+  # An ordinary resource is applied alongside the broker and the Deployments, and `--wait` waits for
+  # it to reach Complete like anything else, so the ordering resolves itself: the Job polls for
+  # broker metadata (TOPIC_WAIT_SECONDS below) while the backend retries its subscribe, and both
+  # settle once the topic exists. It is also removed by `helm uninstall`, which a hook is not.
 spec:
   backoffLimit: 10
-  # Belt and braces alongside the delete policy, for the case where the hook is run outside a
-  # normal release lifecycle.
+  # Reaps the finished pod without waiting for the next upgrade to prune the Job, so a namespace
+  # that is installed once and left alone does not accumulate Completed pods.
   ttlSecondsAfterFinished: 300
   template:
     metadata:
@@ -48,11 +54,11 @@ spec:
                 name: {{ include "redepanda.fullname" . }}-config
           env:
             {{- include "redepanda.saslEnv" (dict "ctx" .) | nindent 12 }}
-            # The Job runs as a post-install hook, so the broker may still be starting; and against
-            # an external broker there may be nothing else to wait on at all. --ensure-topic polls
-            # for metadata until this budget is spent. It is a *metadata* request rather than
-            # `rpk cluster health`, which needs the Admin API on 9644 -- a port a managed broker
-            # has no reason to expose.
+            # The Job is applied at the same moment as the broker, so on a fresh install it will
+            # certainly start before there is anything to talk to; and against an external broker
+            # there may be nothing else to wait on at all. --ensure-topic polls for metadata until
+            # this budget is spent. It is a *metadata* request rather than `rpk cluster health`,
+            # which needs the Admin API on 9644 -- a port a managed broker has no reason to expose.
             - name: TOPIC_WAIT_SECONDS
               value: "180"
           securityContext:

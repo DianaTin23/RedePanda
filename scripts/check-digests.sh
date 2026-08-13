@@ -44,8 +44,6 @@ fi
 # Every digest-pinned reference in the repository, one "image:tag@sha256:..." per line. The
 # file list is spelled out rather than globbed: a new pin in a file nobody added here goes
 # unchecked, which is visible, instead of some unrelated file being scraped for sha256 strings.
-# deploy/k8s/rendered.yaml is deliberately absent -- it is generated from values.yaml, so
-# checking it would only ever report the same drift twice.
 collect_pins() {
     grep -rhoE '[a-zA-Z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}' \
         "${REPO_ROOT}/src/RedePanda.Backend/Dockerfile" \
@@ -93,6 +91,36 @@ resolve_digest() {
 drifted=0
 checked=0
 
+# ---- Broker parity ---------------------------------------------------------------------------
+
+# Dev/prod parity, enforced instead of asserted. The broker in the compose file and the broker in
+# the chart are meant to be the same image down to the digest -- that is the whole of what parity
+# means for this repository's one shared backing service, and a comment claiming it is not a
+# check. Two people updating one file and not the other is the ordinary way it breaks.
+#
+# Runs before the registry lookups because it needs no network: an offline run still gets this
+# answer, and a mismatch here would make the drift report below misleading anyway.
+broker_ref() {
+    grep -oE 'redpandadata/redpanda:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}' "$1" | head -1 || true
+}
+
+COMPOSE_BROKER="$(broker_ref "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.yml")"
+CHART_BROKER="$(broker_ref "${REPO_ROOT}/deploy/helm/redepanda/values.yaml")"
+
+if [[ -z "${COMPOSE_BROKER}" || -z "${CHART_BROKER}" ]]; then
+    echo "?? broker parity: could not read the pin from both files, so it went unchecked"
+    drifted=1
+elif [[ "${COMPOSE_BROKER}" != "${CHART_BROKER}" ]]; then
+    echo "DRIFT broker parity: local and cluster run different brokers"
+    echo "     compose: ${COMPOSE_BROKER}"
+    echo "     chart:   ${CHART_BROKER}"
+    drifted=1
+else
+    echo "ok broker parity: ${COMPOSE_BROKER}"
+fi
+
+# ---- Registry lookups ------------------------------------------------------------------------
+
 while IFS= read -r pin; do
     [[ -z "${pin}" ]] && continue
     ref="${pin%@*}"
@@ -125,8 +153,7 @@ if [[ "${drifted}" -eq 0 ]]; then
     echo "==> ${checked} pinned images, all current"
 else
     echo "==> Some pins are stale or unverifiable. Update the file, rebuild, and re-run."
-    echo "    deploy/k8s/rendered.yaml is generated: after editing values.yaml, regenerate it with"
-    echo "    helm template redepanda deploy/helm/redepanda \\"
-    echo "      -f deploy/releases/<version>.yaml > deploy/k8s/rendered.yaml"
+    echo "    A broker-parity mismatch is fixed by hand in whichever of the two files is behind;"
+    echo "    both must name the same digest."
 fi
 exit "${drifted}"

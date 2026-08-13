@@ -11,11 +11,32 @@ var options = BackendOptions.FromEnvironment();
 // ---- Logging ---------------------------------------------------------------------------------
 // Structured, to stdout, no log files: the platform collects them (12-Factor "Logs").
 builder.Logging.ClearProviders();
-builder.Logging.AddJsonConsole(c => c.IncludeScopes = false);
-builder.Logging.SetMinimumLevel(
-    Enum.TryParse<LogLevel>(Environment.GetEnvironmentVariable("LOG_LEVEL"), ignoreCase: true, out var level)
-        ? level
-        : LogLevel.Information);
+builder.Logging.AddJsonConsole(c =>
+{
+    c.IncludeScopes = false;
+
+    // Without this the JSON carries no event time whatsoever. An event stream whose events cannot
+    // be ordered or correlated with anything else is a much smaller fraction of a log than it
+    // looks, and README section 11 claimed a Timestamp field that was never emitted.
+    //
+    // Round-trippable and explicitly UTC, so nothing downstream has to guess an offset. No
+    // trailing space: that is a convention of the plain-text console formatter, which needs to
+    // separate the stamp from the message, and in JSON it would only corrupt the field's value.
+    c.TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
+    c.UseUtcTimestamp = true;
+});
+builder.Logging.SetMinimumLevel(options.LogLevel);
+
+// The backend's equivalent of the Caddyfile's `log_skip` on /healthz. ASP.NET writes about six
+// lines per request at Information, and most requests here are readiness probes -- so the
+// application's own events were a minority of its own log.
+//
+// Suppressed only while nobody is actually debugging: someone who sets LOG_LEVEL=Debug is asking
+// for everything, and silently withholding the framework half would be its own puzzle.
+if (options.LogLevel > LogLevel.Debug)
+{
+    builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+}
 
 // ---- Services --------------------------------------------------------------------------------
 builder.Services.AddSingleton(options);

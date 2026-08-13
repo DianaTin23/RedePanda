@@ -54,12 +54,71 @@ public sealed record BackendOptions
     /// Roughly a screenful of scrollback. At the maximum message length that is about 240 KB per
     /// room, two orders of magnitude below the 512Mi the chart gives the pod — and it stays that
     /// way however many replicas the autoscaler decides to run.
-    /// <para>
-    /// It bounds memory, not startup time: the consumer still replays the whole topic before the
-    /// pod reports ready.
-    /// </para>
     /// </summary>
     public const int DefaultHistorySize = 200;
+
+    /// <summary>
+    /// How many rooms a replica keeps a history for at once, or <c>0</c> for as many as arrive.
+    /// <para>
+    /// <see cref="HistorySize"/> bounds a room; this bounds how many rooms there can be. Without it
+    /// the buffer is only half bounded, and the unbounded half is the one nobody outside chooses:
+    /// a room is created by naming it in a query string or in a message, so the number of them is
+    /// set by whoever is talking to the pod rather than by configuration. Every replica holds every
+    /// room, because every replica consumes the whole topic.
+    /// </para>
+    /// <para>
+    /// The room whose last message is oldest is dropped to make space. What is lost is what that
+    /// pod can replay on a join; the messages are still in the topic, which is the same trade
+    /// <see cref="ReplayRecords"/> already makes at startup.
+    /// </para>
+    /// </summary>
+    public required int MaxRooms { get; init; }
+
+    /// <summary>
+    /// At <see cref="DefaultHistorySize"/> messages of the maximum length this is about 48 MB per
+    /// replica in the worst case — an order of magnitude below the 512Mi the chart gives the pod,
+    /// and unlike the old behaviour it stays there however many rooms are named.
+    /// </summary>
+    public const int DefaultMaxRooms = 200;
+
+    /// <summary>
+    /// How many records back a starting pod reads <b>per partition</b> before it reports ready, or
+    /// <c>0</c> for everything the broker still holds.
+    /// <para>
+    /// Deliberately a separate setting from <see cref="HistorySize"/> rather than derived from it,
+    /// because the two count different things and conflating them hides the difference.
+    /// <see cref="HistorySize"/> is per <em>room</em> and bounds memory; this is per
+    /// <em>partition</em> and bounds startup. A pod that read back exactly
+    /// <see cref="HistorySize"/> records would under-fill every room as soon as more than one was
+    /// busy, and nothing in the name would have warned anyone.
+    /// </para>
+    /// <para>
+    /// It exists because every replica used to replay the entire topic before becoming ready, so
+    /// both startup time and broker read load grew with the topic <em>and</em> with the replica
+    /// count — worst exactly when an autoscaler adds pods because the pods are already loaded.
+    /// </para>
+    /// </summary>
+    public required int ReplayRecords { get; init; }
+
+    /// <summary>
+    /// Ten times the default per-room history, so several busy rooms can each still fill their
+    /// buffer from one replay. At the maximum message length this is about 1 MB per partition.
+    /// </summary>
+    public const int DefaultReplayRecords = 2_000;
+
+    /// <summary>
+    /// Minimum level for everything this process logs.
+    /// <para>
+    /// Read here rather than inline in <c>Program.cs</c> so this record is what its own summary
+    /// claims to be — every setting the application owns — and so a misspelling fails at startup
+    /// like every other setting instead of silently falling back to Information, which is the one
+    /// way a configuration mistake here could hide the evidence of itself.
+    /// </para>
+    /// </summary>
+    public required LogLevel LogLevel { get; init; }
+
+    /// <summary>Loud enough to explain the pod's own lifecycle, quiet enough to read.</summary>
+    public const LogLevel DefaultLogLevel = Microsoft.Extensions.Logging.LogLevel.Information;
 
     /// <summary>Consumer group id. Unique per pod on purpose: each pod then receives every
     /// message (fan-out) instead of the pods splitting the partitions between them, which is
@@ -74,7 +133,10 @@ public sealed record BackendOptions
             Topic = Read("REDPANDA_TOPIC", "redepanda-chat"),
             MaxMessageLength = ReadInt("MAX_MESSAGE_LENGTH", Contracts.ChatMessage.DefaultMaxTextLength),
             HistorySize = ReadInt("CHAT_HISTORY_SIZE", DefaultHistorySize, allowZero: true),
+            MaxRooms = ReadInt("CHAT_MAX_ROOMS", DefaultMaxRooms, allowZero: true),
+            ReplayRecords = ReadInt("CHAT_REPLAY_RECORDS", DefaultReplayRecords, allowZero: true),
             ProduceTimeoutMs = ReadInt("PRODUCE_TIMEOUT_MS", DefaultProduceTimeoutMs),
+            LogLevel = ReadLogLevel("LOG_LEVEL", DefaultLogLevel),
 
             PodName = ResolvePodName(
                 Environment.GetEnvironmentVariable("POD_NAME"),
@@ -124,6 +186,30 @@ public sealed record BackendOptions
     {
         var value = Environment.GetEnvironmentVariable(key);
         return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
+
+    /// <summary>
+    /// <c>Enum.TryParse</c> on its own is not enough: it accepts any number that fits the
+    /// underlying type, so <c>LOG_LEVEL=99</c> would parse cleanly and silence the process
+    /// entirely. <c>Enum.IsDefined</c> is what turns that into an error.
+    /// </summary>
+    internal static LogLevel ReadLogLevel(string key, LogLevel fallback, string? raw = null)
+    {
+        raw ??= Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return fallback;
+        }
+
+        if (!Enum.TryParse<LogLevel>(raw.Trim(), ignoreCase: true, out var level) ||
+            !Enum.IsDefined(level))
+        {
+            throw new InvalidOperationException(
+                $"{key} is '{raw}', which is not a known level. Accepted: " +
+                $"{string.Join(", ", Enum.GetNames<LogLevel>())}.");
+        }
+
+        return level;
     }
 
     /// <param name="allowZero">

@@ -7,6 +7,13 @@ metadata:
     {{- include "redepanda.labels" . | nindent 4 }}
     app.kubernetes.io/component: prometheus
 data:
+  # Serves the Prometheus UI and API over TLS. A separate file because Prometheus takes it
+  # through its own --web.config.file flag rather than as a section of prometheus.yml.
+  web.yml: |
+    tls_server_config:
+      cert_file: {{ include "redepanda.tlsMountPath" . }}/tls.crt
+      key_file: {{ include "redepanda.tlsMountPath" . }}/tls.key
+
   prometheus.yml: |
     global:
       scrape_interval: {{ .Values.prometheus.scrapeInterval }}
@@ -19,10 +26,20 @@ data:
         # service.instance.id; without honor_labels Prometheus overwrites both and moves the
         # originals to exported_job / exported_instance, and the README's queries return empty.
         honor_labels: true
+
+        # The exporter on 8889 serves TLS, and this verifies it against the release CA rather
+        # than setting insecure_skip_verify. No server_name override is needed: the target below
+        # is addressed by the Service name, which is the certificate's CN and first SAN.
+        scheme: https
+        tls_config:
+          ca_file: {{ include "redepanda.tlsMountPath" . }}/ca.crt
         static_configs:
           - targets: ['{{ include "redepanda.collectorService" . }}:8889']
 
-      # The collector's own pipeline health, so a silent drop is visible somewhere.
+      # The collector's own pipeline health, so a silent drop is visible somewhere. This one is
+      # deliberately plain HTTP -- the collector's self-telemetry reader has no TLS setting to
+      # configure (see files/otel-collector-config.yaml) -- and is the only unencrypted hop left
+      # in the release. It carries no chat data: these are the collector's own counters.
       - job_name: otel-collector
         static_configs:
           - targets: ['{{ include "redepanda.collectorService" . }}:8888']

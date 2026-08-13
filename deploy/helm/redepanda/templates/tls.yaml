@@ -1,0 +1,100 @@
+{{- /*
+The chart's own certificate authority and one server certificate per component.
+
+Why the chart mints these rather than cert-manager: cert-manager is the right answer in a
+cluster that already runs it, and the wrong dependency for this one. It would turn `helm
+upgrade --install` into "install CRDs, a webhook and three pods, wait for them, then install
+the chart" on kind, minikube and Docker Desktop, which are the clusters this chart is aimed at.
+The trade is deliberate and has a cost: rotation here is manual (delete the Secrets and
+upgrade), and the CA is trusted by nothing outside this release.
+
+Every certificate is reused when its Secret already exists, and only minted when it does not.
+That is what keeps a `helm upgrade` from silently rotating key material and restarting every
+pod in the release. The reuse depends on `lookup`, which reaches the API server -- and returns
+nothing under `helm template`, so any rendered copy of this chart carries a freshly minted,
+throwaway CA and four private keys. That is one of the reasons a rendered manifest is no longer
+committed: `helm template` output is fine to inspect and must not be installed from.
+*/ -}}
+{{- $fullname := include "redepanda.fullname" . }}
+{{- $ns := .Release.Namespace }}
+{{- $caName := printf "%s-ca" $fullname }}
+
+{{- /* An existing CA is loaded from its own Secret; buildCustomCert takes the base64 that
+       .data already holds, so there is no decode/encode round trip here.
+
+       Spelled out as if/else rather than a ternary on purpose: ternary evaluates both of its
+       arguments, so it would call buildCustomCert on the empty strings of a Secret that does
+       not exist yet and fail the render on a fresh install. */}}
+{{- $existingCa := lookup "v1" "Secret" $ns $caName }}
+{{- $caIsNew := not $existingCa }}
+{{- $ca := dict }}
+{{- if $caIsNew }}
+{{- $ca = genCA $caName (int .Values.tls.caValidityDays) }}
+{{- else }}
+{{- $ca = buildCustomCert (index $existingCa.data "ca.crt" | toString) (index $existingCa.data "ca.key" | toString) }}
+{{- end }}
+
+{{- $components := list
+      (dict "name" "frontend" "service" (printf "%s-frontend" $fullname))
+      (dict "name" "backend" "service" (printf "%s-backend" $fullname)) }}
+{{- if .Values.otelCollector.enabled }}
+{{- $components = append $components (dict "name" "otel-collector" "service" (include "redepanda.collectorService" .)) }}
+{{- end }}
+{{- if .Values.prometheus.enabled }}
+{{- $components = append $components (dict "name" "prometheus" "service" (printf "%s-prometheus" $fullname)) }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $caName }}
+  labels:
+    {{- include "redepanda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tls
+type: Opaque
+data:
+  ca.crt: {{ $ca.Cert | b64enc }}
+  # The private key stays in the cluster because a later upgrade needs it to sign a certificate
+  # for a component that is only switched on then -- otelCollector.enabled, for instance.
+  ca.key: {{ $ca.Key | b64enc }}
+{{- range $c := $components }}
+{{- $secretName := printf "%s-%s-tls" $fullname $c.name }}
+{{- $existing := lookup "v1" "Secret" $ns $secretName }}
+{{- /* A reused leaf would not chain to a freshly minted CA, so the CA being new forces every
+       certificate to be reissued with it. The key check is the third condition: a Secret that
+       exists but has been emptied out would otherwise be "reused" into a blank certificate,
+       and the resulting pod would fail to start with a far less obvious message. */}}
+{{- $reuse := and $existing (not $caIsNew) (index (default dict $existing.data) "tls.crt") }}
+{{- $crt := "" }}
+{{- $key := "" }}
+{{- if $reuse }}
+{{- $crt = index (default dict $existing.data) "tls.crt" | toString }}
+{{- $key = index (default dict $existing.data) "tls.key" | toString }}
+{{- else }}
+{{- /* `list` rather than a helper returning a joined string: genSignedCert wants []interface{},
+       and splitList yields []string, which it rejects.
+
+       localhost and 127.0.0.1 are in here for one reason: every path the README documents for
+       reaching this stack from outside the cluster goes through `kubectl port-forward`, so the
+       name a browser or `curl --cacert` actually verifies is localhost, not the Service name.
+       Without them every documented command fails on a name mismatch. */}}
+{{- $altNames := list $c.service (printf "%s.%s" $c.service $ns) (printf "%s.%s.svc" $c.service $ns) (printf "%s.%s.svc.cluster.local" $c.service $ns) "localhost" }}
+{{- $cert := genSignedCert $c.service (list "127.0.0.1") $altNames (int $.Values.tls.certValidityDays) $ca }}
+{{- $crt = $cert.Cert | b64enc }}
+{{- $key = $cert.Key | b64enc }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    {{- include "redepanda.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $c.name }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $crt }}
+  tls.key: {{ $key }}
+  # Carried alongside the pair so that a pod which is both a server and a client -- the frontend
+  # proxying to the backend, Prometheus scraping the collector -- needs exactly one mount.
+  ca.crt: {{ $ca.Cert | b64enc }}
+{{- end }}

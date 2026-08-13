@@ -20,6 +20,9 @@ internal static class TestOptions
         MaxMessageLength = ChatMessage.DefaultMaxTextLength,
         PodName = "test",
         HistorySize = historySize,
+        MaxRooms = BackendOptions.DefaultMaxRooms,
+        ReplayRecords = BackendOptions.DefaultReplayRecords,
         ProduceTimeoutMs = BackendOptions.DefaultProduceTimeoutMs,
+        LogLevel = BackendOptions.DefaultLogLevel,
     };
 }

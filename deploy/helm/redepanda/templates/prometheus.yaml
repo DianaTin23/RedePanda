@@ -18,6 +18,9 @@ spec:
         app.kubernetes.io/component: prometheus
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/prometheus-configmap.yaml") . | sha256sum }}
+        # Rotating the certificates must roll this pod: it both presents one and verifies the
+        # collector with the CA. See the same annotation on the backend.
+        checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,21 +42,27 @@ spec:
           # relative to its WORKDIR (/prometheus) and exit with a config load error.
           args:
             - --config.file=/etc/prometheus/prometheus.yml
+            # TLS for the UI and the API. It is a separate flag and a separate file on purpose:
+            # prometheus.yml describes what Prometheus scrapes, this describes how it is reached.
+            - --web.config.file=/etc/prometheus/web.yml
             - --storage.tsdb.path=/prometheus
             - --storage.tsdb.retention.time={{ .Values.prometheus.retention }}
           ports:
-            - name: http
+            - name: https
               containerPort: 9090
           livenessProbe:
             httpGet:
               path: /-/healthy
-              port: http
+              port: https
+              # TLS without verification, as on every other probe in this chart.
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /-/ready
-              port: http
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
@@ -69,6 +78,11 @@ spec:
               # Required by readOnlyRootFilesystem: the TSDB is written here. It is an emptyDir
               # on purpose -- the demo needs no metric history across restarts.
               mountPath: /prometheus
+            # Both halves of Prometheus' TLS: the certificate it presents on 9090, and the CA it
+            # verifies the collector with when scraping 8889.
+            - name: tls
+              mountPath: {{ include "redepanda.tlsMountPath" . }}
+              readOnly: true
           resources:
             {{- toYaml .Values.prometheus.resources | nindent 12 }}
       volumes:
@@ -77,6 +91,9 @@ spec:
             name: {{ include "redepanda.fullname" . }}-prometheus
         - name: tsdb
           emptyDir: {}
+        - name: tls
+          secret:
+            secretName: {{ include "redepanda.fullname" . }}-prometheus-tls
 ---
 apiVersion: v1
 kind: Service
@@ -90,7 +107,7 @@ spec:
   selector:
     {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "prometheus") | nindent 4 }}
   ports:
-    - name: http
+    - name: https
       port: 9090
-      targetPort: http
+      targetPort: https
 {{- end }}

@@ -35,6 +35,24 @@ public class ChatProducerTests
     }
 
     /// <summary>
+    /// The frontend resumes a dropped SSE stream by discarding every offset it has already seen,
+    /// so a record that arrives out of order is not a duplicate to shrug at — it is dropped and
+    /// never shown. Idempotence is what stops librdkafka from delivering a retry out of order in
+    /// the first place, and it is the reason that filter is safe.
+    /// </summary>
+    [Fact]
+    public void ARetriedRecordMayNotOvertakeALaterOne()
+    {
+        var config = ChatProducer.BuildConfig(TestOptions.Create());
+
+        Assert.True(config.EnableIdempotence);
+
+        // Implied by idempotence rather than independent of it: librdkafka refuses to build a
+        // client that asks for both idempotence and a weaker acknowledgement.
+        Assert.Equal(Acks.All, config.Acks);
+    }
+
+    /// <summary>
     /// A timeout is not a broken gateway: the request was never answered either way, and 504 is
     /// what says so. Everything else the broker rejects outright stays 502.
     /// </summary>

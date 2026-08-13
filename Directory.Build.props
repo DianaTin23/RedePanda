@@ -20,4 +20,27 @@
         <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     </PropertyGroup>
 
+    <!-- The lock file only enforces anything where something actually restores in locked mode, and
+         until this existed the only place that did was the two container builds, which exclude
+         tests/ via .dockerignore. So a plain `dotnet test` would quietly rewrite three of the four
+         lock files rather than fail, and the one guard this repository has against an unreviewed
+         transitive package upgrade was off in the one command everybody runs.
+
+         Gated on ContinuousIntegrationBuild rather than switched on outright, because locked mode
+         is exactly wrong while a dependency is being changed on purpose: it would refuse the very
+         restore that is meant to update the lock file. Set it when the answer should be "fail"
+         rather than "rewrite":
+
+             dotnet test -p:ContinuousIntegrationBuild=true
+
+         scripts/check-repro.sh does that across every project, and README section 13 references it.
+         There is no CI here to run it automatically; section 14 names that limitation.
+
+         (Note for editors: XML forbids a double hyphen inside a comment. An earlier version of
+         this block used one as a dash, and MSBuild's response was to report an empty
+         TargetFramework from a completely different file.) -->
+    <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'">
+        <RestoreLockedMode>true</RestoreLockedMode>
+    </PropertyGroup>
+
 </Project>

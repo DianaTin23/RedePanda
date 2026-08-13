@@ -3,7 +3,7 @@ Prometheus is pointless without the collector: the collector is its only scrape 
 at template time with a clear message rather than deploying a Prometheus that scrapes nothing.
 */ -}}
 {{- if and .Values.prometheus.enabled (not .Values.otelCollector.enabled) -}}
-{{- fail "prometheus.enabled requires otelCollector.enabled: the collector is Prometheus' only scrape target." -}}
+{{- fail "prometheus.enabled requires otelCollector.enabled: the bundled collector is Prometheus' only scrape target. An otelCollector.external.endpoint does not help -- this Prometheus cannot scrape a collector it does not deploy -- so turn Prometheus off as well when pointing the telemetry elsewhere." -}}
 {{- end -}}
 {{- /*
 Credentials are a reference to a Secret, never a value in values.yaml -- which ends up in
@@ -12,6 +12,37 @@ costs one command; a deployment that authenticates against nothing costs an inci
 */ -}}
 {{- if and (include "redepanda.saslEnabled" .) (not .Values.redpanda.auth.existingSecret) -}}
 {{- fail "redpanda.auth.securityProtocol uses SASL, so redpanda.auth.existingSecret must name a Secret with the keys username and password." -}}
+{{- end -}}
+{{- /*
+A SASL protocol without a mechanism is the same class of mistake one step further on: the
+application refuses to start without REDPANDA_SASL_MECHANISM, so this only decides whether the
+operator learns about it from `helm` or from a CrashLoopBackOff.
+*/ -}}
+{{- if and (include "redepanda.saslEnabled" .) (not .Values.redpanda.auth.saslMechanism) -}}
+{{- fail "redpanda.auth.securityProtocol uses SASL, so redpanda.auth.saslMechanism must be set (for example ScramSha512)." -}}
+{{- end -}}
+{{- /*
+The bundled broker listens in plaintext only -- redpanda.yaml configures no TLS and no
+authentication. Selecting a secured protocol while it is deployed produces a release whose pods
+cannot reach their own broker, and the two values have nothing tying them together, so it is one
+forgotten --set away. The chart already catches this class of mistake twice above.
+*/ -}}
+{{- if and .Values.redpanda.enabled (ne (include "redepanda.securityProtocol" .) "Plaintext") -}}
+{{- fail (printf "redpanda.auth.securityProtocol is %q, but redpanda.enabled=true deploys the bundled broker, which listens in plaintext only. Either leave the protocol at Plaintext, or set redpanda.enabled=false and point redpanda.external.bootstrapServers at a secured broker." .Values.redpanda.auth.securityProtocol) -}}
+{{- end -}}
+{{- /*
+An external address that is silently ignored is worse than a missing one: whoever set it believes
+the release points somewhere it does not, and every symptom afterwards points at the broker.
+*/ -}}
+{{- if and .Values.redpanda.enabled .Values.redpanda.external.bootstrapServers -}}
+{{- fail "redpanda.external.bootstrapServers is set, but redpanda.enabled is true, so it would be ignored and every client would talk to the bundled broker instead. Set redpanda.enabled=false to use the external broker." -}}
+{{- end -}}
+{{- /*
+The same rule KafkaSecurity enforces at runtime, moved to render time. A CA bundle means someone
+believes this connection is encrypted; if it is not, saying so early is the only honest option.
+*/ -}}
+{{- if and .Values.redpanda.auth.caSecret (not (include "redepanda.brokerTls" .)) -}}
+{{- fail (printf "redpanda.auth.caSecret is set, but redpanda.auth.securityProtocol is %q, which does not use TLS. Set it to Ssl or SaslSsl, or remove the CA Secret." .Values.redpanda.auth.securityProtocol) -}}
 {{- end -}}
 apiVersion: v1
 kind: ConfigMap
@@ -26,15 +57,39 @@ data:
   REDPANDA_TOPIC: {{ .Values.chat.topic | quote }}
   MAX_MESSAGE_LENGTH: {{ .Values.chat.maxMessageLength | quote }}
   CHAT_HISTORY_SIZE: {{ .Values.chat.historySize | quote }}
+
+  # The second half of the same bound: CHAT_HISTORY_SIZE trims a room, this trims how many rooms
+  # there are. A room is created by naming one, so without this the pod's memory is bounded by
+  # whoever is talking to it rather than by this file. See values.yaml.
+  CHAT_MAX_ROOMS: {{ .Values.chat.maxRooms | quote }}
   PRODUCE_TIMEOUT_MS: {{ .Values.chat.produceTimeoutMs | quote }}
 
-  # Read by the topic Job, which runs the chat client's --ensure-topic mode. They live here rather
-  # than as env: entries on the Job so that it needs nothing but an envFrom -- one configuration
-  # source for the application and for the admin process that prepares it.
+  # How far back a starting pod reads, per partition. Separate from CHAT_HISTORY_SIZE on purpose:
+  # that one is per room and bounds memory, this one is per partition and bounds startup. See
+  # BackendOptions.ReplayRecords.
+  CHAT_REPLAY_RECORDS: {{ .Values.chat.replayRecords | quote }}
+
+  # Read by the admin processes -- the topic Job's --ensure-topic, and any ad-hoc adminJob. They
+  # live here rather than as env: entries on the Job so that it needs nothing but an envFrom: one
+  # configuration source for the application and for the processes that administer it.
   CHAT_PARTITIONS: {{ .Values.chat.partitions | quote }}
   CHAT_REPLICATION_FACTOR: {{ .Values.chat.replicationFactor | quote }}
+
+  # Read by the backend, and by the backend alone. It used to be listed with the two above as
+  # something the topic Job reads, which was never true: the admin processes write plain lines to
+  # stdout and have no logger to set a level on. Worth keeping accurate rather than tidy -- someone
+  # raising this to debug a failing topic Job would otherwise wait for output that cannot come.
   LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
-  ASPNETCORE_URLS: "http://+:8080"
+
+  # Kestrel serves TLS only -- there is no plaintext listener to fall back to, because the only
+  # client is the frontend proxy and it is configured to verify. The three variables below are
+  # the second exception to the "plain names" rule above, alongside OTEL_*: Kestrel's certificate
+  # is framework configuration, so it is spelled in ASP.NET's Section__Key convention and read by
+  # the framework rather than by BackendOptions. Re-reading it in code would be a second source
+  # of truth for something the framework already owns.
+  ASPNETCORE_URLS: "https://+:8443"
+  ASPNETCORE_Kestrel__Certificates__Default__Path: "{{ include "redepanda.tlsMountPath" . }}/tls.crt"
+  ASPNETCORE_Kestrel__Certificates__Default__KeyPath: "{{ include "redepanda.tlsMountPath" . }}/tls.key"
 
   # How the clients reach the broker. Everything except the credentials belongs here: a protocol
   # and a mechanism are configuration, a username and a password are not, and mixing them would
@@ -48,7 +103,19 @@ data:
   # The private CA, from the Secret mounted at this path by the pods that speak Kafka.
   REDPANDA_SSL_CA_LOCATION: "/etc/redepanda/ca/ca.crt"
 {{- end }}
+{{- /*
+Where telemetry goes: the bundled collector, an existing one somewhere else, or nowhere. The
+middle case is what makes "the telemetry backend is a swappable backing service" true of the
+chart and not only of the application -- until it existed, turning the collector off switched the
+SDK off entirely, so the only way to export to an existing collector was to edit this template.
+*/ -}}
+{{- $otlpEndpoint := "" }}
 {{- if .Values.otelCollector.enabled }}
+{{- $otlpEndpoint = printf "https://%s:4317" (include "redepanda.collectorService" .) }}
+{{- else if .Values.otelCollector.external.endpoint }}
+{{- $otlpEndpoint = .Values.otelCollector.external.endpoint }}
+{{- end }}
+{{- if $otlpEndpoint }}
 
   # OTEL_* are specified by OpenTelemetry and read by the SDK itself. They are deliberately not
   # re-read in application code, which would create a second source of truth.
@@ -56,14 +123,27 @@ data:
   # service.namespace is deliberately NOT set: the collector's Prometheus exporter builds the
   # job label as <service.namespace>/<service.name>, so setting it would turn every job label
   # into "redepanda/redepanda-backend" and break the PromQL examples in the README.
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://{{ include "redepanda.collectorService" . }}:4317"
-  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $otlpEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.otelCollector.external.protocol | default "grpc" | quote }}
+
+  # OTEL_EXPORTER_OTLP_CERTIFICATE is deliberately absent, and the release CA is trusted through
+  # the OS bundle instead -- see the ca-bundle init container in backend.yaml. The variable is
+  # specified and the SDK does read it, but OpenTelemetry .NET loads the file it names with
+  # X509Certificate2.CreateFromPemFile(path), whose one-argument form is documented to take the
+  # private key from that same file. A CA file that contains a private key is not a CA file worth
+  # shipping, so there is no content that both satisfies the SDK and is safe to mount. The backend
+  # crashes at startup on anything else ("The key contents do not contain a PEM"). This is
+  # upstream on main, not specific to the 1.17 pinned here, so no version of the package fixes it.
+  #
+  # It also has to be absent rather than merely unused: the topic Job reads this ConfigMap whole
+  # and mounts no TLS Secret, so a path here would name a file that pod does not have.
   OTEL_SERVICE_NAME: "{{ include "redepanda.fullname" . }}-backend"
   OTEL_METRIC_EXPORT_INTERVAL: {{ .Values.otelCollector.metricExportIntervalMs | quote }}
   OTEL_SDK_DISABLED: "false"
 {{- else }}
 
-  # No collector deployed, so the SDK is switched off rather than left retrying an endpoint
-  # that does not exist. Honoured from OpenTelemetry .NET 1.15.0 onwards; this chart ships 1.17.
+  # No collector at all -- neither bundled nor named in otelCollector.external.endpoint -- so the
+  # SDK is switched off rather than left retrying an endpoint that does not exist. Honoured from
+  # OpenTelemetry .NET 1.15.0 onwards; this chart ships 1.17.
   OTEL_SDK_DISABLED: "true"
 {{- end }}

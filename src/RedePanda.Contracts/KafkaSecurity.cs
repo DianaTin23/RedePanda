@@ -14,9 +14,14 @@ namespace RedePanda.Contracts;
 /// <para>
 /// It lives in Contracts, which otherwise holds no Kafka dependency at all, because
 /// <see cref="ClientConfig"/> is the shared base of the producer, consumer and admin
-/// configurations: one mapping here serves all five client sites in the repository, and three
+/// configurations: one mapping here serves all seven client sites in the repository, and seven
 /// copies of it would drift. Contracts already owns the other thing every client must agree on,
 /// the wire format.
+/// </para>
+/// <para>
+/// The count is worth keeping honest. It read "five" while there were seven, and the two it did
+/// not account for were the two admin clients -- one of which had been shipped without this
+/// applied at all, failing every readiness probe against a secured broker.
 /// </para>
 /// <para>
 /// Nothing configured leaves the config untouched, so the bundled plaintext demo behaves exactly

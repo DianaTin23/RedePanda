@@ -4,6 +4,51 @@ Arbeitsdokument für die Gruppe. Abgehakt wird direkt hier per Commit.
 
 ---
 
+## ⚠ Status 13.08.2026 — 12-Factor-Audit abgearbeitet, E8 war falsch
+
+Ein Audit gegen alle zwölf Faktoren hat einen blockierenden Fehler, ein veraltetes Release-Artefakt
+und elf Behauptungen in der README gefunden, die sich durch Öffnen einer einzigen Datei widerlegen
+ließen. Alles davon ist umgesetzt; **maßgeblich ist die README**, dieses Dokument bleibt
+Planungsstand.
+
+**E8 (unten, Zeile ~124) hat sich als falsch erwiesen** und ist zurückgenommen. Die Annahme lautete:
+ein zusätzlich gerendertes `deploy/k8s/rendered.yaml` sei „kein doppelter Pflegeaufwand, weil
+generiert". Genau daran ist es gescheitert — die Datei hing zuletzt 677 Zeilen und fünf fehlende
+Secrets hinter dem Chart her, weil nichts die Drift bemerkt (kein CI). Dazu kam, was beim
+Aufschreiben von E8 noch nicht galt: seit der TLS-Umstellung mintet jedes Rendern eine CA und vier
+private Schlüssel, die dann im Repository lägen, und `helm template` rendert `.Release.Revision`
+immer als `1`, sodass ein zweites `kubectl apply` am unveränderlichen Job-Namen scheitert. Vor allem
+aber kann ein gerendertes Manifest die `fail`-Prüfungen des Charts nicht mitnehmen: wer Helm
+übersprang, übersprang jede Kontrolle, die eine Fehlkonfiguration laut macht.
+
+Die Datei ist gelöscht, Helm ist der Installationsweg. Der Rest von E8 gilt weiter und war von
+Anfang an richtig: die Aufgabe verlangt Manifeste, und Templates *sind* Manifeste.
+
+Zwei weitere Punkte unten sind überholt: der Topic-Job ist längst **kein** Helm-Hook mehr (ein
+`post-install`-Hook wartet auf ein Backend, das ohne Topic nie `Ready` wird — ein Deadlock), und es
+gibt inzwischen vier Admin-Prozesse statt einem.
+
+---
+
+## ⚠ Status 12.08.2026 — alle HTTP-Strecken auf TLS umgestellt
+
+Nach der Umsetzung dieses Plans kam eine Änderung dazu, die ihn an mehreren Stellen überholt:
+**jede HTTP-Verbindung im Release ist jetzt TLS**, und jeder Client prüft sein Gegenüber gegen
+eine CA, die das Chart bei der ersten Installation selbst ausstellt.
+
+Was unten deshalb nicht mehr stimmt: Frontend und Backend hören auf `:8443` statt `:8080`
+(`:8080` antwortet nur noch mit `308`), `ASPNETCORE_URLS` ist `https://+:8443`,
+`BACKEND_HOST` ist `redepanda-backend:8443`, `OTEL_EXPORTER_OTLP_ENDPOINT` ist `https://…:4317`,
+und der Caddyfile-Auszug in 4.5 zeigt eine ältere Fassung. **Maßgeblich ist die README**,
+Abschnitt 3 für die Strecken und Abschnitt 7 für die Zertifikate; dieses Dokument bleibt als
+Planungsstand stehen und wird nicht nachgezogen.
+
+Zwei Strecken sind bewusst weiterhin unverschlüsselt und in README Abschnitt 14 begründet: die
+Selbsttelemetrie des Collectors auf `:8888` (das Schema kennt dort kein Zertifikatsfeld) und
+Kafka zum mitgelieferten Broker (TLS/SASL sind konfigurierbar, aber nicht Default).
+
+---
+
 ## ⚠ Status 11.08.2026 — Plan umgesetzt, neun Fehler korrigiert
 
 Phasen 0–5 sind implementiert (siehe Git-Historie). Vor der Umsetzung wurden die technischen

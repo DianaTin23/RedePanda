@@ -1,4 +1,5 @@
 using System.Net.ServerSentEvents;
+using Microsoft.Extensions.Logging.Abstractions;
 using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
@@ -24,8 +25,15 @@ public class ChatStreamTests
     /// <summary>How long a genuinely prompt item may take before the test calls it a failure.</summary>
     private static readonly TimeSpan Promptly = TimeSpan.FromSeconds(5);
 
-    private static ChatBroadcaster CreateBroadcaster() =>
-        new(TestOptions.Create(), new TestMeterFactory());
+    private static ChatBroadcaster CreateBroadcaster()
+    {
+        var meterFactory = new TestMeterFactory();
+        return new ChatBroadcaster(
+            TestOptions.Create(),
+            meterFactory,
+            new ChatMetrics(meterFactory),
+            NullLogger<ChatBroadcaster>.Instance);
+    }
 
     private static ChatMessage Message(string room, string text) =>
         new(room, "alice", text, DateTimeOffset.UtcNow);

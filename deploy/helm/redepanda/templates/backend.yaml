@@ -43,6 +43,11 @@ spec:
         # Roll the pods when the configuration changes; without this a helm upgrade that only
         # edits the ConfigMap leaves the old values running.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # Same reasoning for the certificates: rotating them is a delete-and-upgrade, and without
+        # this the pods would keep serving the old certificate while their peers already trust
+        # only the new CA. Note that on the very first install this hashes a throwaway render --
+        # `lookup` finds no Secret yet -- so the first upgrade afterwards rolls the pods once.
+        checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
         # Which build this pod is running, for anyone holding a `kubectl describe` and no
         # access to the shell history of whoever deployed it.
         {{- include "redepanda.releaseAnnotations" . | nindent 8 }}
@@ -73,13 +78,49 @@ spec:
         fsGroup: 1654
         seccompProfile:
           type: RuntimeDefault
+{{- if .Values.otelCollector.enabled }}
+      initContainers:
+        # Builds the trust store the OTLP exporter uses to verify the collector.
+        #
+        # This exists because OTEL_EXPORTER_OTLP_CERTIFICATE cannot be used -- see the note in
+        # configmap.yaml. Trusting the CA at the OS level reaches the exporter anyway: .NET on
+        # Linux validates through OpenSSL, which reads SSL_CERT_FILE, and that covers every TLS
+        # client in the process rather than the OTLP one alone.
+        #
+        # It concatenates rather than replaces: SSL_CERT_FILE overrides the whole trust store, so
+        # a file holding only the release CA would leave the backend distrusting every public CA.
+        #
+        # The backend's own image, for the same reason the topic Job uses it: one image per
+        # release, and no second base image to keep pinned and patched for a `cat`.
+        - name: ca-bundle
+          image: {{ include "redepanda.image" (dict "ctx" . "component" "backend") | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - cat /etc/ssl/certs/ca-certificates.crt {{ include "redepanda.tlsMountPath" . }}/ca.crt
+              > /etc/redepanda/ca-bundle/ca-bundle.crt
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tls
+              mountPath: {{ include "redepanda.tlsMountPath" . }}
+              readOnly: true
+            - name: ca-bundle
+              mountPath: /etc/redepanda/ca-bundle
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+{{- end }}
       containers:
         - name: backend
           image: {{ include "redepanda.image" (dict "ctx" . "component" "backend") | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
-            - name: http
-              containerPort: 8080
+            - name: https
+              containerPort: 8443
           envFrom:
             - configMapRef:
                 name: {{ include "redepanda.fullname" . }}-config
@@ -95,11 +136,34 @@ spec:
             # "instance" label the pod name; the application never sets the resource in code.
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: "service.instance.id=$(POD_NAME)"
+            # Read by OpenSSL, which is what .NET validates certificates with on Linux. Points at
+            # the bundle the ca-bundle init container assembled, so the exporter trusts this
+            # release's CA without the application configuring anything.
+            - name: SSL_CERT_FILE
+              value: /etc/redepanda/ca-bundle/ca-bundle.crt
 {{- end }}
+            {{- /*
+            Anything else the operator needs, without editing a template. Last in the list on
+            purpose: Kubernetes lets a later entry win, so this can override any value above it,
+            including one from the ConfigMap -- which is what makes it useful for a one-off
+            diagnosis (LOG_LEVEL=Debug on one release) rather than only for additions.
+
+            Until this existed there was no env passthrough anywhere in the chart, and every new
+            variable meant a template change. For a chart whose subject is configuration in the
+            environment, that was the wrong shape.
+            */}}
+            {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health/live
-              port: http
+              port: https
+              # The kubelet speaks TLS here but deliberately does not verify the certificate --
+              # it has no way to be given this release's CA. That is the documented behaviour of
+              # scheme: HTTPS, and it is fine: a probe asks "is this process alive", not "is this
+              # process who it claims to be".
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
@@ -107,7 +171,8 @@ spec:
             # endpoints while Redpanda is unreachable. The result is cached for 5s.
             httpGet:
               path: /health/ready
-              port: http
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 6
@@ -132,20 +197,47 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
-          {{- if .Values.redpanda.auth.caSecret }}
           volumeMounts:
+            # Kestrel's server certificate and, in the same directory, the release CA that the
+            # OTLP exporter verifies the collector against.
+            - name: tls
+              mountPath: {{ include "redepanda.tlsMountPath" . }}
+              readOnly: true
+            {{- if .Values.otelCollector.enabled }}
+            - name: ca-bundle
+              mountPath: /etc/redepanda/ca-bundle
+              readOnly: true
+            {{- end }}
+            {{- if .Values.redpanda.auth.caSecret }}
             - name: broker-ca
               mountPath: /etc/redepanda/ca
               readOnly: true
-          {{- end }}
+            {{- end }}
+            # The same writable temp directory the topic Job already mounts, for the same reason:
+            # .NET wants somewhere to write under readOnlyRootFilesystem. The two pods run the same
+            # runtime under the same flag, so exactly one of them having it was a bug either way --
+            # and the one without it was the long-running process.
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
-      {{- if .Values.redpanda.auth.caSecret }}
       volumes:
+        - name: tls
+          secret:
+            secretName: {{ include "redepanda.fullname" . }}-backend-tls
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.otelCollector.enabled }}
+        # Written once by the init container, read-only everywhere else. The pod's fsGroup makes
+        # it writable by the non-root user; readOnlyRootFilesystem does not apply to a mount.
+        - name: ca-bundle
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.redpanda.auth.caSecret }}
         - name: broker-ca
           secret:
             secretName: {{ .Values.redpanda.auth.caSecret | quote }}
-      {{- end }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -163,9 +255,9 @@ spec:
   selector:
     {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
   ports:
-    - name: http
-      port: 8080
-      targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

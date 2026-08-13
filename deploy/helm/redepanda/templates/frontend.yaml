@@ -30,12 +30,13 @@ spec:
       labels:
         {{- include "redepanda.labels" . | nindent 8 }}
         app.kubernetes.io/component: frontend
-      {{- with include "redepanda.releaseAnnotations" . }}
-      # Which build this pod is running. Guarded by `with` because, unlike the backend, this
-      # pod template has no other annotation to keep the key from rendering empty.
       annotations:
-        {{- . | nindent 8 }}
-      {{- end }}
+        # Rotating the certificates is a delete-and-upgrade, and without this the pods would go
+        # on serving the old one while their peers already trust only the new CA. See the same
+        # annotation on the backend for the one wrinkle on a fresh install.
+        checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
+        {{- /* Which build this pod is running. */}}
+        {{- include "redepanda.releaseAnnotations" . | nindent 8 }}
     spec:
       # Covers the preStop hook as well as the signal: 5s of drain plus Caddy's own graceful
       # shutdown of in-flight requests, with slack before SIGKILL. Shorter than the backend's 45s
@@ -62,27 +63,39 @@ spec:
           image: {{ include "redepanda.image" (dict "ctx" . "component" "frontend") | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
-            - name: http
+            - name: https
+              containerPort: 8443
+            # Serves nothing but a 308 to the port above. It is here so that an http:// address
+            # someone still has answers with a redirect rather than a connection reset.
+            - name: http-redirect
               containerPort: 8080
           env:
             # Caddy substitutes this into the Caddyfile before parsing it. The image carries
             # the in-cluster service name as its default, so this is belt and braces.
             - name: BACKEND_HOST
-              value: "{{ include "redepanda.fullname" . }}-backend:8080"
+              value: "{{ include "redepanda.fullname" . }}-backend:8443"
             # Same mechanism: substituted into the Caddyfile before parsing. Governs the access
             # log and Caddy's own runtime log.
             - name: FRONTEND_LOG_LEVEL
               value: {{ .Values.frontend.logLevel | quote }}
+            # The port the redirect names. It is the port the *client* can reach, which under
+            # `kubectl port-forward` is the forwarded one and not this container's.
+            - name: PUBLIC_HTTPS_PORT
+              value: {{ .Values.tls.publicHttpsPort | quote }}
           livenessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: https
+              # TLS without verification: the kubelet has no way to be handed this release's CA.
+              # See the same note on the backend's probes.
+              scheme: HTTPS
             initialDelaySeconds: 3
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 3
             periodSeconds: 10
           lifecycle:
@@ -103,8 +116,14 @@ spec:
               # The image runs setcap -r on the binary, so it never needs CAP_NET_BIND_SERVICE.
               drop: [ALL]
           volumeMounts:
-            # Even with auto_https off, Caddy sweeps its TLS storage at startup and logs an
-            # error if these are not writable. Both are throwaway: nothing here is persisted.
+            # This pod's own server certificate, and the release CA it verifies the backend
+            # with when proxying /api. Both come from the same Secret, hence one mount.
+            - name: tls
+              mountPath: {{ include "redepanda.tlsMountPath" . }}
+              readOnly: true
+            # Caddy sweeps its certificate *storage* at startup — unrelated to the mount above,
+            # which it only reads files from — and logs an error if these are not writable. Both
+            # are throwaway: nothing here is persisted.
             - name: caddy-data
               mountPath: /data
             - name: caddy-config
@@ -112,6 +131,9 @@ spec:
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
       volumes:
+        - name: tls
+          secret:
+            secretName: {{ include "redepanda.fullname" . }}-frontend-tls
         - name: caddy-data
           emptyDir: {}
         - name: caddy-config
@@ -129,9 +151,12 @@ spec:
   selector:
     {{- include "redepanda.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
   ports:
-    - name: http
+    - name: https
+      port: 8443
+      targetPort: https
+    - name: http-redirect
       port: 8080
-      targetPort: http
+      targetPort: http-redirect
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

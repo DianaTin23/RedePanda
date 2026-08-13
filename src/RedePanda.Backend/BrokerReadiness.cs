@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using RedePanda.Contracts;
 
 namespace RedePanda.Backend;
 
@@ -30,10 +31,44 @@ public sealed class BrokerReadiness : IDisposable
     {
         _options = options;
         _logger = logger;
-        _adminClient = new AdminClientBuilder(new AdminClientConfig
+
+        // The handlers matter as much here as on the other two clients. librdkafka names an admin
+        // client `rdkafka#producer-N` internally, so without SetLogHandler this one client went on
+        // printing raw `%3|...|FAIL|` lines to stderr -- outside LOG_LEVEL, outside the JSON, and
+        // confusingly attributed to a producer.
+        _adminClient = new AdminClientBuilder(BuildConfig(options))
+            .SetLogHandler((_, message) =>
+                _logger.Log(
+                    KafkaLogging.ToLogLevel(message.Level),
+                    "librdkafka {Facility}: {Message}",
+                    message.Facility,
+                    message.Message))
+            .Build();
+    }
+
+    /// <summary>
+    /// The admin client's configuration, separate from the constructor so it can be asserted on
+    /// without a broker in the picture.
+    /// </summary>
+    internal static AdminClientConfig BuildConfig(BackendOptions options) =>
+        BuildConfig(options, Environment.GetEnvironmentVariable);
+
+    /// <param name="read">
+    /// Where a security setting comes from, injected for the same reason
+    /// <see cref="KafkaSecurity.ApplyTo(ClientConfig, Func{string, string?})"/> injects it.
+    /// </param>
+    internal static AdminClientConfig BuildConfig(BackendOptions options, Func<string, string?> read)
+    {
+        var config = new AdminClientConfig
         {
             BootstrapServers = options.BootstrapServers,
-        }).Build();
+        };
+
+        // The line this class shipped without. It is the readiness probe's own client, so omitting
+        // it did not fail loudly against a secured broker -- it failed as a permanent 503 with the
+        // reason swallowed, which reads exactly like a broker outage. See KafkaSecurity.
+        KafkaSecurity.ApplyTo(config, read);
+        return config;
     }
 
     /// <summary>
@@ -73,7 +108,11 @@ public sealed class BrokerReadiness : IDisposable
             }
             catch (KafkaException e)
             {
-                _logger.LogDebug("Broker not ready: {Reason}", e.Error.Reason);
+                // Warning rather than Debug: this is the only account a pod gives of why it is
+                // failing its readiness probe, and the chart runs at Information, so at Debug it
+                // was invisible exactly when it was needed. The cache above bounds it to one line
+                // per CacheDuration, which is why it cannot become a log storm.
+                _logger.LogWarning("Broker not ready: {Reason}", e.Error.Reason);
                 ready = false;
             }
 

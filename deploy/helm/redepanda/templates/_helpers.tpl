@@ -47,13 +47,43 @@ against a Service nobody deployed.
 {{- end -}}
 
 {{/*
+The configured broker protocol, normalised to the application's spelling. Underscores and dashes
+are stripped so the spelling from the broker documentation (SASL_SSL) matches here as well as in
+KafkaSecurity, which normalises the same way.
+
+Anything else is a hard error, and that is the point of this helper existing at all. The previous
+version compared against two strings and treated everything that did not match as "not SASL", so
+`SASL_PLAIN` -- a plausible typo -- rendered perfectly happily, mounted no credentials, and left
+the pods failing to authenticate against a broker that was working correctly. A silent no is the
+one answer a security setting must never give.
+*/}}
+{{- define "redepanda.securityProtocol" -}}
+{{- $raw := .Values.redpanda.auth.securityProtocol | default "Plaintext" -}}
+{{- $key := $raw | replace "_" "" | replace "-" "" | lower -}}
+{{- $known := dict "plaintext" "Plaintext" "ssl" "Ssl" "saslplaintext" "SaslPlaintext" "saslssl" "SaslSsl" -}}
+{{- if not (hasKey $known $key) -}}
+{{- fail (printf "redpanda.auth.securityProtocol is %q, which is not a known value. Accepted: Plaintext, Ssl, SaslPlaintext, SaslSsl (underscores and dashes are ignored, so SASL_SSL also works)." $raw) -}}
+{{- end -}}
+{{- index $known $key -}}
+{{- end -}}
+
+{{/*
 Whether the configured protocol authenticates over SASL, i.e. whether the credentials from
-redpanda.auth.existingSecret have to be mounted into the pods. Underscores are stripped so the
-spelling from the broker documentation (SASL_SSL) matches here as well as in the application.
+redpanda.auth.existingSecret have to be mounted into the pods.
 */}}
 {{- define "redepanda.saslEnabled" -}}
-{{- $protocol := .Values.redpanda.auth.securityProtocol | replace "_" "" | lower -}}
-{{- if or (eq $protocol "saslssl") (eq $protocol "saslplaintext") -}}
+{{- $protocol := include "redepanda.securityProtocol" . -}}
+{{- if or (eq $protocol "SaslSsl") (eq $protocol "SaslPlaintext") -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether the connection to the broker is encrypted, i.e. whether a private CA bundle is meaningful.
+*/}}
+{{- define "redepanda.brokerTls" -}}
+{{- $protocol := include "redepanda.securityProtocol" . -}}
+{{- if or (eq $protocol "Ssl") (eq $protocol "SaslSsl") -}}
 true
 {{- end -}}
 {{- end -}}
@@ -85,6 +115,15 @@ Call as (dict "ctx" .).
 {{- end -}}
 
 {{/*
+Where each pod finds its certificate, its key and the release CA. One path for every component,
+because the mount is the same everywhere and a per-component path would only be something else
+to get wrong in a probe or a config file.
+*/}}
+{{- define "redepanda.tlsMountPath" -}}
+/etc/redepanda/tls
+{{- end -}}
+
+{{/*
 The version of the running release, not of the chart. .Chart.AppVersion is the fallback so
 `helm lint` and a bare `helm show` still produce something readable; in an actual deployment the
 release file always supplies it.
@@ -99,11 +138,23 @@ Image reference for a locally built image. Call as (dict "ctx" . "component" "ba
 The empty tag is a hard error rather than a default, because every plausible default is a
 mutable name: deploying one would put an unidentifiable image in the cluster and make the next
 `helm rollback` a no-op. Failing here costs one command; failing in the cluster costs an hour.
+
+Non-emptiness alone was not enough, though. `--set backend.image.tag=latest` satisfied it and
+rendered perfectly happily, which is precisely the deploy this guard exists to prevent -- so a
+mutable name is rejected by name, and a tag that arrived without the release metadata beside it
+is rejected as well. The two checks catch different mistakes: the first a deliberate mutable
+tag, the second any tag set by hand instead of by a release file.
 */}}
 {{- define "redepanda.image" -}}
 {{- $image := index .ctx.Values .component "image" -}}
 {{- if not $image.tag -}}
 {{- fail (printf "%s.image.tag is empty: no release selected. Run scripts/build-images.sh, then deploy with -f deploy/releases/<version>.yaml" .component) -}}
+{{- end -}}
+{{- if has (lower (toString $image.tag)) (list "latest" "main" "master" "edge" "stable" "dev" "test") -}}
+{{- fail (printf "%s.image.tag is '%s', which is a mutable name: it can point at a different image tomorrow, and a later `helm rollback` would restore the same name rather than the same build. Deploy with -f deploy/releases/<version>.yaml" .component $image.tag) -}}
+{{- end -}}
+{{- if not .ctx.Values.release.gitSha -}}
+{{- fail (printf "%s.image.tag is '%s' but release.gitSha is empty, so nothing records which commit that image was built from. Deploy with -f deploy/releases/<version>.yaml rather than setting the tag by hand." .component $image.tag) -}}
 {{- end -}}
 {{- printf "%s:%s" $image.repository $image.tag -}}
 {{- end -}}

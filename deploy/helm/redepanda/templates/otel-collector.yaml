@@ -18,6 +18,9 @@ spec:
         app.kubernetes.io/component: otel-collector
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/otel-collector-configmap.yaml") . | sha256sum }}
+        # Rotating the certificates must roll this pod: the config above names cert files that
+        # the collector reads once, at startup. See the same annotation on the backend.
+        checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -56,12 +59,16 @@ spec:
             httpGet:
               path: /
               port: health
+              # The extension now serves TLS, so the kubelet has to speak it. Unverified, as
+              # everywhere else a probe is concerned; see the note on the backend.
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /
               port: health
+              scheme: HTTPS
             initialDelaySeconds: 3
             periodSeconds: 10
           securityContext:
@@ -75,12 +82,20 @@ spec:
             - name: config
               mountPath: /conf
               readOnly: true
+            # The certificate every server in that config presents: OTLP on 4317 and 4318, the
+            # Prometheus exporter on 8889 and the health endpoint on 13133.
+            - name: tls
+              mountPath: {{ include "redepanda.tlsMountPath" . }}
+              readOnly: true
           resources:
             {{- toYaml .Values.otelCollector.resources | nindent 12 }}
       volumes:
         - name: config
           configMap:
             name: {{ include "redepanda.collectorService" . }}
+        - name: tls
+          secret:
+            secretName: {{ include "redepanda.collectorService" . }}-tls
 ---
 apiVersion: v1
 kind: Service

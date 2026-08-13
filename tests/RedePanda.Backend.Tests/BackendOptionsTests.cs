@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace RedePanda.Backend.Tests;
 
 /// <summary>
@@ -11,6 +13,46 @@ namespace RedePanda.Backend.Tests;
 /// </summary>
 public class BackendOptionsTests
 {
+    /// <summary>
+    /// LOG_LEVEL was the one setting with a silent fallback, and it is the worst possible one to
+    /// have it: a misspelling left the process running at Information while whoever set it
+    /// believed they had turned the detail up, so the mistake hid the evidence of itself.
+    /// </summary>
+    [Theory]
+    [InlineData("Debug", LogLevel.Debug)]
+    [InlineData("warning", LogLevel.Warning)]
+    [InlineData("  Error  ", LogLevel.Error)]
+    public void AKnownLogLevelIsAccepted(string raw, LogLevel expected)
+    {
+        Assert.Equal(
+            expected,
+            BackendOptions.ReadLogLevel("LOG_LEVEL", BackendOptions.DefaultLogLevel, raw));
+    }
+
+    [Theory]
+    [InlineData("Verbose")]      // a real level name, but in another logging framework
+    [InlineData("WARN")]         // the abbreviation half the world writes
+    [InlineData("99")]           // parses as an enum without Enum.IsDefined, and silences everything
+    public void AnUnknownLogLevelIsRefused(string raw)
+    {
+        var failure = Assert.Throws<InvalidOperationException>(
+            () => BackendOptions.ReadLogLevel("LOG_LEVEL", BackendOptions.DefaultLogLevel, raw));
+
+        Assert.Contains("LOG_LEVEL", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Information", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>An unset value is not a mistake; it is the documented default.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AnUnsetLogLevelFallsBackQuietly(string raw)
+    {
+        Assert.Equal(
+            BackendOptions.DefaultLogLevel,
+            BackendOptions.ReadLogLevel("LOG_LEVEL", BackendOptions.DefaultLogLevel, raw));
+    }
+
     [Fact]
     public void ConsumerGroupIdIsUniquePerPod()
     {
@@ -41,6 +83,17 @@ public class BackendOptionsTests
     public void TheDefaultHistorySizeIsBounded()
     {
         Assert.True(BackendOptions.DefaultHistorySize > 0);
+    }
+
+    /// <summary>
+    /// The other half of the same bound. A per-room limit alone leaves the number of rooms open,
+    /// and that number is chosen by whoever names a room rather than by configuration — so zero
+    /// here is legal but must not be what ships either.
+    /// </summary>
+    [Fact]
+    public void TheDefaultRoomLimitIsBounded()
+    {
+        Assert.True(BackendOptions.DefaultMaxRooms > 0);
     }
 
     /// <summary>The supplied name is used verbatim, so the group id keeps naming its pod.</summary>

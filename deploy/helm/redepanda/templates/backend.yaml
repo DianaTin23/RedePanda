@@ -1,3 +1,25 @@
+{{- /*
+Which CA the OTLP exporter has to be taught to trust, if any.
+
+The bundled collector serves the release's own CA, which is already mounted for Kestrel. An
+external collector may serve a private one too -- and until this variable existed there was no way
+to say so: the whole trust-store apparatus below was gated on `otelCollector.enabled`, so
+"the telemetry backend is a swappable backing service" held only for a collector whose certificate
+a public CA had signed. That is not a swap, it is a swap with a condition nobody wrote down.
+
+Empty means "nothing to add": either there is no collector at all, or its certificate already
+validates against the public trust store the base image ships.
+*/ -}}
+{{- $otelEnabled := or .Values.otelCollector.enabled (ne (toString .Values.otelCollector.external.endpoint) "") }}
+{{- $otelCaPath := "" }}
+{{- $otelCaVolume := "" }}
+{{- if .Values.otelCollector.enabled }}
+{{- $otelCaPath = printf "%s/ca.crt" (include "redepanda.tlsMountPath" .) }}
+{{- $otelCaVolume = "tls" }}
+{{- else if and .Values.otelCollector.external.endpoint .Values.otelCollector.external.caSecret }}
+{{- $otelCaPath = "/etc/redepanda/otel-ca/ca.crt" }}
+{{- $otelCaVolume = "otel-ca" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -78,7 +100,7 @@ spec:
         fsGroup: 1654
         seccompProfile:
           type: RuntimeDefault
-{{- if .Values.otelCollector.enabled }}
+{{- if $otelCaPath }}
       initContainers:
         # Builds the trust store the OTLP exporter uses to verify the collector.
         #
@@ -97,7 +119,7 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
-            - cat /etc/ssl/certs/ca-certificates.crt {{ include "redepanda.tlsMountPath" . }}/ca.crt
+            - cat /etc/ssl/certs/ca-certificates.crt {{ $otelCaPath }}
               > /etc/redepanda/ca-bundle/ca-bundle.crt
           securityContext:
             allowPrivilegeEscalation: false
@@ -105,9 +127,17 @@ spec:
             capabilities:
               drop: [ALL]
           volumeMounts:
+            {{- if eq $otelCaVolume "tls" }}
             - name: tls
               mountPath: {{ include "redepanda.tlsMountPath" . }}
               readOnly: true
+            {{- else }}
+            # The CA of a collector this release does not deploy, from the Secret named in
+            # otelCollector.external.caSecret.
+            - name: otel-ca
+              mountPath: /etc/redepanda/otel-ca
+              readOnly: true
+            {{- end }}
             - name: ca-bundle
               mountPath: /etc/redepanda/ca-bundle
           resources:
@@ -131,14 +161,21 @@ spec:
                   fieldPath: metadata.name
             {{- /* Credentials from a Secret, never from the ConfigMap above. No-op without SASL. */}}
             {{- include "redepanda.saslEnv" (dict "ctx" .) | nindent 12 }}
-{{- if .Values.otelCollector.enabled }}
+{{- if $otelEnabled }}
             # Expanded by the kubelet from POD_NAME above. This is what makes the Prometheus
             # "instance" label the pod name; the application never sets the resource in code.
+            #
+            # Gated on telemetry being on at all rather than on the bundled collector: exporting to
+            # an external one is still exporting, and without this the SDK invents an instance id
+            # that changes on every restart -- the exact failure this variable exists to prevent.
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: "service.instance.id=$(POD_NAME)"
+{{- end }}
+{{- if $otelCaPath }}
             # Read by OpenSSL, which is what .NET validates certificates with on Linux. Points at
-            # the bundle the ca-bundle init container assembled, so the exporter trusts this
-            # release's CA without the application configuring anything.
+            # the bundle the ca-bundle init container assembled, so the exporter trusts the
+            # collector's CA -- this release's own, or the one named in
+            # otelCollector.external.caSecret -- without the application configuring anything.
             - name: SSL_CERT_FILE
               value: /etc/redepanda/ca-bundle/ca-bundle.crt
 {{- end }}
@@ -203,7 +240,7 @@ spec:
             - name: tls
               mountPath: {{ include "redepanda.tlsMountPath" . }}
               readOnly: true
-            {{- if .Values.otelCollector.enabled }}
+            {{- if $otelCaPath }}
             - name: ca-bundle
               mountPath: /etc/redepanda/ca-bundle
               readOnly: true
@@ -227,11 +264,18 @@ spec:
             secretName: {{ include "redepanda.fullname" . }}-backend-tls
         - name: tmp
           emptyDir: {}
-        {{- if .Values.otelCollector.enabled }}
+        {{- if $otelCaPath }}
         # Written once by the init container, read-only everywhere else. The pod's fsGroup makes
         # it writable by the non-root user; readOnlyRootFilesystem does not apply to a mount.
         - name: ca-bundle
           emptyDir: {}
+        {{- end }}
+        {{- if eq $otelCaVolume "otel-ca" }}
+        # The CA of an external collector. Only mounted into the init container, which folds it
+        # into the bundle above; the backend itself reads the bundle, never this.
+        - name: otel-ca
+          secret:
+            secretName: {{ .Values.otelCollector.external.caSecret | quote }}
         {{- end }}
         {{- if .Values.redpanda.auth.caSecret }}
         - name: broker-ca

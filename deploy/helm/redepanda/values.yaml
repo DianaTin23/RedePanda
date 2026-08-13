@@ -252,6 +252,20 @@ chatClient:
 # unveränderlich. Zwei verschiedene Kommandos innerhalb *derselben* Revision scheitern deshalb an
 # „field is immutable"; jedes `helm upgrade` zählt die Revision hoch, ein zweiter Lauf mit anderen
 # Argumenten ist also ein weiteres `upgrade`, kein Sonderfall.
+# ---- Topic-Job ---------------------------------------------------------------------------------
+topicJob:
+  # Wie lange `--ensure-topic` auf Broker-Metadaten wartet, bevor es aufgibt und der Job es erneut
+  # versucht. Beim Install läuft er gegen einen Broker, der gerade erst startet, deshalb großzügig.
+  #
+  # Stand früher als feste 180 in templates/topic-job.yaml, während README Abschnitt 9
+  # `TOPIC_WAIT_SECONDS` als Einstellung führte — gegen einen fremden, langsam startenden Broker
+  # war das eine Änderung an einem Template statt an einer Wertedatei.
+  #
+  # Zusammen mit `backoffLimit: 10` im Template ergibt das die Obergrenze, bis zu der ein fehlender
+  # Broker den Job beschäftigt: 10 × dieser Wert. Wer das `--timeout` von `helm upgrade` kürzer
+  # setzt, sieht die Installation scheitern, während der Job noch berechtigt weiterläuft.
+  brokerWaitSeconds: 180
+
 adminJob:
   enabled: false
 
@@ -270,6 +284,14 @@ adminJob:
   # Der Pod verschwindet nach dieser Zeit von selbst. Länger als beim Topic-Job, weil hier jemand
   # die Ausgabe lesen will.
   ttlSecondsAfterFinished: 3600
+
+  # Nach dieser Zeit bricht Kubernetes den Job ab. Nötig wegen `interactive: true`: der Chat-Client
+  # liest dann von stdin und wartet, bis jemand `kubectl attach` macht — passiert das nie, liefe der
+  # Pod ohne diese Grenze unbegrenzt weiter und hielte einen Consumer und seinen Speicher.
+  #
+  # Großzügiger als `ttlSecondsAfterFinished`, weil die beiden Verschiedenes zählen: dies ist die
+  # Laufzeit *bis* zum Ende, jenes die Aufbewahrung *danach*.
+  activeDeadlineSeconds: 7200
 
   extraEnv: []
 
@@ -349,6 +371,18 @@ otelCollector:
 
     # grpc oder http/protobuf, je nachdem, worauf der fremde Collector hört.
     protocol: "grpc"
+
+    # Name eines Secrets mit dem Schlüssel `ca.crt`: die CA, gegen die das Backend das Zertifikat
+    # eines *fremden* Collectors prüft. Nur nötig, wenn dessen Zertifikat von einer privaten CA
+    # stammt — bei einer öffentlich vertrauenswürdigen genügt der Trust Store des Images.
+    #
+    # Ohne diesen Schlüssel galt der Austausch des Telemetrie-Backends nur unter einer Bedingung,
+    # die nirgends stand: der Init-Container, der die CA in den Trust Store faltet, hing an
+    # `otelCollector.enabled`. Ein fremder Collector hinter privater CA war damit nicht
+    # erreichbar, und zwar ohne Fehlermeldung, die das erklärt hätte.
+    #
+    #   kubectl -n redepanda create secret generic otel-ca --from-file=ca.crt=/pfad/zur/ca.crt
+    caSecret: ""
 
   # Core distribution, not contrib: core already contains the prometheus exporter and the
   # health_check extension. otelcol-k8s would be wrong -- it has no prometheus exporter at all.

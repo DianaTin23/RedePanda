@@ -41,6 +41,18 @@ the release points somewhere it does not, and every symptom afterwards points at
 The same rule KafkaSecurity enforces at runtime, moved to render time. A CA bundle means someone
 believes this connection is encrypted; if it is not, saying so early is the only honest option.
 */ -}}
+{{- /*
+The same rule for the telemetry side. A CA for a collector this release deploys itself is a
+contradiction -- that collector's certificate comes from the release CA, which the pod already
+trusts -- and a CA for an endpoint that is not TLS is the mistake the broker guard below catches:
+someone believes a connection is encrypted that is not.
+*/ -}}
+{{- if and .Values.otelCollector.external.caSecret .Values.otelCollector.enabled -}}
+{{- fail "otelCollector.external.caSecret is set, but otelCollector.enabled is true, so it would be ignored: the bundled collector is verified against this release's own CA. Set otelCollector.enabled=false and otelCollector.external.endpoint to point at an external collector." -}}
+{{- end -}}
+{{- if and .Values.otelCollector.external.caSecret (not (hasPrefix "https://" (toString .Values.otelCollector.external.endpoint))) -}}
+{{- fail (printf "otelCollector.external.caSecret is set, but otelCollector.external.endpoint is %q, which is not an https:// address. A CA bundle is only meaningful for a connection that verifies a certificate." .Values.otelCollector.external.endpoint) -}}
+{{- end -}}
 {{- if and .Values.redpanda.auth.caSecret (not (include "redepanda.brokerTls" .)) -}}
 {{- fail (printf "redpanda.auth.caSecret is set, but redpanda.auth.securityProtocol is %q, which does not use TLS. Set it to Ssl or SaslSsl, or remove the CA Secret." .Values.redpanda.auth.securityProtocol) -}}
 {{- end -}}

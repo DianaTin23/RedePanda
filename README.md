@@ -327,8 +327,10 @@ es ist entfernt, weil es mehr gekostet als eingebracht hat:
   Schlüsseln — und lag anschließend in diesem Repository.
 - `helm template` rendert `.Release.Revision` immer als `1`. Der Topic-Job hieß deshalb jedes Mal
   gleich, und das zweite `kubectl apply` scheiterte an einem unveränderlichen Feld.
-- Nichts hat die Drift bemerkt, und sie ist eingetreten: zuletzt 677 Zeilen und fünf fehlende
-  Secrets Unterschied zu dem, was das Chart tatsächlich erzeugt.
+- Nichts hat die Drift bemerkt, und sie ist eingetreten: mehrere hundert Zeilen und fünf fehlende
+  Secrets Unterschied zu dem, was das Chart tatsächlich erzeugt. Die fünf Secrets sind exakt (das
+  Chart rendert fünf, die Datei enthielt keines); die Zeilenzahl hängt davon ab, welche zwei
+  Stände man vergleicht, und stand hier zu lange als eine einzige feste Zahl.
 
 Das Release-Artefakt ist `deploy/releases/<version>.yaml`. Es pinnt den unveränderlichen
 Image-Tag, und genau das ist es, was ein späteres `helm rollback` einen echten Build
@@ -764,12 +766,12 @@ Exporter-Block; der Ausbaupfad steht offen.
 | Codebase | ein Git-Repo, **eine** Beschreibung des Deployments (das Chart), sieben Wertekombinationen rendern sauber daraus | ein gerendertes Manifest ist nicht reproduzierbar: `tls.yaml` findet ohne Cluster nichts nachzuschlagen und mintet bei jedem Lauf neue Schlüssel. Deshalb liegt keines im Repo (Abschnitt 7) |
 | Dependencies | NuGet zentral deklariert und per `packages.lock.json` inklusive transitiver Pakete festgenagelt, Restore nur gegen nuget.org; alle Registry-Images per Digest gepinnt; Frontend bewusst ohne Build-Tooling (Vanilla JS) | erzwungen wird das nur, wo jemand `./scripts/check-repro.sh` aufruft, und ohne CI ruft es niemand von selbst auf. Im Alltag schreibt ein `dotnet test` die Lock-Dateien weiterhin um, statt zu scheitern — absichtlich, siehe Abschnitt 13 |
 | Config | ausschließlich Env-Variablen, im Cluster aus ConfigMap; Zugangsdaten getrennt davon aus einem Secret (`redpanda.auth.existingSecret`), nie aus `values.yaml` | kein Live-Reload: eine geänderte ConfigMap rollt die Pods über die `checksum/config`-Annotation, sie wird nicht im laufenden Prozess nachgelesen |
-| Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide ohne Codeänderung austauschbar, **und beide auch im Chart**: `redpanda.enabled=false` + `redpanda.external.bootstrapServers` bzw. `otelCollector.enabled=false` + `otelCollector.external.endpoint`. TLS/SASL sind über `redpanda.auth` konfigurierbar und in Abschnitt 5 gegen einen echten SASL/TLS-Broker vorgeführt | der mitgelieferte Broker spricht weiterhin Plaintext, und das Chart lehnt die Kombination „abgesichertes Protokoll + mitgelieferter Broker" beim Rendern ab, weil sie nicht funktionieren kann. Ein fremder Collector schließt das mitgelieferte Prometheus aus: es kennt nur den mitgelieferten als Scrape-Ziel |
+| Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide ohne Codeänderung austauschbar, **und beide auch im Chart**: `redpanda.enabled=false` + `redpanda.external.bootstrapServers` bzw. `otelCollector.enabled=false` + `otelCollector.external.endpoint`, dessen privater CA das Backend über `otelCollector.external.caSecret` vertraut. TLS/SASL sind über `redpanda.auth` konfigurierbar und in Abschnitt 5 gegen einen echten SASL/TLS-Broker vorgeführt | der mitgelieferte Broker spricht weiterhin Plaintext, und das Chart lehnt die Kombination „abgesichertes Protokoll + mitgelieferter Broker" beim Rendern ab, weil sie nicht funktionieren kann. Ein fremder Collector schließt das mitgelieferte Prometheus aus: es kennt nur den mitgelieferten als Scrape-Ziel |
 | Build, Release, Run | drei getrennte Stufen mit identifizierbarem Release: unveränderlicher Image-Tag + Release-Datei, `helm rollback` funktioniert (siehe unten) | keine Registry: alte Images leben nur im Image-Store der Node. Kein CI (laut Aufgabe erlaubt) |
 | Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut. Ein Leser, der weiter als 256 Nachrichten zurückfällt, bekommt seinen Stream **beendet** statt still gekürzt — der Browser verbindet sich neu und holt die Lücke per `Last-Event-ID` nach (`redepanda_streams_cut_total`) |
 | Port Binding | Backend `:8443`, Frontend `:8443` (plus `:8080` nur für die `308`-Weiterleitung), kein externer Webserver nötig. TLS terminiert der Prozess selbst — es gibt keinen vorgelagerten Terminator, den das Deployment mitbringen müsste | das Zertifikat kommt als Secret-Mount von außen; das Image allein kann kein TLS und startet deshalb per Default auf `:8080` |
 | Concurrency | **Beide** Deployments laufen mit 2 Replicas, PodDisruptionBudget, `preStop`-Drain und Rollout ohne Unterbrechung (`maxUnavailable: 0`) — der SSE-Pfad ist damit von Caddy bis Kafka redundant, nicht nur an seinem hinteren Ende. Backend zusätzlich: Consumer-GroupId pro Pod ⇒ echter Fan-out, HPA optional, kein Sticky-Session-Bedarf, weil die SSE-`id` der Kafka-Offset ist. Caddy spricht zum Backend auf `versions 1.1` — über HTTP/2 liefe jeder Stream eines Pods über *eine* TCP-Verbindung und damit auf *einer* Backend-Replica | Offsets sind **pro Partition** eindeutig, nicht brokerweit. Bei `chat.partitions > 1` trägt die Konstruktion nur, weil beide Producer nach Raum keyen und ein Raum damit auf einer Partition bleibt. Jede Replica liest 100 % des Topics: der Fan-out skaliert das Ausliefern, nicht das Lesen. HPA braucht metrics-server und ist per Default aus |
-| Disposability | SIGTERM: Consumer `Close()`, Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten. Frontend analog: Caddy hat `grace_period 5s`, sonst wartete es unbegrenzt auf SSE-Antworten, die per Definition nie fertig werden | das Budget ist 35 s, nicht 30: `ChatProducer.Dispose()` flusht bis zu 5 s **nachdem** `Host.StopAsync` zurückgekehrt ist, also `preStop` 5 s + 25 s + 5 s < Grace Period 45 s. Die Readiness hängt am Broker: ohne erreichbaren Broker wird der Pod nie `Ready` — richtig so, aber es macht eine Broker-Störung zu einem Rollout, der stehen bleibt |
+| Disposability | SIGTERM: Consumer `Close()` (auf 5 s begrenzt, sonst wird der Broker nicht mehr abgewartet), Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten. Frontend analog: Caddy hat `grace_period 5s`, sonst wartete es unbegrenzt auf SSE-Antworten, die per Definition nie fertig werden | das Budget ist 40 s, nicht 30: `ChatProducer.Dispose()` flusht bis zu 5 s **nachdem** `Host.StopAsync` zurückgekehrt ist, und `Close()` darf 5 s brauchen, also `preStop` 5 s + 25 s + 5 s + 5 s < Grace Period 45 s. Der `Close()`-Term ist neu begrenzt: `HostOptions.ShutdownTimeout` bricht ihn nicht ab (der Timeout kündigt ein Token, das dieser Aufruf gar nicht entgegennimmt), also lief er gegen einen unerreichbaren Broker über das ganze Budget hinaus in ein stilles SIGKILL. Die Readiness hängt am Broker: ohne erreichbaren Broker wird der Pod nie `Ready` — richtig so, aber es macht eine Broker-Störung zu einem Rollout, der stehen bleibt |
 | Dev/Prod Parity | derselbe Broker lokal und im Cluster, **inklusive Digest** und im selben `--mode=dev-container`; identisch gepinntes .NET-SDK in `global.json`, `flake.nix` und beiden Build-Dockerfiles | **die Anwendungs-Images laufen lokal nicht**: Abschnitt 5 startet Backend und Konsolenclient per `dotnet run` aus dem Quelltext, und das Frontend läuft lokal überhaupt nicht — die Browser-Oberfläche gibt es nur über den Cluster-Weg. Redpanda ist ein einzelner Broker ohne Replikation |
 | Logs | strukturiert (JSON) nach stdout, keine Logdateien: Backend über `AddJsonConsole` mit `Timestamp`/`LogLevel`/`Category`, Frontend als Caddy-Access-Log (eine Zeile pro Request, Probes ausgenommen). Auch librdkafkas eigene Ausgabe geht über `SetLogHandler` durch `ILogger`, statt roh auf stderr an `LOG_LEVEL` vorbei | Logs laufen bewusst **nicht** über OTLP. Die beiden JSON-Schemata sind nicht vereinheitlicht — Caddy loggt zap-artig (`ts`/`level`/`msg`/`request`), .NET mit `Timestamp`/`LogLevel`/`Category`. Und die Admin-Prozesse sind gar nicht strukturiert: sie schreiben einfache Zeilen mit `Console.WriteLine` und kennen kein `LOG_LEVEL` |
 | Admin Processes | vier Admin-Prozesse aus **demselben Build unter demselben Tag** wie die Anwendung und mit **derselben ConfigMap** per `envFrom`: `--ensure-topic` (legt den Topic an und zieht die Partitionszahl nach), `--describe-topic`, `--print-config` und der interaktive Chat-Client. Der erste läuft bei jedem Install/Upgrade als Job, die übrigen ad hoc über `adminJob.enabled=true` — inklusive `kubectl attach -ti`. Kein Shell-Skript in einem fremden Image, keine zweite Konfigurationsquelle | „dasselbe Image" wäre zu viel gesagt: es sind zwei Images auf zwei Laufzeit-Basen (`aspnet:10.0` für das Backend, `runtime:10.0` für den Client). Gemeinsam sind Build, Tag und Konfiguration — und darauf kommt es an. Ein Job-Name trägt die Release-Revision, zwei verschiedene Kommandos in derselben Revision brauchen also zwei `helm upgrade` |
@@ -807,7 +809,8 @@ Daraus folgt der Rest:
 
 Was fehlt: eine Registry und damit garantierte Aufbewahrung alter Images, und ein CI, das den
 Build automatisch anstößt. Beides ist laut Aufgabe nicht gefordert; der Ausbaupfad wäre ein
-`--push` in `build-images.sh` plus Digest-Pin auch für diese beiden Images.
+`--push` in `build-images.sh` plus Digest-Pin auch für diese drei Images (Backend, Frontend und
+Konsolenclient — es waren einmal zwei, bevor der Admin-Prozess ein eigenes Image bekam).
 
 ---
 
@@ -1043,8 +1046,9 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 - **Kein CI.** Die Reproduzierbarkeits-Prüfungen aus Abschnitt 13 — `./scripts/check-repro.sh` und
   `./scripts/check-digests.sh` — laufen deshalb nicht automatisch. Sie melden Drift nur, wenn
   jemand sie aufruft. Das ist die Lücke, aus der die beiden Fehler kamen, die dieses Repo zuletzt
-  hatte: ein gerendertes Manifest, das 677 Zeilen hinterherhing, und ein Kafka-Client, der als
-  einziger von sieben ohne Sicherheitseinstellungen gebaut wurde.
+  hatte: ein gerendertes Manifest, das dem Chart um mehrere hundert Zeilen und fünf Secrets
+  hinterherhing, und ein Kafka-Client, der als einziger von sieben ohne Sicherheitseinstellungen
+  gebaut wurde.
 - **Die SSE-Verteilung auf zwei Backend-Replicas ist nicht gemessen.** Sie folgt daraus, dass Caddy
   per `versions 1.1` je Stream eine eigene TCP-Verbindung öffnet und kube-proxy pro *Verbindung*
   auswählt. Das ist die richtige Konstruktion und der Grund, warum HTTP/2 hier ausdrücklich
@@ -1108,6 +1112,34 @@ Für die Nebenläufigkeit gilt dasselbe: dass zwei Replicas einander vertreten, 
 Offset-basierten Wiedereinstieg und ist auf Test- und Wire-Ebene abgesichert — die Demo-Punkte 7 bis
 9 aus Abschnitt 8 und die neuen Punkte der Abnahmeliste sind aber noch von Hand nachzuvollziehen.
 
+Vier weitere Punkte, die eine Durchsicht gegen die zwölf Faktoren gefunden hat und die bewusst
+stehen bleiben, statt still zu sein:
+
+- **Logzeilen lassen sich nicht zusammenführen.** `IncludeScopes` steht auf `false`, und die
+  JSON-Zeilen tragen weder `TraceId` noch `SpanId` — obwohl das OTel-SDK im selben Prozess läuft.
+  Eine Backend-Zeile lässt sich damit nicht an die Caddy-Access-Log-Zeile desselben Requests
+  hängen. Das ist die Grenze der bewussten Entscheidung, Logs **nicht** über OTLP zu schicken:
+  ohne Log-Pipeline gibt es auch nichts, worin eine Trace-Id nachgeschlagen würde. Sie
+  einzuschalten wäre eine Zeile; sie ohne den Rest einzuschalten wäre Deko.
+- **Nur das Backend hat einen HPA.** Ausgerechnet das Frontend nicht — dabei terminiert es jede
+  Browser-Verbindung und öffnet wegen `versions 1.1` je SSE-Stream eine eigene TCP-Verbindung nach
+  hinten. Seine Last hängt damit direkter an der Zahl gleichzeitiger Leser als die des Backends.
+  `frontend.replicas` ist fest; ein `frontend.autoscaling` gibt es nicht. Für die Demo genügt das,
+  gemeint ist es nicht als Aussage über die richtige Skalierungsachse.
+- **Ein Pod, der den Broker verliert, bleibt bis zu 60 s im Service.** Die Readiness-Probe läuft
+  alle 10 s mit `failureThreshold: 6`, und `BrokerReadiness` cached das negative Ergebnis
+  zusätzlich 5 s. In diesem Fenster nimmt der Pod weiter `POST /api/messages` an, die dann
+  fehlschlagen. Abschnitt 11 nennt nur die andere Richtung (ohne Broker wird ein startender Pod
+  nie `Ready`); dies ist die Rückrichtung, und die Schwelle ist Absicht — kürzer würde ein
+  einzelner langsamer Metadaten-Aufruf die Replica aus dem Service werfen.
+- **`tls.publicHttpsPort` bedient zwei Adressaten mit einer Zahl.** Er ist als der Port
+  dokumentiert, unter dem der *Browser* das Frontend erreicht (also der weitergeleitete Port aus
+  `scripts/demo.sh`), und er ist zugleich das Ziel der `308`-Weiterleitung, die der Plaintext-Port
+  im Cluster ausspricht. Solange beide Zahlen `8443` sind, fällt das nicht auf. Wer die Demo auf
+  einen anderen lokalen Port legt und den Wert mitzieht, schickt jeden clusterinternen Aufrufer
+  des `:8080`-Ports auf einen Port, den es dort nicht gibt. Im Release ruft niemand diesen Port
+  intern auf, deshalb ist es heute latent.
+
 ---
 
 ## 15. Fehlerbehebung
@@ -1140,7 +1172,8 @@ auch der Check im Dockerfile:
 
 ```bash
 podman run --rm -v "$PWD/src/RedePanda.Frontend/Caddyfile:/Caddyfile:ro" \
-  docker.io/library/caddy:2.11.4-alpine caddy adapt --config /Caddyfile --adapter caddyfile
+  docker.io/library/caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 \
+  caddy adapt --config /Caddyfile --adapter caddyfile
 ```
 
 Drei Dinge müssen in der Ausgabe stehen:

@@ -60,7 +60,7 @@ spec:
             # this budget is spent. It is a *metadata* request rather than `rpk cluster health`,
             # which needs the Admin API on 9644 -- a port a managed broker has no reason to expose.
             - name: TOPIC_WAIT_SECONDS
-              value: "180"
+              value: {{ .Values.topicJob.brokerWaitSeconds | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

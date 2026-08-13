@@ -51,6 +51,8 @@ collect_pins() {
         "${REPO_ROOT}/src/RedePanda.Frontend/Dockerfile" \
         "${REPO_ROOT}/deploy/helm/redepanda/values.yaml" \
         "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.yml" \
+        "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.sasl.yml" \
+        "${REPO_ROOT}/RedePanda-kafka-docker/make-tls.sh" \
     | sort -u
 }
 
@@ -104,19 +106,35 @@ broker_ref() {
     grep -oE 'redpandadata/redpanda:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}' "$1" | head -1 || true
 }
 
-COMPOSE_BROKER="$(broker_ref "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.yml")"
+# Every place outside the chart that names the broker. It was only the first of these for a long
+# time, which is the failure mode this check exists to prevent, one level up: a parity check that
+# covers some of the copies reads exactly like one that covers all of them.
+BROKER_SOURCES=(
+    "RedePanda-kafka-docker/docker-compose.yml"
+    "RedePanda-kafka-docker/docker-compose.sasl.yml"
+    "RedePanda-kafka-docker/make-tls.sh"
+)
+
 CHART_BROKER="$(broker_ref "${REPO_ROOT}/deploy/helm/redepanda/values.yaml")"
 
-if [[ -z "${COMPOSE_BROKER}" || -z "${CHART_BROKER}" ]]; then
-    echo "?? broker parity: could not read the pin from both files, so it went unchecked"
-    drifted=1
-elif [[ "${COMPOSE_BROKER}" != "${CHART_BROKER}" ]]; then
-    echo "DRIFT broker parity: local and cluster run different brokers"
-    echo "     compose: ${COMPOSE_BROKER}"
-    echo "     chart:   ${CHART_BROKER}"
+if [[ -z "${CHART_BROKER}" ]]; then
+    echo "?? broker parity: no pin found in the chart, so nothing could be compared against it"
     drifted=1
 else
-    echo "ok broker parity: ${COMPOSE_BROKER}"
+    for source in "${BROKER_SOURCES[@]}"; do
+        source_broker="$(broker_ref "${REPO_ROOT}/${source}")"
+        if [[ -z "${source_broker}" ]]; then
+            echo "?? broker parity: no pin found in ${source}, so it went unchecked"
+            drifted=1
+        elif [[ "${source_broker}" != "${CHART_BROKER}" ]]; then
+            echo "DRIFT broker parity: ${source} and the chart name different brokers"
+            echo "     ${source}: ${source_broker}"
+            echo "     chart:     ${CHART_BROKER}"
+            drifted=1
+        else
+            echo "ok broker parity: ${source}"
+        fi
+    done
 fi
 
 # ---- Registry lookups ------------------------------------------------------------------------

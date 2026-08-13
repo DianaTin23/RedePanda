@@ -178,7 +178,8 @@ RedePanda/
 │   │       ├── topic-job.yaml     # Helm post-install hook
 │   │       ├── otel-collector.yaml # Deployment + Service + Collector-Config-ConfigMap
 │   │       └── prometheus.yaml    # Deployment + Service + Scrape-Config (Ziel: Collector)
-│   └── k8s/rendered.yaml          # generiert via `helm template`
+│                                  # (k8s/rendered.yaml stand hier einmal — zurückgenommen,
+│                                  #  siehe Statusnotiz vom 13.08. am Kopf dieses Dokuments)
 ├── scripts/
 │   ├── build-images.sh / .ps1     # Build + in den lokalen Cluster laden
 │   └── demo.sh / .ps1             # Port-Forwards für die Vorführung
@@ -340,7 +341,8 @@ Alles Weitere (zwei Browserfenster, Pod-Neustart, Helm-Deinstallation) ist eine
 ### Phase 5 — Dokumentation & Probelauf (03.–06.09.)
 
 - [x] README nach Abschnitt 5 dieses Plans
-- [x] `helm template` → `deploy/k8s/rendered.yaml` committen
+- [~] ~~`helm template` → `deploy/k8s/rendered.yaml` committen~~ — zurückgenommen, siehe E8 und
+      die Statusnotiz vom 13.08. am Kopf. Die Datei ist gelöscht, Helm ist der Installationsweg.
 - [ ] **Kompletter Probelauf auf einem frischen Cluster**, strikt nach eigener README —
       jemand, der es nicht gebaut hat, führt ihn durch
 - [ ] Repository auf public stellen, Gruppenmitglieder eintragen

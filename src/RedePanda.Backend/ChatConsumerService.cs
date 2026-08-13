@@ -284,14 +284,105 @@ public sealed class ChatConsumerService(
             "Replayed topic {Topic} to the end; the pod is ready to serve history", options.Topic);
     }
 
+    /// <summary>
+    /// How long the leave-group round trip may take before the pod stops waiting for it.
+    /// <para>
+    /// Chosen to keep the shutdown budget the README states: <c>preStop</c> 5 s + the host's 25 s
+    /// + the producer's 5 s flush is 35 s against a grace period of 45 s, and this is the fourth
+    /// term. It is generous for the case it is there for — a broker that answers closes in
+    /// milliseconds, and one that does not will not start answering within five seconds.
+    /// </para>
+    /// </summary>
+    internal static readonly TimeSpan CloseBudget = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Runs <paramref name="close"/> on a thread of its own and waits at most
+    /// <paramref name="budget"/> for it.
+    /// <para>
+    /// <c>Close()</c> is a blocking round trip to the group coordinator, and
+    /// <c>HostOptions.ShutdownTimeout</c> does not bound it: that timeout cancels the token passed
+    /// to <c>StopAsync</c>, and this call takes no token to cancel. Against an unreachable broker
+    /// the wait therefore ran past the whole shutdown budget and ended in a SIGKILL, which logs
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// The thread is a background thread precisely so it can be abandoned: one still blocked when
+    /// the budget is spent cannot hold the process open, and by that point the pod is leaving
+    /// anyway. Not a thread-pool item, which would tie up a pool thread for as long as the broker
+    /// stays away.
+    /// </para>
+    /// </summary>
+    /// <param name="failure">
+    /// What <paramref name="close"/> threw, or <c>null</c>. Reported rather than raised: the pod is
+    /// stopping either way, and a broker outage should read as a warning rather than as a stack
+    /// trace out of the shutdown path.
+    /// </param>
+    /// <returns><c>true</c> if the close finished inside the budget.</returns>
+    internal static bool TryCloseWithin(Action close, TimeSpan budget, out Exception? failure)
+    {
+        Exception? caught = null;
+
+        var closer = new Thread(() =>
+        {
+            try
+            {
+                close();
+            }
+            catch (Exception e)
+            {
+                caught = e;
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "kafka-consumer-close",
+        };
+
+        closer.Start();
+        var finished = closer.Join(budget);
+
+        // Only read after Join has reported the thread finished; otherwise it is still being
+        // written on the other thread.
+        failure = finished ? caught : null;
+        return finished;
+    }
+
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await base.StopAsync(cancellationToken);
 
-        // Close() tells the group coordinator we are leaving instead of waiting for the session
-        // timeout. It must run before Dispose().
-        _consumer?.Close();
-        _consumer?.Dispose();
+        var consumer = _consumer;
         _consumer = null;
+
+        if (consumer is null)
+        {
+            return;
+        }
+
+        // Close() tells the group coordinator we are leaving instead of waiting for the session
+        // timeout. It must run before Dispose(), and both are inside the budget: a Dispose that
+        // follows an abandoned Close would block on the same unreachable broker.
+        if (!TryCloseWithin(
+                () =>
+                {
+                    consumer.Close();
+                    consumer.Dispose();
+                },
+                CloseBudget,
+                out var failure))
+        {
+            logger.LogWarning(
+                "The Kafka consumer did not finish leaving its group within {Budget}; shutting " +
+                "down without it. The group coordinator will time the member out after its " +
+                "session timeout instead",
+                CloseBudget);
+            return;
+        }
+
+        if (failure is not null)
+        {
+            logger.LogWarning(
+                failure, "The Kafka consumer reported an error while leaving its group");
+        }
     }
 }

@@ -160,7 +160,7 @@ fi
 #     and committed them here;
 #   * `helm template` always renders .Release.Revision as 1, so the topic Job kept one name and the
 #     second `kubectl apply` failed on an immutable field;
-#   * nothing detected drift, and it drifted -- by 677 lines and five missing Secrets.
+#   * nothing detected drift, and it drifted -- by five missing Secrets and several hundred lines.
 #
 # Helm is the install path. The release artifact is deploy/releases/<version>.yaml, which is what
 # pins the immutable image tag and therefore what makes `helm rollback` restore a real build.

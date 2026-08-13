@@ -30,6 +30,12 @@ spec:
   # service anyone asked for.
   backoffLimit: 0
   ttlSecondsAfterFinished: {{ .Values.adminJob.ttlSecondsAfterFinished }}
+
+  # An upper bound on the run itself, which the TTL above is not: that one only reaps a pod that has
+  # already finished. It matters here and not in the topic Job because of `interactive: true` -- the
+  # chat client then reads stdin and waits for a `kubectl attach` that may never come, and an
+  # unattended one would otherwise hold a consumer and its memory until somebody noticed the pod.
+  activeDeadlineSeconds: {{ .Values.adminJob.activeDeadlineSeconds }}
   template:
     metadata:
       labels:

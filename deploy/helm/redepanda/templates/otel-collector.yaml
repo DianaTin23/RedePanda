@@ -18,14 +18,10 @@ spec:
         app.kubernetes.io/component: otel-collector
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/otel-collector-configmap.yaml") . | sha256sum }}
-        # Rotating the certificates must roll this pod: the config above names cert files that
-        # the collector reads once, at startup. See the same annotation on the backend.
         checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
     spec:
       securityContext:
         runAsNonRoot: true
-        # The image is FROM scratch and already runs as 10001; stated explicitly so the
-        # kubelet's runAsNonRoot check has a numeric uid to verify.
         runAsUser: 10001
         runAsGroup: 10001
         seccompProfile:
@@ -34,8 +30,6 @@ spec:
         - name: otel-collector
           image: {{ .Values.otelCollector.image | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          # The image's default CMD points at /etc/otelcol/config.yaml. Kubernetes `args`
-          # replaces CMD wholesale, so mounting the config anywhere else requires saying so.
           args: ["--config=/conf/config.yaml"]
           env:
             - name: OTELCOL_LOG_LEVEL
@@ -54,13 +48,9 @@ spec:
             - name: health
               containerPort: 13133
           livenessProbe:
-            # Answered by the health_check extension, which must appear both under
-            # `extensions:` and under `service.extensions:` or this port is simply not open.
             httpGet:
               path: /
               port: health
-              # The extension now serves TLS, so the kubelet has to speak it. Unverified, as
-              # everywhere else a probe is concerned; see the note on the backend.
               scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -73,8 +63,6 @@ spec:
             periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false
-            # Verified: this pipeline (otlp -> memory_limiter/batch -> prometheus/debug) never
-            # writes to disk, so it needs no writable mount at all.
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
@@ -82,8 +70,6 @@ spec:
             - name: config
               mountPath: /conf
               readOnly: true
-            # The certificate every server in that config presents: OTLP on 4317 and 4318, the
-            # Prometheus exporter on 8889 and the health endpoint on 13133.
             - name: tls
               mountPath: {{ include "redepanda.tlsMountPath" . }}
               readOnly: true
@@ -121,6 +107,4 @@ spec:
     - name: self-metrics
       port: 8888
       targetPort: self-metrics
-    # Port 13133 is intentionally absent: the health endpoint is for the kubelet, not for other
-    # pods. Forward it against deploy/... rather than svc/... when debugging.
 {{- end }}

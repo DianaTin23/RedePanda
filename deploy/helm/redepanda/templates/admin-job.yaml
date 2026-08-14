@@ -1,40 +1,15 @@
 {{- if .Values.adminJob.enabled }}
-{{- /*
-An ad-hoc admin process, in the release's own image and the release's own configuration.
-
-Why this exists as a template rather than as a `kubectl run` in the README: `kubectl run` has no
---envFrom, so every ad-hoc invocation would have to restate the broker address, the topic, the
-security protocol and the SASL Secret by hand. That is the second configuration source the topic
-Job was built to avoid, and it would be wrong in exactly the situation someone reaches for an
-admin command -- when the release is already misbehaving.
-
-It is topic-job.yaml with four changes and nothing else: a gate, args from values, no retries, and
-a terminal. Everything about identity, security context, volumes and configuration is the same,
-because being the same is the point (12-Factor XII).
-*/ -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  # Same revision suffix as the topic Job, and it has a sharper edge here. A Job's pod template is
-  # immutable, so re-running a *different* command at the same revision fails with "field is
-  # immutable" -- and an ad-hoc admin command is exactly the thing one wants to run twice in a row
-  # with different arguments. Every `helm upgrade` bumps the revision, so an upgrade that only
-  # changes adminJob.args does work; two `--set` runs at one revision do not.
   name: {{ include "redepanda.fullname" . }}-admin-{{ .Release.Revision }}
   labels:
     {{- include "redepanda.labels" . | nindent 4 }}
     app.kubernetes.io/component: admin-job
 spec:
-  # No retries, unlike the topic Job's 10. That one is idempotent and races a broker that is still
-  # starting; this one runs whatever it was told to run, and silently doing it again is not a
-  # service anyone asked for.
   backoffLimit: 0
   ttlSecondsAfterFinished: {{ .Values.adminJob.ttlSecondsAfterFinished }}
 
-  # An upper bound on the run itself, which the TTL above is not: that one only reaps a pod that has
-  # already finished. It matters here and not in the topic Job because of `interactive: true` -- the
-  # chat client then reads stdin and waits for a `kubectl attach` that may never come, and an
-  # unattended one would otherwise hold a consumer and its memory until somebody noticed the pod.
   activeDeadlineSeconds: {{ .Values.adminJob.activeDeadlineSeconds }}
   template:
     metadata:
@@ -45,7 +20,6 @@ spec:
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
-        # APP_UID from the .NET base image, numeric because runAsNonRoot rejects a named USER.
         runAsUser: 1654
         runAsGroup: 1654
         seccompProfile:
@@ -56,12 +30,9 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           args: {{ toJson .Values.adminJob.args }}
 
-          # So `kubectl attach -ti job/<name>` reaches the process. The chat client reads stdin in
-          # its interactive mode, and without these the pod has no terminal to attach to.
           stdin: {{ .Values.adminJob.interactive }}
           tty: {{ .Values.adminJob.interactive }}
           envFrom:
-            # The same ConfigMap the backend and the topic Job read, in full and unedited.
             - configMapRef:
                 name: {{ include "redepanda.fullname" . }}-config
           env:
@@ -88,7 +59,6 @@ spec:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
       volumes:
-        # The .NET runtime wants a writable temp directory; the root filesystem is read-only.
         - name: tmp
           emptyDir: {}
         {{- if .Values.redpanda.auth.caSecret }}

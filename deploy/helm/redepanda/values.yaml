@@ -1,411 +1,179 @@
-# Default values for the redepanda chart.
-#
-# Every image pulled from a registry is pinned by digest, not just by tag: a tag can be moved
-# to different content, a digest cannot. The tag is kept alongside it so the version stays
-# readable. The two locally built redepanda-* images are the exception and are explained where
-# they are defined. scripts/check-digests.sh reports when an upstream tag has moved off its
-# digest.
-#
-# This file alone does not describe a deployable release: the two image tags are deliberately
-# empty and are supplied by a generated release file. See the `release` block below.
+# Vorgabewerte des redepanda-Charts.
+# Begruendungen zu allen Schaltern hier: docs/deployment.md
 
 nameOverride: ""
 fullnameOverride: ""
 
-# ---- Release identity -------------------------------------------------------------------------
-# Filled in by deploy/releases/<version>.yaml, which scripts/build-images.sh generates alongside
-# the images. Keeping it out of this file is the point: a release is a named artifact produced by
-# a build, not a value someone edits by hand between deployments.
-#
-#   ./scripts/build-images.sh --load kind
-#   helm upgrade --install redepanda ./deploy/helm/redepanda \
-#     -n redepanda -f deploy/releases/<version>.yaml --description "release <version>"
-#
-# version is what ends up in the app.kubernetes.io/version label on every object, so
-# `kubectl get pods -L app.kubernetes.io/version` names the running release.
+# Wird von deploy/releases/<version>.yaml gefuellt. Ohne Release-Datei bricht das Chart ab.
 release:
   version: ""
   gitSha: ""
   builtAt: ""
-  # True when the images were built from an unclean working tree. Such a build is reproducible
-  # only by accident and is not committed as a release; the flag keeps that visible in-cluster
-  # rather than only in the tag.
+  # true, wenn aus einem unsauberen Arbeitsbaum gebaut.
   dirty: false
 
-# Locally built images are not in any registry, so the kubelet must not try to fetch them.
-# IfNotPresent rather than Never: Never fails outright with ErrImageNeverPull on Docker
-# Desktop, where the image is already present and no pull would happen anyway.
+# IfNotPresent, nicht Never: Never scheitert auf Docker Desktop mit ErrImageNeverPull.
 imagePullPolicy: IfNotPresent
 
-# ---- Transport security -----------------------------------------------------------------------
-# Every HTTP hop in this release is TLS, and every client verifies its peer against the CA the
-# chart mints on the first install -- no `insecure_skip_verify` anywhere. There is deliberately no
-# switch to turn this off: an off position nobody demonstrates is an untested code path, and the
-# templates would carry a second variant of every port, probe and mount to support it.
-#
-# Certificates are reused across upgrades, never rotated silently. To rotate them, delete the
-# Secrets and upgrade:
-#   kubectl -n redepanda delete secret -l app.kubernetes.io/instance=redepanda,app.kubernetes.io/component=tls
-#   kubectl -n redepanda delete secret redepanda-frontend-tls redepanda-backend-tls \
-#     redepanda-otel-collector-tls redepanda-prometheus-tls
-#   helm upgrade redepanda ./deploy/helm/redepanda -n redepanda -f deploy/releases/<version>.yaml
+# Das Chart stellt bei der ersten Installation eine eigene CA aus. Kein Ausschalter.
 tls:
   caValidityDays: 3650
-
-  # 825 days is the longest a leaf certificate may be valid and still be accepted by Safari and
-  # Chrome. Irrelevant to a private CA, which those browsers do not enforce it for, and kept
-  # anyway so the number does not have to be defended later.
+  # 825 Tage: Hoechstlaufzeit, die Safari und Chrome fuer ein Leaf-Zertifikat akzeptieren.
   certValidityDays: 825
-
-  # The port the *browser* reaches, used only to build the redirect that :8080 answers with. It
-  # is the port-forwarded port from scripts/demo.sh rather than the container port, because a
-  # redirect is followed by the client and has to name something the client can reach.
+  # Der Port, den der *Browser* erreicht; nur fuer die Weiterleitung von :8080.
   publicHttpsPort: 8443
 
-# ---- Chat settings shared by every component --------------------------------------------------
 chat:
   topic: redepanda-chat
   partitions: 1
   replicationFactor: 1
+  # Zeichen je Nachricht. Haengt an ChatMessage.DefaultMaxTextLength.
   maxMessageLength: 500
-
-  # Obergrenze für eine einzelne Nachricht im Producer (librdkafka `message.timeout.ms`). Dessen
-  # Default sind 300 000 ms — fünf Minuten —, und der Producer sitzt hier im Request-Pfad eines
-  # POST: gegen einen nicht erreichbaren Broker hinge der Browser samt Eingabefeld fünf Minuten an
-  # einer Antwort, die nach wenigen Sekunden feststeht.
-  #
-  # 10 s überstehen eine Leader-Wahl oder einen Broker-Neustart und sind kurz genug, dass jemand
-  # eine Fehlermeldung sieht statt eines eingefrorenen Fensters.
+  # librdkafkas message.timeout.ms. Dessen Vorgabe von 300000 haelt einen POST fuenf Minuten offen.
   produceTimeoutMs: 10000
-
-  # Nachrichten, die ein Raum beim Betreten nachliefert. Begrenzt, und bewusst nicht mehr 0: diesen
-  # Puffer hält *jede* Replica im eigenen Speicher. Unbegrenzt wächst er mit der Retention des
-  # Brokers, und der HPA weiter unten vervielfacht ihn genau dann, wenn die Pods ohnehin unter Last
-  # stehen.
-  #
-  # 200 Nachrichten sind im schlechtesten Fall (500 Zeichen je Nachricht) rund 240 KB pro Raum —
-  # auch bei 100 Räumen weit unter dem Memory-Limit von 512Mi.
-  #
-  # 0 bleibt zulässig und heißt weiterhin „alles, was im Topic liegt".
+  # Nachrichten je Raum im Verlaufspuffer. 0 = alles, was im Topic liegt.
   historySize: 200
-
-  # Wie viele Räume eine Replica gleichzeitig im Verlauf hält. `historySize` begrenzt einen Raum,
-  # dieser Wert begrenzt die Anzahl der Räume — ohne ihn war der Puffer nur zur Hälfte begrenzt,
-  # und die offene Hälfte bestimmte nicht die Konfiguration, sondern wer einen Raumnamen in die
-  # Query-Zeile schreibt. Jede Replica hält jeden Raum, weil jede den ganzen Topic liest.
-  #
-  # Verdrängt wird der Raum, dessen letzte Nachricht am ältesten ist. Verloren geht dabei nur, was
-  # dieser Pod beim Betreten nachliefern kann — im Topic stehen die Nachrichten weiter. Dieselbe
-  # Abwägung trifft `replayRecords` weiter unten schon beim Start.
-  #
-  # 200 Räume sind bei `historySize: 200` im schlechtesten Fall rund 48 MB je Replica und damit
-  # weiterhin eine Größenordnung unter dem Memory-Limit von 512Mi. 0 heißt „so viele, wie kommen"
-  # und stellt das frühere Verhalten wieder her.
+  # Gleichzeitig gehaltene Raeume je Replica. 0 = so viele, wie kommen.
   maxRooms: 200
-
-  # Wie weit ein startender Pod zurückliest, **pro Partition**. Bewusst eine eigene Zahl und nicht
-  # aus `historySize` abgeleitet, weil die beiden Verschiedenes zählen: `historySize` gilt pro
-  # *Raum* und begrenzt den Speicher, dieser Wert gilt pro *Partition* und begrenzt die Startzeit.
-  # Ein Pod, der genau `historySize` Sätze zurückliest, füllte keinen einzigen Raum mehr vollständig,
-  # sobald zwei Räume aktiv sind — und der Name hätte niemanden gewarnt.
-  #
-  # Vorher las jede Replica den gesamten Topic, bevor sie ready wurde: Startzeit und Leselast am
-  # Broker wuchsen mit dem Topic *und* mit der Replica-Zahl, also genau dann am stärksten, wenn der
-  # HPA wegen Last zusätzliche Pods startet.
-  #
-  # 2000 Sätze sind rund 1 MB je Partition. 0 heißt „alles, was im Topic liegt" und stellt das
-  # frühere Verhalten wieder her.
+  # Wie weit ein startender Pod zurueckliest, **je Partition**. 0 = das ganze Topic.
   replayRecords: 2000
 
-# ---- Backend ----------------------------------------------------------------------------------
 backend:
-  # No digest, unlike the third-party images below: this is built locally by
-  # scripts/build-images.sh and never pulled from a registry, so a digest would guard against a
-  # registry moving content that no registry ever serves. Pinning one would also break
-  # imagePullPolicy: IfNotPresent, which matches on the tag.
-  #
-  # What the digest does for the images below, the tag does here: build-images.sh derives it from
-  # the chart's appVersion and the git commit and never reuses it, so one tag means one build.
-  # The empty default is intentional -- the chart refuses to render without a release file rather
-  # than quietly deploying whatever a mutable name happens to point at today.
+  # Lokal gebaut, nie aus einer Registry gezogen. Tag kommt aus der Release-Datei.
   image:
     repository: redepanda-backend
     tag: ""
 
-  # Zusätzliche Umgebungsvariablen für das Backend, im normalen `env:`-Format. Sie stehen im
-  # Container **hinter** der ConfigMap, und Kubernetes lässt den späteren Eintrag gewinnen — dieser
-  # Block kann also auch überschreiben, nicht nur ergänzen. Genau das macht ihn für eine einmalige
-  # Diagnose brauchbar:
-  #
-  #   helm upgrade ... --set-json 'backend.extraEnv=[{"name":"LOG_LEVEL","value":"Debug"}]'
-  #
-  # Vorher gab es im ganzen Chart keinen einzigen Durchreicher für Umgebungsvariablen, und jede
-  # neue Variable brauchte eine Template-Änderung — für ein Chart, dessen Thema „Konfiguration in
-  # der Umgebung" ist, die falsche Form.
+  # Zusaetzliche Umgebungsvariablen im env:-Format. Stehen hinter der ConfigMap und ueberschreiben sie.
   extraEnv: []
 
-  # Two replicas, not one. Every pod consumes under its own group id and therefore sees every
-  # message; and the SSE `id` is the **Kafka offset**, which is the broker's and not any one pod's.
-  # A browser that resumes on a *different* replica sends the same Last-Event-ID and gets exactly
-  # what it missed.
-  #
-  # That is why the Service needs neither sticky sessions nor sessionAffinity — and why the second
-  # replica here is real work rather than a claim. Delete one pod during the demo: the windows on
-  # the other one notice nothing at all.
-  #
-  # Ignored while backend.autoscaling.enabled is true: the Deployment then omits the field so that
-  # Helm and the autoscaler do not fight over it.
   replicas: 2
+  # .NET-Schreibweise (Trace|Debug|Information|Warning|Error|Critical|None).
   logLevel: Information
 
-  # 5s preStop + the application's own 25s shutdown timeout = 30s. The grace period covers the hook
-  # as well as the signal, so 45s leaves 15s of slack before SIGKILL.
+  # 5s preStop + 25s Shutdown-Timeout der Anwendung, mit Puffer vor SIGKILL.
   terminationGracePeriodSeconds: 45
 
-  # The CPU request is Kubernetes' scheduling floor — and, once the autoscaler below runs, the
-  # **denominator** of its target utilisation. Hence 100m rather than the 50m that were enough for a
-  # one-pod demo: at 50m, 70% is 35m, which an idle ASP.NET Core pod with GC and a 5-second metric
-  # export already brushes against — the HPA would sit at maxReplicas from the first second.
-  #
-  # Still no CPU limit, as everywhere else in this chart. It would not change the HPA's arithmetic
-  # (utilisation is measured against the request, not the limit) and CFS throttling would cap the
-  # very signal the HPA reads: an overloaded pod would report as merely busy.
+  # Der CPU-Request ist zugleich der Nenner der HPA-Zielauslastung. Bewusst kein CPU-Limit.
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { memory: 512Mi }
 
-  # Off by default, and that is a decision rather than an oversight: an HPA needs metrics-server,
-  # which neither kind nor Docker Desktop ships. Without it the object exists, reads `<unknown>/70%`
-  # forever and never scales — which looks more broken than shipping no autoscaler at all. The
-  # README has the two commands that turn it on.
+  # Aus per Vorgabe: ein HPA braucht metrics-server, den kind und Docker Desktop nicht mitbringen.
   autoscaling:
     enabled: false
-
-    # Never below the baseline the PodDisruptionBudget and the rollout strategy are written for.
+    # Nie unter die Basislinie, fuer die PDB und Rollout-Strategie geschrieben sind.
     minReplicas: 2
-
-    # An upper bound from arithmetic, not a guess: 4 x 100m + Redpanda 200m + collector 50m +
-    # Prometheus 50m + 2 x frontend 10m = 720m. Fits on a one-CPU node.
+    # Obergrenze aus Arithmetik: passt zusammen mit allem uebrigen auf einen Ein-CPU-Node.
     maxReplicas: 4
-
-    # Percent of the CPU **request** above, not of the limit and not of the node.
+    # Prozent des CPU-*Requests*, nicht des Limits und nicht des Nodes.
     targetCPUUtilizationPercentage: 70
-
-    # Kubernetes defaults to 300s. Right for production, longer than the whole demo — shortened for
-    # the same reason as the metric export interval and the scrape interval: a number nobody sees
-    # move demonstrates nothing.
+    # Kubernetes-Vorgabe waeren 300s -- laenger als die ganze Demo.
     scaleDownStabilizationSeconds: 60
 
-# ---- Frontend ---------------------------------------------------------------------------------
 frontend:
-  # Locally built, not pulled, tag supplied by the release file — see backend.image above.
+  # Lokal gebaut, Tag aus der Release-Datei -- siehe backend.image.
   image:
     repository: redepanda-frontend
     tag: ""
-  # Zwei, aus demselben Grund wie beim Backend -- und mit mehr Nachdruck: *jeder* SSE-Stream läuft
-  # durch dieses Deployment. Mit einem einzigen Caddy-Pod wäre die Redundanz des Backends nicht
-  # beobachtbar, weil ein einziger geräumter Node trotzdem jeden Browser trennt. Caddy hält keinen
-  # Zustand, die zweite Replica kostet 10m CPU.
+  # Zwei, weil *jeder* SSE-Stream durch dieses Deployment laeuft.
   replicas: 2
-
-  # 5s preStop + Caddys eigener Shutdown offener Requests, mit Puffer vor SIGKILL. Kürzer als die
-  # 45s des Backends: hier muss weder eine Consumer-Group verlassen noch ein Producer geflusht
-  # werden.
+  # Kuerzer als beim Backend: keine Consumer-Group zu verlassen, kein Producer zu flushen.
   terminationGracePeriodSeconds: 30
-
-  # Caddy's level, for the access log and its own runtime log alike: DEBUG, INFO, WARN or ERROR.
-  # Deliberately spelled differently from backend.logLevel above — that one is .NET's vocabulary
-  # (`Information`), this one is Caddy's, and Caddy rejects the .NET spelling at startup rather
-  # than falling back to a default.
+  # Caddys Schreibweise (DEBUG|INFO|WARN|ERROR), nicht die von .NET.
   logLevel: INFO
-
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }
 
-# ---- Chat client / Admin-Prozess --------------------------------------------------------------
-# Ein eigenes Image, aber aus **demselben Build unter demselben Tag** wie Backend und Frontend --
-# nicht dasselbe Image: der Client baut auf `runtime:10.0`, das Backend braucht `aspnet:10.0`. Was
-# Faktor XII verlangt, ist auch nicht ein gemeinsames Image, sondern dass der Admin-Prozess
-# denselben Code und dieselbe Konfiguration mitbringt wie die Anwendung, statt ein Shell-Skript in
-# einem fremden Image zu sein. Beides gilt hier: derselbe Build, derselbe Tag, dieselbe ConfigMap
-# per `envFrom`. Tag wie oben aus der Release-Datei.
-#
-# Der Topic-Job führt es mit `--ensure-topic` aus; adminJob weiter unten mit allem anderen.
+# Eigenes Image, aber aus demselben Build und unter demselben Tag wie Backend und Frontend.
 chatClient:
   image:
     repository: redepanda-chatclient
     tag: ""
 
-# ---- Ad-hoc Admin-Prozess ---------------------------------------------------------------------
-# Ein einmaliger Job im Image und in der Konfiguration *dieses* Releases (12-Factor XII). Aus
-# demselben Build wie Backend und Frontend, mit derselben ConfigMap per `envFrom` und demselben
-# SASL-Secret wie der Topic-Job — es gibt also keine zweite Konfigurationsquelle, die abweichen
-# könnte.
-#
-#   helm upgrade redepanda deploy/helm/redepanda -f "$REL" \
-#     --set adminJob.enabled=true \
-#     --set-json 'adminJob.args=["--describe-topic"]'
-#   kubectl -n redepanda logs job/redepanda-admin-<revision>
-#
-# Zu beachten: der Name trägt die Release-Revision, und das Pod-Template eines Jobs ist
-# unveränderlich. Zwei verschiedene Kommandos innerhalb *derselben* Revision scheitern deshalb an
-# „field is immutable"; jedes `helm upgrade` zählt die Revision hoch, ein zweiter Lauf mit anderen
-# Argumenten ist also ein weiteres `upgrade`, kein Sonderfall.
-# ---- Topic-Job ---------------------------------------------------------------------------------
 topicJob:
-  # Wie lange `--ensure-topic` auf Broker-Metadaten wartet, bevor es aufgibt und der Job es erneut
-  # versucht. Beim Install läuft er gegen einen Broker, der gerade erst startet, deshalb großzügig.
-  #
-  # Stand früher als feste 180 in templates/topic-job.yaml, während README Abschnitt 9
-  # `TOPIC_WAIT_SECONDS` als Einstellung führte — gegen einen fremden, langsam startenden Broker
-  # war das eine Änderung an einem Template statt an einer Wertedatei.
-  #
-  # Zusammen mit `backoffLimit: 10` im Template ergibt das die Obergrenze, bis zu der ein fehlender
-  # Broker den Job beschäftigt: 10 × dieser Wert. Wer das `--timeout` von `helm upgrade` kürzer
-  # setzt, sieht die Installation scheitern, während der Job noch berechtigt weiterläuft.
+  # Wie lange --ensure-topic auf Broker-Metadaten wartet. Mit backoffLimit 10 im Template die Obergrenze.
   brokerWaitSeconds: 180
 
+# Einmaliger Admin-Job im Image und in der Konfiguration dieses Releases (12-Factor XII).
 adminJob:
   enabled: false
-
-  # Argumente an den Chat-Client. --help listet sie auf.
+  # Argumente an den Chat-Client; --help listet sie auf.
   args: ["--print-config"]
-
-  # stdin/tty für `kubectl attach -ti`. Nur für den interaktiven Chat-Client nötig; ein
-  # --describe-topic braucht kein Terminal.
+  # stdin/tty fuer `kubectl attach -ti`. Nur fuer den interaktiven Chat-Client noetig.
   interactive: false
-
-  # Wie lange auf den Broker gewartet wird, bevor aufgegeben wird. Kürzer als beim Topic-Job: der
-  # läuft beim Install gegen einen Broker, der erst startet, dieser hier gegen einen, der laufen
-  # sollte.
+  # Kuerzer als beim Topic-Job: der laeuft gegen einen Broker, der laufen sollte.
   brokerWaitSeconds: 60
-
-  # Der Pod verschwindet nach dieser Zeit von selbst. Länger als beim Topic-Job, weil hier jemand
-  # die Ausgabe lesen will.
+  # Aufbewahrung des Pods *nach* dem Ende.
   ttlSecondsAfterFinished: 3600
-
-  # Nach dieser Zeit bricht Kubernetes den Job ab. Nötig wegen `interactive: true`: der Chat-Client
-  # liest dann von stdin und wartet, bis jemand `kubectl attach` macht — passiert das nie, liefe der
-  # Pod ohne diese Grenze unbegrenzt weiter und hielte einen Consumer und seinen Speicher.
-  #
-  # Großzügiger als `ttlSecondsAfterFinished`, weil die beiden Verschiedenes zählen: dies ist die
-  # Laufzeit *bis* zum Ende, jenes die Aufbewahrung *danach*.
+  # Laufzeit *bis* zum Ende. Noetig wegen interactive: true.
   activeDeadlineSeconds: 7200
-
   extraEnv: []
 
-# ---- Redpanda broker --------------------------------------------------------------------------
 redpanda:
-  # Auf false wird *kein* Broker deployt und die Anwendung zeigt auf `external.bootstrapServers`.
-  # Das ist die Probe darauf, dass Redpanda wirklich ein austauschbarer Backing Service ist und
-  # nicht nur ein mitgeliefertes StatefulSet: ohne diesen Schalter bliebe die Behauptung in
-  # Abschnitt 11 der README unbelegt.
+  # Auf false wird kein Broker deployt; die Anwendung zeigt dann auf external.bootstrapServers.
   enabled: true
 
   external:
-    # Pflicht, sobald enabled: false -- sonst bricht das Chart beim Rendern ab, statt ein Backend
-    # zu deployen, das gegen einen Service läuft, den niemand deployt hat.
+    # Pflicht, sobald enabled: false -- sonst bricht das Chart beim Rendern ab.
     bootstrapServers: ""
 
-  # Der mitgelieferte Broker spricht Plaintext auf einem Cluster-internen Service. Jeder andere --
-  # verwaltetes Redpanda, ein gemeinsam genutztes Kafka -- braucht TLS, Zugangsdaten oder beides.
-  # Ohne das hier wäre „ohne Codeänderung austauschbar" nur für genau einen Broker wahr.
   auth:
-    # Plaintext, Ssl, SaslPlaintext oder SaslSsl. Die Schreibweise aus den Broker-Dokus
-    # (`SASL_SSL`) wird ebenfalls akzeptiert.
+    # Plaintext, Ssl, SaslPlaintext oder SaslSsl. Die Schreibweise SASL_SSL wird ebenfalls akzeptiert.
     securityProtocol: Plaintext
-
-    # Pflicht bei einem SASL-Protokoll: Plain, ScramSha256, ScramSha512 (auch `SCRAM-SHA-512`).
+    # Pflicht bei einem SASL-Protokoll: Plain, ScramSha256, ScramSha512 (auch SCRAM-SHA-512).
     saslMechanism: ""
-
-    # Name eines *bestehenden* Secrets mit den Schlüsseln `username` und `password`. Bewusst ein
-    # Verweis und kein Wert: Zugangsdaten in values.yaml landen in `helm get values`, im
-    # Shell-Verlauf und in jedem Repo, das die Datei enthält. Bei einem SASL-Protokoll ohne dieses
-    # Feld bricht das Chart ab.
+    # Name eines *bestehenden* Secrets mit den Schluesseln username und password. Nie ein Wert hier.
     existingSecret: ""
-
-    # Optional, nur bei TLS: Secret mit dem Schlüssel `ca.crt` für eine private CA. Ohne das
-    # benutzt librdkafka den System-Truststore, was für ein öffentlich vertrauenswürdiges
-    # Zertifikat das Richtige ist.
+    # Optional, nur bei TLS: Secret mit dem Schluessel ca.crt fuer eine private CA.
     caSecret: ""
 
-  # docker.io rather than docker.redpanda.com: the latter is a pull-through proxy in front of
-  # this same repository, and it rate-limits anonymous manifest reads hard enough that the
-  # digest cannot be resolved or re-checked reliably. Pointing at the origin keeps the pin
-  # verifiable. RedePanda-kafka-docker/docker-compose.yml was moved with it so local
-  # development and the chart still agree on one image.
+  # docker.io statt docker.redpanda.com: Letzteres drosselt anonyme Manifest-Zugriffe zu hart.
+  # Muss mit RedePanda-kafka-docker/docker-compose.yml uebereinstimmen (scripts/check-digests.sh).
   image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
 
-  # Service name kept short because it is baked into REDPANDA_BOOTSTRAP_SERVERS defaults and
-  # into the broker's own advertised address.
+  # Kurz gehalten: steht im advertise-kafka-addr und in jedem Bootstrap-Vorgabewert.
   serviceName: redpanda
   storage: 1Gi
   storageClassName: ""
 
-  # Seastar needs explicit limits in a container or it sizes itself against the whole node.
+  # Seastar bemisst sich in einem Container sonst am ganzen Node.
   smp: 1
   memory: 1G
   resources:
     requests: { cpu: 200m, memory: 1Gi }
     limits: { memory: 2Gi }
 
-# ---- OpenTelemetry Collector ------------------------------------------------------------------
 otelCollector:
   enabled: true
 
-  # Auf `enabled: false` wird *kein* Collector deployt. Steht dann hier ein Endpunkt, exportiert das
-  # Backend dorthin; steht keiner da, wird das SDK abgeschaltet.
-  #
-  # Das ist die Probe darauf, dass auch das Telemetrie-Backend ein austauschbarer Backing Service
-  # ist. Die Anwendung konnte das immer — sie liest `OTEL_EXPORTER_OTLP_ENDPOINT` —, das Chart nicht:
-  # ohne diesen Schalter war der einzige Weg zu einem vorhandenen Collector eine Änderung an
-  # `templates/configmap.yaml`, und damit war die Behauptung in Abschnitt 11 für das Deployment
-  # unbelegt.
-  #
-  # Prometheus muss dabei ebenfalls aus: das mitgelieferte Prometheus kennt als Scrape-Ziel nur den
-  # mitgelieferten Collector und kann einen fremden nicht abfragen. Das Chart sagt das beim Rendern.
+  # Auf enabled: false wird kein Collector deployt. Steht hier ein Endpunkt, exportiert das
+  # Backend dorthin; steht keiner da, wird das SDK abgeschaltet. Prometheus muss dann ebenfalls aus.
   external:
     # z. B. "https://otel-collector.observability:4317"
     endpoint: ""
-
-    # grpc oder http/protobuf, je nachdem, worauf der fremde Collector hört.
+    # grpc oder http/protobuf, je nachdem, worauf der fremde Collector hoert.
     protocol: "grpc"
-
-    # Name eines Secrets mit dem Schlüssel `ca.crt`: die CA, gegen die das Backend das Zertifikat
-    # eines *fremden* Collectors prüft. Nur nötig, wenn dessen Zertifikat von einer privaten CA
-    # stammt — bei einer öffentlich vertrauenswürdigen genügt der Trust Store des Images.
-    #
-    # Ohne diesen Schlüssel galt der Austausch des Telemetrie-Backends nur unter einer Bedingung,
-    # die nirgends stand: der Init-Container, der die CA in den Trust Store faltet, hing an
-    # `otelCollector.enabled`. Ein fremder Collector hinter privater CA war damit nicht
-    # erreichbar, und zwar ohne Fehlermeldung, die das erklärt hätte.
-    #
-    #   kubectl -n redepanda create secret generic otel-ca --from-file=ca.crt=/pfad/zur/ca.crt
+    # Secret mit dem Schluessel ca.crt: die CA eines *fremden* Collectors hinter privater CA.
     caSecret: ""
 
-  # Core distribution, not contrib: core already contains the prometheus exporter and the
-  # health_check extension. otelcol-k8s would be wrong -- it has no prometheus exporter at all.
+  # Core-Distribution, nicht contrib: core hat den Prometheus-Exporter und health_check bereits.
   image: docker.io/otel/opentelemetry-collector:0.158.0@sha256:5b97e6e3550ec6e48a71dba6f6304d349a293af8df4ee1f51da67be94fce2ecd
   logLevel: info
-
-  # Set to "detailed" to have every received metric logged while debugging the pipeline.
+  # "detailed" protokolliert jede empfangene Metrik.
   debugVerbosity: basic
-
-  # The .NET SDK default is 60s, which looks frozen during a five-minute demo.
+  # Die .NET-Vorgabe waeren 60s, was in einer Demo eingefroren aussieht.
   metricExportIntervalMs: 5000
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 256Mi }
 
-# ---- Prometheus -------------------------------------------------------------------------------
-# Requires otelCollector.enabled: the collector is its only scrape target, so Prometheus on its
-# own would come up with nothing to scrape. The chart refuses that combination.
+# Braucht otelCollector.enabled: der Collector ist das einzige Scrape-Ziel.
 prometheus:
   enabled: true
   image: quay.io/prometheus/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
-
-  # 5s rather than the usual 15s so counters visibly move during the demo.
+  # 5s statt der ueblichen 15s, damit sich Zaehler in der Demo sichtbar bewegen.
   scrapeInterval: 5s
   retention: 6h
   resources:

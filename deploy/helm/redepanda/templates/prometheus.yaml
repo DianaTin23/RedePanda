@@ -18,16 +18,10 @@ spec:
         app.kubernetes.io/component: prometheus
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/prometheus-configmap.yaml") . | sha256sum }}
-        # Rotating the certificates must roll this pod: it both presents one and verifies the
-        # collector with the CA. See the same annotation on the backend.
         checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
     spec:
       securityContext:
         runAsNonRoot: true
-        # The image declares `USER nobody`, which is NOT numeric. With runAsNonRoot set and no
-        # runAsUser, the kubelet refuses to start the container:
-        #   "container has runAsNonRoot and image has non-numeric user (nobody)".
-        # 65534 is nobody.
         runAsUser: 65534
         runAsGroup: 65534
         fsGroup: 65534
@@ -37,13 +31,8 @@ spec:
         - name: prometheus
           image: {{ .Values.prometheus.image | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          # Setting args replaces the image's CMD entirely, and that CMD is exactly these two
-          # flags. Omitting --config.file would make Prometheus look for ./prometheus.yml
-          # relative to its WORKDIR (/prometheus) and exit with a config load error.
           args:
             - --config.file=/etc/prometheus/prometheus.yml
-            # TLS for the UI and the API. It is a separate flag and a separate file on purpose:
-            # prometheus.yml describes what Prometheus scrapes, this describes how it is reached.
             - --web.config.file=/etc/prometheus/web.yml
             - --storage.tsdb.path=/prometheus
             - --storage.tsdb.retention.time={{ .Values.prometheus.retention }}
@@ -54,7 +43,6 @@ spec:
             httpGet:
               path: /-/healthy
               port: https
-              # TLS without verification, as on every other probe in this chart.
               scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 15
@@ -75,11 +63,7 @@ spec:
               mountPath: /etc/prometheus
               readOnly: true
             - name: tsdb
-              # Required by readOnlyRootFilesystem: the TSDB is written here. It is an emptyDir
-              # on purpose -- the demo needs no metric history across restarts.
               mountPath: /prometheus
-            # Both halves of Prometheus' TLS: the certificate it presents on 9090, and the CA it
-            # verifies the collector with when scraping 8889.
             - name: tls
               mountPath: {{ include "redepanda.tlsMountPath" . }}
               readOnly: true

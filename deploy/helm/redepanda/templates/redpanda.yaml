@@ -1,9 +1,3 @@
-{{- /*
-The bundled broker, and nothing of it is rendered when redpanda.enabled is false: the
-application then talks to redpanda.external.bootstrapServers, and a broker nobody uses would
-still claim a PersistentVolume and a gigabyte of memory. This switch is what makes "austauschbarer
-Backing Service" something the chart can actually do rather than something the README asserts.
-*/ -}}
 {{- if .Values.redpanda.enabled -}}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -27,12 +21,8 @@ spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
-        # The image creates its user with --uid 101 --gid 101.
         runAsUser: 101
         runAsGroup: 101
-        # Without fsGroup a freshly provisioned PVC is mounted root-owned and the broker cannot
-        # write its data directory. It only bites on a *fresh* volume, so it survives every
-        # upgrade test and then fails on the first clean install.
         fsGroup: 101
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
@@ -42,14 +32,8 @@ spec:
           image: {{ .Values.redpanda.image | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
 
-          # `command` replaces the image ENTRYPOINT (/entrypoint.sh), and that script is the
-          # only thing that maps the name `redpanda` onto rpk. /usr/bin/redpanda is the Seastar
-          # broker binary: it does not understand `start` or `--mode` and exits immediately with
-          # a parse error. Invoking rpk explicitly is what the official chart does too.
           command: [rpk, redpanda, start]
           args:
-            # dev-container already implies --overprovisioned, --reserve-memory 0M and
-            # --check=false, but NOT --smp, which is why that one is still listed.
             - --mode=dev-container
             - --smp={{ .Values.redpanda.smp }}
             - --memory={{ .Values.redpanda.memory }}
@@ -76,9 +60,6 @@ spec:
             failureThreshold: 12
           securityContext:
             allowPrivilegeEscalation: false
-            # Deliberately NOT read-only, unlike every other pod in this chart: `rpk redpanda
-            # start` writes the merged broker configuration to /etc/redpanda/redpanda.yaml on
-            # every start. This is recorded as a known limitation in the README.
             readOnlyRootFilesystem: false
             capabilities:
               drop: [ALL]
@@ -88,8 +69,6 @@ spec:
           resources:
             {{- toYaml .Values.redpanda.resources | nindent 12 }}
   volumeClaimTemplates:
-    # A volumeClaimTemplate rather than a standalone PVC, so the volume is bound to the
-    # StatefulSet's identity. Note that these PVCs deliberately outlive `helm uninstall`.
     - metadata:
         name: data
       spec:
@@ -117,10 +96,6 @@ spec:
       port: 9092
       targetPort: kafka
     - name: admin
-      # Redpanda's Admin API. Nothing in this chart speaks it any more -- the topic job uses the
-      # Kafka protocol on 9092 like every other client, which is also what lets it work against a
-      # managed broker that exposes no admin port. Kept because `rpk cluster health` from a shell
-      # is still the ordinary way to look at a broker by hand.
       port: 9644
       targetPort: admin
 {{- end -}}

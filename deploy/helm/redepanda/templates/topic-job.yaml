@@ -1,27 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  # The revision suffix is what lets this be an ordinary resource instead of a hook. A Job's pod
-  # template is immutable, so a fixed name would make every `helm upgrade` fail with "field is
-  # immutable"; a new name per revision sidesteps that, and Helm prunes the previous revision's
-  # Job because it is no longer in the manifest it is reconciling against.
   name: {{ include "redepanda.fullname" . }}-create-topic-{{ .Release.Revision }}
   labels:
     {{- include "redepanda.labels" . | nindent 4 }}
     app.kubernetes.io/component: topic-job
-  # Deliberately NOT a helm.sh/hook. As a post-install hook this could never run: Helm runs
-  # post-install hooks only after `--wait` reports the release ready, and the backend is not ready
-  # until it has read the topic this Job creates. That is a deadlock with no way out -- the install
-  # sits at pending-install until the timeout expires, having created no Job at all.
-  #
-  # An ordinary resource is applied alongside the broker and the Deployments, and `--wait` waits for
-  # it to reach Complete like anything else, so the ordering resolves itself: the Job polls for
-  # broker metadata (TOPIC_WAIT_SECONDS below) while the backend retries its subscribe, and both
-  # settle once the topic exists. It is also removed by `helm uninstall`, which a hook is not.
 spec:
   backoffLimit: 10
-  # Reaps the finished pod without waiting for the next upgrade to prune the Job, so a namespace
-  # that is installed once and left alone does not accumulate Completed pods.
   ttlSecondsAfterFinished: 300
   template:
     metadata:
@@ -32,33 +17,20 @@ spec:
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
-        # APP_UID from the .NET base image, numeric because runAsNonRoot rejects a named USER.
         runAsUser: 1654
         runAsGroup: 1654
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: create-topic
-          # The application's own image, running its own --ensure-topic mode. It used to be
-          # `rpk` in the Redpanda image driven by a thirty-line shell script: a second codebase
-          # and a second configuration source for a task that belongs to this application.
-          # 12-Factor XII asks for an admin process that ships and runs with the app, and this is
-          # what that costs -- one image, already built by the same script as the other two.
           image: {{ include "redepanda.image" (dict "ctx" . "component" "chatClient") | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           args: ["--ensure-topic"]
           envFrom:
-            # The same ConfigMap the backend reads, in full and unedited. Nothing about the broker
-            # or the topic is restated here, so the two cannot drift apart.
             - configMapRef:
                 name: {{ include "redepanda.fullname" . }}-config
           env:
             {{- include "redepanda.saslEnv" (dict "ctx" .) | nindent 12 }}
-            # The Job is applied at the same moment as the broker, so on a fresh install it will
-            # certainly start before there is anything to talk to; and against an external broker
-            # there may be nothing else to wait on at all. --ensure-topic polls for metadata until
-            # this budget is spent. It is a *metadata* request rather than `rpk cluster health`,
-            # which needs the Admin API on 9644 -- a port a managed broker has no reason to expose.
             - name: TOPIC_WAIT_SECONDS
               value: {{ .Values.topicJob.brokerWaitSeconds | quote }}
           securityContext:
@@ -78,7 +50,6 @@ spec:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
       volumes:
-        # The .NET runtime wants a writable temp directory; the root filesystem is read-only.
         - name: tmp
           emptyDir: {}
         {{- if .Values.redpanda.auth.caSecret }}

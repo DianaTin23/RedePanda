@@ -1,11 +1,4 @@
-# Every server this collector opens is TLS. The certificate and key are mounted from the chart's
-# <release>-otel-collector-tls Secret; the paths are the same in every pod of this release.
-#
-# The one exception is service.telemetry.metrics at the bottom, which has no TLS setting to
-# configure. It is called out there and in the README's list of known limitations.
 extensions:
-  # Without this block port 13133 is dead and the probes fail. It must ALSO be listed under
-  # service.extensions below, or it is parsed and then never started.
   health_check:
     endpoint: 0.0.0.0:13133
     path: /
@@ -17,7 +10,6 @@ receivers:
   otlp:
     protocols:
       grpc:
-        # Not localhost: nothing from another pod would ever arrive.
         endpoint: 0.0.0.0:4317
         tls:
           cert_file: /etc/redepanda/tls/tls.crt
@@ -29,7 +21,6 @@ receivers:
           key_file: /etc/redepanda/tls/tls.key
 
 processors:
-  # Must be the first processor so backpressure reaches the receiver.
   memory_limiter:
     check_interval: 1s
     limit_mib: 160
@@ -41,21 +32,15 @@ processors:
 exporters:
   prometheus:
     endpoint: 0.0.0.0:8889
-    # Prometheus scrapes this with scheme: https and verifies against the release CA; see the
-    # scrape config in templates/prometheus-configmap.yaml.
     tls:
       cert_file: /etc/redepanda/tls/tls.crt
       key_file: /etc/redepanda/tls/tls.key
-    # Stated explicitly rather than relying on the default behaviour. This is what turns
-    # redepanda.messages.sent into redepanda_messages_sent_total.
     translation_strategy: UnderscoreEscapingWithSuffixes
     send_timestamps: true
-    # Must exceed OTEL_METRIC_EXPORT_INTERVAL or series flicker between scrapes.
     metric_expiration: 5m
     without_scope_info: true
     resource_to_telemetry_conversion:
       enabled: false
-  # Named "debug"; the old "logging" exporter was removed in v0.111.0.
   debug:
     verbosity: ${env:OTELCOL_DEBUG_VERBOSITY:-basic}
 
@@ -70,12 +55,6 @@ service:
     logs:
       level: ${env:OTELCOL_LOG_LEVEL:-info}
     metrics:
-      # The collector's own pipeline metrics, and the one server here that is NOT TLS. This is a
-      # reader from the opentelemetry-configuration schema, not a confighttp server, and that
-      # schema gives a pull/prometheus reader host, port and a couple of formatting switches --
-      # there is no field to hand it a certificate. Left as plain HTTP and recorded in the
-      # README's known limitations rather than dropped: losing sight of whether the collector is
-      # silently discarding metrics would be the worse trade.
       readers:
         - pull:
             exporter:

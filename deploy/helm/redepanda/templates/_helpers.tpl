@@ -1,13 +1,7 @@
-{{/* Base name, overridable. */}}
 {{- define "redepanda.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/*
-Release-qualified name. With the conventional release name "redepanda" this collapses to
-"redepanda", which is what keeps the service names in the README short: redepanda-backend,
-redepanda-otel-collector and so on.
-*/}}
 {{- define "redepanda.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
@@ -21,21 +15,10 @@ redepanda-otel-collector and so on.
 {{- end -}}
 {{- end -}}
 
-{{/*
-The broker's service name is deliberately NOT release-qualified. It is written into the
-broker's own --advertise-kafka-addr and into every client's bootstrap default, and a short
-stable name keeps those readable and matching the documentation.
-*/}}
 {{- define "redepanda.brokerService" -}}
 {{- .Values.redpanda.serviceName -}}
 {{- end -}}
 
-{{/*
-Where every client looks for the broker: the bundled one, or whatever redpanda.external names
-when this chart deploys none. Empty is a hard error rather than a default, for the same reason
-an empty image tag is: the alternative is a backend that comes up and fails every connection
-against a Service nobody deployed.
-*/}}
 {{- define "redepanda.bootstrapServers" -}}
 {{- if .Values.redpanda.enabled -}}
 {{- printf "%s:9092" (include "redepanda.brokerService" .) -}}
@@ -46,17 +29,6 @@ against a Service nobody deployed.
 {{- end -}}
 {{- end -}}
 
-{{/*
-The configured broker protocol, normalised to the application's spelling. Underscores and dashes
-are stripped so the spelling from the broker documentation (SASL_SSL) matches here as well as in
-KafkaSecurity, which normalises the same way.
-
-Anything else is a hard error, and that is the point of this helper existing at all. The previous
-version compared against two strings and treated everything that did not match as "not SASL", so
-`SASL_PLAIN` -- a plausible typo -- rendered perfectly happily, mounted no credentials, and left
-the pods failing to authenticate against a broker that was working correctly. A silent no is the
-one answer a security setting must never give.
-*/}}
 {{- define "redepanda.securityProtocol" -}}
 {{- $raw := .Values.redpanda.auth.securityProtocol | default "Plaintext" -}}
 {{- $key := $raw | replace "_" "" | replace "-" "" | lower -}}
@@ -67,10 +39,6 @@ one answer a security setting must never give.
 {{- index $known $key -}}
 {{- end -}}
 
-{{/*
-Whether the configured protocol authenticates over SASL, i.e. whether the credentials from
-redpanda.auth.existingSecret have to be mounted into the pods.
-*/}}
 {{- define "redepanda.saslEnabled" -}}
 {{- $protocol := include "redepanda.securityProtocol" . -}}
 {{- if or (eq $protocol "SaslSsl") (eq $protocol "SaslPlaintext") -}}
@@ -78,9 +46,6 @@ true
 {{- end -}}
 {{- end -}}
 
-{{/*
-Whether the connection to the broker is encrypted, i.e. whether a private CA bundle is meaningful.
-*/}}
 {{- define "redepanda.brokerTls" -}}
 {{- $protocol := include "redepanda.securityProtocol" . -}}
 {{- if or (eq $protocol "Ssl") (eq $protocol "SaslSsl") -}}
@@ -88,11 +53,6 @@ true
 {{- end -}}
 {{- end -}}
 
-{{/*
-The SASL credentials, as environment variables from the referenced Secret. Rendered into both
-pod templates that speak Kafka, which is why it is a helper rather than eight duplicated lines.
-Call as (dict "ctx" .).
-*/}}
 {{- define "redepanda.saslEnv" -}}
 {{- with .ctx -}}
 {{- if include "redepanda.saslEnabled" . }}
@@ -114,37 +74,14 @@ Call as (dict "ctx" .).
 {{- printf "%s-otel-collector" (include "redepanda.fullname" .) -}}
 {{- end -}}
 
-{{/*
-Where each pod finds its certificate, its key and the release CA. One path for every component,
-because the mount is the same everywhere and a per-component path would only be something else
-to get wrong in a probe or a config file.
-*/}}
 {{- define "redepanda.tlsMountPath" -}}
 /etc/redepanda/tls
 {{- end -}}
 
-{{/*
-The version of the running release, not of the chart. .Chart.AppVersion is the fallback so
-`helm lint` and a bare `helm show` still produce something readable; in an actual deployment the
-release file always supplies it.
-*/}}
 {{- define "redepanda.releaseVersion" -}}
 {{- .Values.release.version | default .Chart.AppVersion -}}
 {{- end -}}
 
-{{/*
-Image reference for a locally built image. Call as (dict "ctx" . "component" "backend").
-
-The empty tag is a hard error rather than a default, because every plausible default is a
-mutable name: deploying one would put an unidentifiable image in the cluster and make the next
-`helm rollback` a no-op. Failing here costs one command; failing in the cluster costs an hour.
-
-Non-emptiness alone was not enough, though. `--set backend.image.tag=latest` satisfied it and
-rendered perfectly happily, which is precisely the deploy this guard exists to prevent -- so a
-mutable name is rejected by name, and a tag that arrived without the release metadata beside it
-is rejected as well. The two checks catch different mistakes: the first a deliberate mutable
-tag, the second any tag set by hand instead of by a release file.
-*/}}
 {{- define "redepanda.image" -}}
 {{- $image := index .ctx.Values .component "image" -}}
 {{- if not $image.tag -}}
@@ -159,11 +96,6 @@ tag, the second any tag set by hand instead of by a release file.
 {{- printf "%s:%s" $image.repository $image.tag -}}
 {{- end -}}
 
-{{/*
-Provenance of the running images, as annotations on the two pod templates that carry them.
-Empty values are omitted rather than rendered blank, so `kubectl describe` stays quiet when a
-chart is rendered without a release file (helm lint, for instance).
-*/}}
 {{- define "redepanda.releaseAnnotations" -}}
 {{- with .Values.release.gitSha }}
 redepanda.dev/git-sha: {{ . | quote }}
@@ -180,14 +112,6 @@ redepanda.dev/dirty-build: "true"
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/*
-Labels applied to every object. app.kubernetes.io/version carries the release version rather
-than the chart's appVersion: the question this label has to answer in a cluster is "which build
-is running", and appVersion is the same string on every revision.
-
-Changing it on an upgrade is safe -- it is not a selector. redepanda.selectorLabels below is
-deliberately separate and holds only immutable identity, so a Deployment's selector never moves.
-*/}}
 {{- define "redepanda.labels" -}}
 helm.sh/chart: {{ include "redepanda.chart" . }}
 app.kubernetes.io/name: {{ include "redepanda.name" . }}
@@ -196,7 +120,6 @@ app.kubernetes.io/version: {{ include "redepanda.releaseVersion" . | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
-{{/* Selector labels for one component. Call as (dict "ctx" . "component" "backend"). */}}
 {{- define "redepanda.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "redepanda.name" .ctx }}
 app.kubernetes.io/instance: {{ .ctx.Release.Name }}

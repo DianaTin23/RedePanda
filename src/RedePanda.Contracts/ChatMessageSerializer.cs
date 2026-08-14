@@ -3,13 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace RedePanda.Contracts;
 
-/// <summary>
-/// The single place where the Kafka payload format is defined.
-/// <para>
-/// Backend and console client must serialize identically or they silently stop understanding
-/// each other, so neither is allowed to call <see cref="JsonSerializer"/> with its own options.
-/// </para>
-/// </summary>
+/// <summary>The single place where the Kafka payload format is defined.</summary>
 public static class ChatMessageSerializer
 {
     private static readonly JsonSerializerOptions Options = new()
@@ -29,7 +23,6 @@ public static class ChatMessageSerializer
         }
         catch (JsonException)
         {
-            // A foreign or corrupt record must not take down the consumer loop.
             return null;
         }
     }

@@ -21,8 +21,6 @@ public sealed class ChatProducer : IDisposable
         _producer = new ProducerBuilder<string, string>(BuildConfig(options))
             .SetErrorHandler((_, error) =>
             {
-                // The metric counts every error; the log reports at most one per interval. See
-                // LogThrottle for why those two are treated differently.
                 _metrics.RecordKafkaError();
                 if (_errorLog.ShouldLog(out var suppressed))
                 {
@@ -32,9 +30,6 @@ public sealed class ChatProducer : IDisposable
                         LogThrottle.Describe(suppressed));
                 }
             })
-
-            // librdkafka writes its own diagnostics to stderr unless they are claimed here, which
-            // put them outside LOG_LEVEL and outside the JSON the platform collects.
             .SetLogHandler((_, message) =>
                 _logger.Log(
                     KafkaLogging.ToLogLevel(message.Level),
@@ -44,54 +39,27 @@ public sealed class ChatProducer : IDisposable
             .Build();
     }
 
-    /// <summary>
-    /// The producer's configuration, separate from the constructor so it can be asserted on
-    /// without a broker in the picture.
-    /// </summary>
+    /// <summary>The producer's configuration, separate so it can be asserted on without a broker.</summary>
     internal static ProducerConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <param name="read">
-    /// Where a security setting comes from, injected for the same reason
-    /// <see cref="KafkaSecurity.ApplyTo(ClientConfig, Func{string, string?})"/> injects it.
-    /// </param>
+    /// <summary>The producer's configuration, reading security settings through <paramref name="read"/>.</summary>
     internal static ProducerConfig BuildConfig(BackendOptions options, Func<string, string?> read)
     {
         var config = new ProducerConfig
         {
             BootstrapServers = options.BootstrapServers,
-
-            // Idempotence is what makes a retry safe *and ordered*. Without it librdkafka may
-            // deliver a retried record after one produced later, and the frontend's resume filter
-            // drops anything whose offset is not greater than the last it saw -- so a reordered
-            // retry was not a duplicate to be tolerated, it was a message lost for good, silently.
-            //
-            // It implies acks=all, bounds in-flight requests and enables retries, so Acks is set
-            // to match rather than left at Leader: librdkafka rejects the combination outright,
-            // and an explicit value is easier to read than an implied one.
             EnableIdempotence = true,
             Acks = Acks.All,
-
-            // Without this, librdkafka's five-minute default applies and the POST behind it holds
-            // the browser's composer open for the whole of it. See BackendOptions.ProduceTimeoutMs.
             MessageTimeoutMs = options.ProduceTimeoutMs,
-
-            // Strictly below the message timeout: at or above it, one in-flight request would
-            // spend the entire budget and the retry the message timeout allows would never happen.
             RequestTimeoutMs = options.ProduceTimeoutMs / 2,
         };
 
-        // A no-op against the plaintext broker in the chart; the whole of TLS and SASL against
-        // anything else. See RedePanda.Contracts.KafkaSecurity.
         KafkaSecurity.ApplyTo(config, read);
         return config;
     }
 
-    /// <summary>
-    /// How a failed produce is reported to the browser. A timeout means the request was never
-    /// answered either way, which is a gateway *timeout*; anything the broker actively refused is
-    /// a bad gateway.
-    /// </summary>
+    /// <summary>How a failed produce is reported to the browser.</summary>
     internal static int StatusCodeFor(Error error) => error.Code switch
     {
         ErrorCode.Local_MsgTimedOut or ErrorCode.Local_TimedOut =>
@@ -108,8 +76,6 @@ public sealed class ChatProducer : IDisposable
             Value = ChatMessageSerializer.Serialize(message),
         };
 
-        // Delivery failures never reach the error handler above — librdkafka's error_cb only
-        // reports client-level events — so the counter has to be fed from here.
         try
         {
             await _producer.ProduceAsync(_options.Topic, record, cancellationToken);
@@ -125,7 +91,6 @@ public sealed class ChatProducer : IDisposable
 
     public void Dispose()
     {
-        // Flush before the process exits so a message accepted with 202 is not lost on SIGTERM.
         _producer.Flush(TimeSpan.FromSeconds(5));
         _producer.Dispose();
     }

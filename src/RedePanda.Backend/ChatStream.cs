@@ -6,42 +6,16 @@ using RedePanda.Contracts;
 
 namespace RedePanda.Backend;
 
-/// <summary>
-/// Turns one room's slice of the <see cref="ChatBroadcaster"/> into the item sequence that
-/// <c>TypedResults.ServerSentEvents</c> writes to a browser.
-/// </summary>
+/// <summary>Turns one room's slice of the <see cref="ChatBroadcaster"/> into an SSE item sequence.</summary>
 internal static class ChatStream
 {
-    /// <summary>
-    /// Keeps idle connections alive through proxies and reveals dead peers to us. Long enough to
-    /// stay cheap, short enough to beat the common 60 s idle timeout.
-    /// </summary>
+    /// <summary>How long a room may stay quiet before a heartbeat is emitted.</summary>
     internal static readonly TimeSpan DefaultHeartbeatInterval = TimeSpan.FromSeconds(15);
 
-    /// <summary>
-    /// Event type of a heartbeat. Deliberately not the default type: EventSource.onmessage only
-    /// fires for <c>message</c>, so the browser drops these without ever seeing them.
-    /// <para>
-    /// This used to be an SSE comment (<c>": ping"</c>). <see cref="SseItem{T}"/> cannot express a
-    /// comment — it carries data, an event type and an id, nothing else — so it is a typed event
-    /// now. Inert for this frontend either way, and still a no-op for any client that filters on
-    /// event type rather than parsing every frame.
-    /// </para>
-    /// </summary>
+    /// <summary>Event type of a heartbeat, so <c>EventSource.onmessage</c> never sees one.</summary>
     internal const string HeartbeatEventType = "ping";
 
     /// <summary>Yields one item per chat message, and a heartbeat whenever the room stays quiet.</summary>
-    /// <param name="lastEventId">
-    /// The offset from the client's <c>Last-Event-ID</c> header, or <c>-1</c> for a fresh
-    /// connection. Everything up to and including it is left out of the replay.
-    /// </param>
-    /// <param name="shutdown">
-    /// <c>IHostApplicationLifetime.ApplicationStopping</c>. Kestrel holds in-flight responses open
-    /// until the host's shutdown timeout, and this stream would happily go on heartbeating for all
-    /// 25 s of it — so the browser sees a perfectly healthy connection to a pod that is already
-    /// leaving, and never reconnects to the replica standing ready next to it. Ending here instead
-    /// turns a rolling update into a blip.
-    /// </param>
     internal static async IAsyncEnumerable<SseItem<string>> Create(
         ChatBroadcaster broadcaster,
         string room,
@@ -50,23 +24,13 @@ internal static class ChatStream
         CancellationToken shutdown = default,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // One token for "this browser went away" and "this pod is going away": every line below
-        // treats them the same, and only one of them arrives on the request.
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(ct, shutdown);
         var token = stopping.Token;
 
-        // Disposed when the framework disposes the enumerator, which is what drops the subscriber
-        // out of the active-connection metric once the browser goes away.
         using var subscription = broadcaster.Subscribe(room, lastEventId);
 
-        // Primes the response. ServerSentEvents writes nothing — not even the status line — until
-        // the first item is yielded, so without this a quiet room would leave the client waiting a
-        // full heartbeat interval before EventSource leaves CONNECTING and fires onopen. The
-        // hand-written predecessor flushed the headers before its loop; this restores that.
         yield return Heartbeat();
 
-        // The room as it stands, before anything live. Ordered by offset and therefore in the order
-        // the messages were written, which is what lets the frontend keep appending blindly.
         foreach (var record in subscription.Backlog)
         {
             yield return Data(record);
@@ -87,17 +51,14 @@ internal static class ChatStream
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested)
                 {
-                    // Heartbeat interval elapsed with no message; fall through and emit a ping.
+                    // Heartbeat interval elapsed; fall through and emit a ping.
                 }
                 catch (OperationCanceledException)
                 {
-                    // The browser went away, or the host is stopping. Both are normal, and both
-                    // mean this stream is over.
                     finished = true;
                 }
                 catch (ChannelClosedException)
                 {
-                    // Subscription was completed during shutdown.
                     finished = true;
                 }
             }
@@ -111,22 +72,12 @@ internal static class ChatStream
         }
     }
 
-    /// <summary>
-    /// One chat message, carrying its Kafka offset as the SSE event id. A browser echoes the last
-    /// id it saw back in <c>Last-Event-ID</c> when it reconnects, which is what turns the replay
-    /// into a resume instead of a second copy of the room.
-    /// </summary>
     private static SseItem<string> Data(ChatRecord record) =>
         new(ChatMessageSerializer.Serialize(record.Message))
         {
             EventId = record.Offset.ToString(CultureInfo.InvariantCulture),
         };
 
-    /// <summary>
-    /// Deliberately without an event id: per the SSE specification a frame that carries no
-    /// <c>id</c> field leaves the client's last-event-id buffer alone. Stamping heartbeats would
-    /// move the resume point forward past messages the browser never received.
-    /// </summary>
     private static SseItem<string> Heartbeat() =>
         new(string.Empty, eventType: HeartbeatEventType);
 }

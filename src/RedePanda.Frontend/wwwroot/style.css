@@ -1,16 +1,3 @@
-/* ---------------------------------------------------------------------------------------------
-   Tokens.
-
-   A viewer is in one of three states: no explicit choice (only prefers-color-scheme applies),
-   data-theme="light", or data-theme="dark". So the light palette is defined on bare :root, the
-   dark palette is defined twice — once behind the media query guarded against an explicit light
-   choice, once behind the attribute so the toggle wins over the OS — and every component reads
-   tokens only. A colour declared solely inside a media or attribute block would not apply in the
-   un-stamped state, which is the majority case.
-
-   The neutrals are biased toward the accent's hue rather than being pure greys: this is a red
-   panda, so the ground is warm umber and the accent is the rust of the animal's fur.
-   --------------------------------------------------------------------------------------------- */
 
 :root {
     --bg: #fbf8f6;
@@ -28,8 +15,6 @@
     --own-bg: #fbede7;
     --own-line: #efd3c7;
 
-    /* Connection state is deliberately green/amber/grey rather than the brand red, so state and
-       identity never read as the same signal. */
     --ok: #1e7a52;
     --ok-bg: #e4f4ec;
     --warn: #8a6212;
@@ -37,8 +22,6 @@
     --danger: #b3261e;
     --danger-bg: #fdecea;
 
-    /* Per-nickname colours vary only in hue; lightness and chroma are fixed per theme so every
-       generated colour stays legible on this ground. See setNicknameHue() in app.js. */
     --nick-l: 0.48;
     --nick-c: 0.13;
 
@@ -109,15 +92,10 @@
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
 }
 
-/* ---------------------------------------------------------------------------------------------
-   Base
-   --------------------------------------------------------------------------------------------- */
-
 * {
     box-sizing: border-box;
 }
 
-/* Several classes below set display, which would otherwise override the hidden attribute. */
 [hidden] {
     display: none !important;
 }
@@ -127,9 +105,6 @@ html {
 }
 
 body {
-    /* An app shell, not a document: header, one scrolling region, composer. The minmax(0, 1fr)
-       is what lets the middle row shrink below its content and scroll instead of pushing the
-       composer off screen. dvh follows mobile browser chrome; vh is the fallback beneath it. */
     height: 100vh;
     height: 100dvh;
     display: grid;
@@ -144,7 +119,6 @@ body {
     -webkit-text-size-adjust: 100%;
 }
 
-/* Zero specificity, so component rules never have to fight it. */
 :where(a, button, input, [tabindex]):focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
@@ -213,10 +187,6 @@ input:disabled {
     stroke-linejoin: round;
 }
 
-/* ---------------------------------------------------------------------------------------------
-   Top bar
-   --------------------------------------------------------------------------------------------- */
-
 .topbar {
     display: flex;
     align-items: center;
@@ -246,7 +216,6 @@ input:disabled {
     background: var(--surface-2);
     border: 1px solid var(--line);
     border-radius: 0.4rem;
-    /* A room name is user input and can be 64 characters long. */
     max-width: 14rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -267,7 +236,6 @@ input:disabled {
     white-space: nowrap;
 }
 
-/* State is carried by a dot as well as by colour, so it does not depend on hue alone. */
 .status::before {
     content: "";
     width: 0.5rem;
@@ -276,8 +244,6 @@ input:disabled {
     background: currentcolor;
 }
 
-/* Stated rather than implied: offline is deliberately neutral, not red. A closed stream is a
-   state, not an error, and red belongs to the brand and to genuine failures. */
 .status--offline {
     color: var(--muted);
     background: var(--surface-2);
@@ -321,7 +287,6 @@ input:disabled {
     background: var(--surface-2);
 }
 
-/* Offer the theme the viewer is not currently in — the same three states as the palette. */
 .icon--sun {
     display: none;
 }
@@ -344,10 +309,6 @@ input:disabled {
     display: none;
 }
 
-/* ---------------------------------------------------------------------------------------------
-   Stage: the join card and the chat scroller share one grid cell, since only one is ever shown.
-   --------------------------------------------------------------------------------------------- */
-
 #stage {
     position: relative;
     display: grid;
@@ -360,7 +321,6 @@ input:disabled {
 }
 
 .card {
-    /* auto margins centre the card in the free space without affecting the chat in the same cell. */
     margin: auto;
     width: min(26rem, calc(100% - 2rem));
     display: flex;
@@ -402,25 +362,15 @@ input:disabled {
     color: var(--muted);
 }
 
-/* ---------------------------------------------------------------------------------------------
-   Chat
-   --------------------------------------------------------------------------------------------- */
-
 .chat {
     overflow-y: auto;
-    /* Scrolling the message list must not chain to the page behind it. */
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
-    /* Deliberately not scroll-behavior: smooth. Following the conversation must be instant, or a
-       burst of messages measures its own animation and mistakes it for the reader scrolling up.
-       Only the jump button animates, and it asks for that explicitly. */
 }
 
 .chat__inner {
     display: flex;
     flex-direction: column;
-    /* Few messages sit at the bottom of the viewport, as in any chat, rather than floating at
-       the top of an otherwise empty screen. */
     justify-content: flex-end;
     min-height: 100%;
     max-width: 52rem;
@@ -429,8 +379,6 @@ input:disabled {
 }
 
 .empty {
-    /* auto margins take the free space above and below, centring the empty state even though
-       the container aligns its content to the end. */
     margin: auto;
     max-width: 34rem;
     padding: 1rem 1.15rem;
@@ -532,7 +480,6 @@ input:disabled {
 .msg__name {
     font-weight: 600;
     color: var(--muted);
-    /* A nickname is user input, up to 32 characters. */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -551,12 +498,9 @@ input:disabled {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 0.85rem;
-    /* Messages are user input: wrap hard so a long unbroken string cannot stretch the layout. */
     overflow-wrap: anywhere;
 }
 
-/* Flatten the corner nearest the avatar on the first bubble of a group, so a run of messages
-   reads as one utterance from one person. */
 .msg__text:first-of-type {
     border-top-left-radius: 0.25rem;
 }
@@ -571,8 +515,6 @@ input:disabled {
     border-top-right-radius: 0.25rem;
 }
 
-/* Hue comes from the nickname hash; lightness and chroma come from the theme. Gated on @supports
-   so engines without oklch() keep the muted fallback above instead of losing the colour entirely. */
 @supports (color: oklch(0.7 0.12 40)) {
     .msg__name {
         color: oklch(var(--nick-l) var(--nick-c) var(--nick-h, 40));
@@ -607,10 +549,6 @@ input:disabled {
     background: var(--accent-hover);
 }
 
-/* ---------------------------------------------------------------------------------------------
-   Composer
-   --------------------------------------------------------------------------------------------- */
-
 .composer {
     display: flex;
     flex-direction: column;
@@ -620,7 +558,6 @@ input:disabled {
     border-top: 1px solid var(--line);
 }
 
-/* Keeps the composer aligned with the message column on a wide screen. */
 .composer > * {
     width: 100%;
     max-width: 52rem;
@@ -644,9 +581,6 @@ input:disabled {
     border: 1px solid var(--warn);
 }
 
-/* Only appears once the automatic retries are spent, so it is the one way back and sits at the far
-   end of the banner. Outlined rather than filled: it borrows the banner's colour instead of
-   competing with the send button for the eye. */
 .banner__action {
     flex: none;
     margin-inline-start: auto;
@@ -656,13 +590,11 @@ input:disabled {
     border-color: currentcolor;
 }
 
-/* Fills with the banner's own colour rather than introducing another one. */
 .banner__action:hover {
     color: var(--warn-bg);
     background: var(--warn);
 }
 
-/* A thick leading rule, not colour alone, is what separates an error from the banner above it. */
 .error {
     color: var(--danger);
     background: var(--danger-bg);
@@ -723,7 +655,6 @@ input:disabled {
 }
 
 @media (max-width: 30rem) {
-    /* Below this width the arrow carries the meaning; the label stays for assistive technology. */
     .send__label {
         position: absolute;
         width: 1px;

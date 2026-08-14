@@ -1,34 +1,11 @@
 {
-	# No ACME, ever. The certificate this server presents is minted by the Helm chart and mounted
-	# at the path below; auto_https would instead have the pod try to reach Let's Encrypt from
-	# inside the cluster. `off` rather than `disable_redirects`: the redirect from :8080 is
-	# written out explicitly further down, because Caddy's own version only exists for sites that
-	# have a hostname, and these do not.
 	auto_https off
 
-	# The admin API would open :2019 and, together with persist_config, wants to write to
-	# /config. Both are off so the container runs with a read-only root filesystem.
 	admin off
 	persist_config off
 
-	# Without this, SIGTERM makes Caddy wait for in-flight requests to finish, with no bound. An
-	# SSE response never finishes — that is what it is for — so the pod sat there until the
-	# kubelet's SIGKILL at terminationGracePeriodSeconds, on every rolling update. The README's
-	# claim that the frontend shuts down analogously to the backend was simply not true: the
-	# backend cuts its streams at ApplicationStopping, and this side did nothing at all.
-	#
-	# 5s matches the preStop sleep in the chart. By the time it elapses the pod is already out of
-	# the Service endpoints, so the streams being cut belong to browsers that have somewhere else
-	# to reconnect to — and they reconnect with Last-Event-ID, so they lose nothing.
 	grace_period 5s
 
-	# Caddy's own runtime log — startup, config load, TLS-storage sweep, upstream dial errors.
-	# To stdout instead of the default stderr, so it shares one stream with everything else; the
-	# platform collects it (12-Factor "Logs").
-	#
-	# This does NOT configure access logs. `log` in the global block names a logger for Caddy's
-	# process events; request entries only exist when `log` appears inside a site block, and the
-	# omission is silent — `caddy validate` passes either way. See the site block below.
 	log {
 		output stdout
 		format json
@@ -37,67 +14,30 @@
 }
 
 :8443 {
-	# ---- Server certificate ---------------------------------------------------------------
-	# Mounted from the chart's <release>-frontend-tls Secret. Named files rather than `tls
-	# internal`, which would have each replica mint its own CA: a browser would then see a
-	# different untrusted issuer depending on which pod it landed on, and a new one after every
-	# restart.
 	tls {$TLS_CERT_FILE:/etc/redepanda/tls/tls.crt} {$TLS_KEY_FILE:/etc/redepanda/tls/tls.key}
 
-	# ---- Access log ----------------------------------------------------------------------
-	# One JSON line per request, to stdout. This block is what actually enables request
-	# logging: a site-level `log` defaults to stderr, so `output stdout` has to be spelled out.
 	log {
 		output stdout
 		format json
 		level {$FRONTEND_LOG_LEVEL:INFO}
 	}
 
-	# ---- API proxy -----------------------------------------------------------------------
-	# The /api prefix is passed through rather than stripped, so the backend answers on the
-	# same paths whether it is reached through this proxy or port-forwarded directly for
-	# debugging. Caddy streams text/event-stream unbuffered on its own, so SSE needs no extra
-	# directives here. The backend address comes from the environment, defaulting to the
-	# in-cluster service name.
 	handle /api/* {
 		reverse_proxy {$BACKEND_HOST:redepanda-backend:8443} {
 			transport http {
-				# HTTP/1.1, deliberately, and this is what makes two backend replicas mean
-				# anything. Left to ALPN this negotiates h2, and Go's HTTP/2 transport
-				# multiplexes every stream to one upstream address over a single TCP
-				# connection. BACKEND_HOST resolves to one ClusterIP, and kube-proxy picks a
-				# backend pod per *connection* — so with h2 every SSE stream from this Caddy
-				# pod would ride the one connection and land on the same backend pod, however
-				# many replicas were running.
-				#
-				# Over 1.1 each SSE stream is its own connection and is balanced on its own.
-				# The cost is one connection per open stream, which for a chat is the right
-				# trade and is what the two-replica demo in section 8 actually depends on.
 				versions 1.1
 
-				# Verified, not skipped: tls_insecure_skip_verify has no business here. The
-				# backend's certificate is signed by the same release CA this pod carries, and
-				# its CN and first SAN are the Service name — which is what BACKEND_HOST
-				# resolves — so the name check passes without an override.
-				#
-				# tls_trust_pool rather than tls_trusted_ca_certs: the latter is deprecated as
-				# of Caddy 2.11 and warns on every config load.
 				tls
 				tls_trust_pool file {$TLS_CA_FILE:/etc/redepanda/tls/ca.crt}
 			}
 		}
 	}
 
-	# ---- Probe --------------------------------------------------------------------------
 	handle /healthz {
-		# Liveness and readiness poll this every 10s each. Their entries would outnumber real
-		# traffic several times over, so they stay out of the access log — the probes still
-		# run, they just do not narrate.
 		log_skip
 		respond "ok" 200
 	}
 
-	# ---- Static frontend ----------------------------------------------------------------
 	handle {
 		root * /usr/share/caddy
 		encode zstd gzip
@@ -106,21 +46,7 @@
 	}
 }
 
-# ---- Plaintext, for exactly one purpose ------------------------------------------------------
-# Nothing is served here. The port stays open only so that an http:// address someone still has
-# — a bookmark, an older README, the URL scripts/demo.sh used to print — answers with a redirect
-# instead of a connection reset that reads like an outage.
-#
-# 308 rather than 301: it keeps the method and body, so a POST /api/messages that arrives here is
-# replayed to the same path over TLS rather than silently turning into a GET.
-#
-# The port in the redirect is the one the *client* can reach, which under `kubectl port-forward`
-# is the forwarded port and not this container's. Hence an environment variable with the demo's
-# port as its default, rather than {server_port}.
 :8080 {
-	# Its own site-level logger, for the same reason the TLS site has one: without it this
-	# server logs nothing, and "the browser went to http:// and nothing happened" is precisely
-	# the situation someone would be reading these logs to explain.
 	log {
 		output stdout
 		format json

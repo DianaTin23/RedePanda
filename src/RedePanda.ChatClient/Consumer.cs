@@ -13,13 +13,9 @@ public sealed class Consumer : IDisposable
         {
             BootstrapServers = bootstrap,
 
-            // A unique group per client means every client receives every message instead of the
-            // group splitting the partitions between them.
             GroupId = "kchat-" + Guid.NewGuid().ToString("N")[..6],
             AutoOffsetReset = showHistory ? AutoOffsetReset.Earliest : AutoOffsetReset.Latest,
 
-            // Without this, every throwaway group id above would leave offsets behind in the
-            // broker for the full retention period.
             EnableAutoCommit = false,
         };
 
@@ -29,8 +25,7 @@ public sealed class Consumer : IDisposable
         _consumer.Subscribe(topic);
     }
 
-    /// <summary>Consumes until cancelled. Runs on a dedicated thread because
-    /// <see cref="IConsumer{TKey,TValue}.Consume(CancellationToken)"/> blocks.</summary>
+    /// <summary>Consumes until cancelled, on a dedicated thread because <c>Consume</c> blocks.</summary>
     public Task RunAsync(CancellationToken token) =>
         Task.Factory.StartNew(
             () => ConsumeLoop(token),
@@ -72,7 +67,6 @@ public sealed class Consumer : IDisposable
 
     public void Dispose()
     {
-        // Close() leaves the consumer group cleanly; it must happen before Dispose().
         _consumer.Close();
         _consumer.Dispose();
     }

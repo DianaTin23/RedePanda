@@ -18,14 +18,9 @@ internal static class Program
             return 0;
         }
 
-        // Configuration comes from the environment (12-Factor); arguments only cover per-session
-        // choices such as the nickname. There is no config file any more.
         var bootstrap = Env("REDPANDA_BOOTSTRAP_SERVERS", DefaultBootstrapServers);
         var topic = GetArg(args, "--topic") ?? Env("REDPANDA_TOPIC", DefaultTopic);
 
-        // The admin processes (12-Factor XII): the same binary, the same image and the same
-        // configuration as the chat itself, run as one-off tasks instead of as a long-running one.
-        // None of them needs a nickname or reads input, so they all return before anything below.
         if (HasFlag(args, "--ensure-topic"))
         {
             return await EnsureTopicAsync(bootstrap, topic);
@@ -57,14 +52,6 @@ internal static class Program
         {
             topic = newTopic;
 
-            // Deliberately the same admin process the topic Job runs, and not a second creation
-            // path beside it. It used to be one: this branch hard-coded one partition and
-            // replication factor 1 and read neither CHAT_PARTITIONS nor CHAT_REPLICATION_FACTOR,
-            // so creating a topic here in a release configured for three partitions produced a
-            // one-partition topic -- the exact drift that --ensure-topic reading the release's own
-            // ConfigMap is supposed to rule out. Worse, against an existing topic with more
-            // partitions than the hard-coded one it took the "cannot be reduced" branch and told
-            // the operator to raise CHAT_PARTITIONS, a variable that path never looked at.
             if (await EnsureTopicAsync(bootstrap, topic) != 0)
             {
                 return 1;
@@ -87,8 +74,6 @@ internal static class Program
         using var producer = new Producer(bootstrap, topic);
         using var consumer = new Consumer(bootstrap, topic, showHistory);
 
-        // Reading every room rather than filtering to `room` is deliberate: it makes visible in the
-        // demo that the console client and the backend really do share one Kafka topic.
         var consumeTask = consumer.RunAsync(cts.Token);
 
         while (!cts.IsCancellationRequested)
@@ -117,15 +102,6 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>
-    /// Creates the chat topic if it is not there yet, then exits — the whole of the admin process.
-    /// <para>
-    /// It waits for the broker itself rather than assuming one is up: as a Helm hook this runs
-    /// while Redpanda is still starting, and against an external broker there may be nothing else
-    /// to wait on at all. A metadata request is the check, because it is the same request every
-    /// client makes first and it needs no Admin API port, which a managed broker may not expose.
-    /// </para>
-    /// </summary>
     private static async Task<int> EnsureTopicAsync(string bootstrap, string topic)
     {
         var partitions = EnvInt("CHAT_PARTITIONS", 1);
@@ -151,7 +127,6 @@ internal static class Program
         return await TryCreateTopicAsync(adminClient, topic, partitions, replicationFactor) ? 0 : 1;
     }
 
-    /// <summary>Polls for broker metadata until it arrives or <paramref name="budget"/> is spent.</summary>
     private static async Task<bool> WaitForBrokerAsync(IAdminClient adminClient, TimeSpan budget)
     {
         var deadline = DateTimeOffset.UtcNow + budget;
@@ -196,11 +171,6 @@ internal static class Program
         }
         catch (CreateTopicsException e) when (e.Results.All(r => r.Error.Code == ErrorCode.TopicAlreadyExists))
         {
-            // Creating an existing topic is not a failure -- but "ensure" has to mean more than
-            // "something with that name is there". This branch used to print a line and return
-            // success without comparing anything, so raising chat.partitions and upgrading was a
-            // silent no-op: Helm succeeded, the Job succeeded, and the topic kept the partition
-            // count it was created with. The flag promised a reconciliation it never performed.
             return await ReconcilePartitionsAsync(adminClient, topic, partitions);
         }
         catch (Exception e)
@@ -210,17 +180,8 @@ internal static class Program
         }
     }
 
-    /// <summary>How long any single admin request may take before it is given up on.</summary>
     private static readonly TimeSpan AdminTimeout = TimeSpan.FromSeconds(10);
 
-    /// <summary>
-    /// Reports what the topic actually is, as opposed to what the configuration asked for.
-    /// <para>
-    /// It answers the one question <c>CHAT_HISTORY_SIZE</c> cannot: how far back a browser can
-    /// see. That is the watermarks, not the buffer size — the buffer only bounds what a pod keeps
-    /// out of what the broker still has, and after retention has run those are different numbers.
-    /// </para>
-    /// </summary>
     private static async Task<int> DescribeTopicAsync(string bootstrap, string topic)
     {
         var adminConfig = new AdminClientConfig { BootstrapServers = bootstrap };
@@ -252,8 +213,6 @@ internal static class Program
         Console.WriteLine($"Partitions  {found.Partitions.Count}");
         Console.WriteLine();
 
-        // A throwaway consumer, only because watermarks live on IConsumer rather than on the admin
-        // client. It never subscribes and never joins the group it names.
         var consumerConfig = new ConsumerConfig
         {
             BootstrapServers = bootstrap,
@@ -275,9 +234,6 @@ internal static class Program
                 low = watermarks.Low.Value.ToString();
                 high = watermarks.High.Value.ToString();
 
-                // High minus low, not high: after retention has deleted the front of the log the
-                // first offset is no longer 0, and reporting `high` would overstate the history by
-                // however much has already gone.
                 var available = watermarks.High.Value - watermarks.Low.Value;
                 total += available;
                 count = available.ToString();
@@ -311,8 +267,6 @@ internal static class Program
             Console.WriteLine("Topic configuration (non-default values only):");
             if (overrides.Count == 0)
             {
-                // Said explicitly, because a bare heading with nothing under it reads like the
-                // request failed rather than like there was nothing to report.
                 Console.WriteLine("  (none -- every setting is at the broker default)");
             }
 
@@ -323,23 +277,12 @@ internal static class Program
         }
         catch (KafkaException e)
         {
-            // Not fatal: a managed broker may refuse DescribeConfigs to an unprivileged principal,
-            // and everything above is still worth having.
             Console.WriteLine($"Topic configuration unavailable: {e.Error.Reason}");
         }
 
         return 0;
     }
 
-    /// <summary>
-    /// Prints the configuration this process actually resolved, with the password masked.
-    /// <para>
-    /// <c>kubectl get configmap</c> shows what was <em>supplied</em>, which is a different thing:
-    /// every setting here has a code-side default that applies invisibly when the key is absent,
-    /// so a missing variable and a variable set to its default look identical from outside and
-    /// behave identically until one of the defaults changes.
-    /// </para>
-    /// </summary>
     private static int PrintConfig(string bootstrap, string topic)
     {
         Console.WriteLine("Resolved configuration (defaults applied, password masked):");
@@ -357,8 +300,6 @@ internal static class Program
         Console.WriteLine($"  REDPANDA_SSL_CA_LOCATION     {Env(KafkaSecurity.CaLocationVariable, "(unset)")}");
         Console.WriteLine();
 
-        // Built rather than described, so this reports what the client library was actually handed
-        // -- including the settings KafkaSecurity decided not to set at all.
         var probe = new ClientConfig { BootstrapServers = bootstrap };
         try
         {
@@ -369,8 +310,6 @@ internal static class Program
         }
         catch (InvalidOperationException e)
         {
-            // The same error the chat and the backend would fail with, reported here as the answer
-            // rather than as a crash -- which is the entire point of a --print-config.
             Console.WriteLine($"  Effective settings           REJECTED: {e.Message}");
             return 1;
         }
@@ -378,16 +317,9 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>
-    /// Reports whether a secret is set and how long it is, and nothing else. Printing the value
-    /// would put it in a pod log, which is the one place a credential must never reach.
-    /// </summary>
     private static string Mask(string? value) =>
         string.IsNullOrEmpty(value) ? "(unset)" : $"(set, {value.Length} characters)";
 
-    /// <summary>
-    /// Brings an existing topic up to the requested partition count, or explains why it cannot.
-    /// </summary>
     private static async Task<bool> ReconcilePartitionsAsync(
         IAdminClient adminClient, string topic, int wanted)
     {
@@ -408,8 +340,6 @@ internal static class Program
 
         if (actual > wanted)
         {
-            // Kafka cannot reduce a partition count. Continuing quietly here is how someone spends
-            // an afternoon on a setting that appeared to have applied.
             Console.Error.WriteLine(
                 $"Topic '{topic}' has {actual} partition(s), but {wanted} were requested. A " +
                 "partition count cannot be reduced. Set CHAT_PARTITIONS back to " +
@@ -420,11 +350,6 @@ internal static class Program
 
         Console.WriteLine($"Topic '{topic}' has {actual} partition(s); increasing to {wanted}.");
 
-        // Worth saying out loud, because it is invisible until someone notices a room replaying
-        // oddly: the backend hands browsers the Kafka offset as the SSE event id, and that is only
-        // monotonic per partition. Both producers key by room, so a room lives on one partition --
-        // but adding partitions rehashes that mapping, so a room can move, and its new offsets can
-        // be lower than the ones a connected browser has already seen.
         if (actual >= 1 && wanted > 1)
         {
             Console.WriteLine(
@@ -450,7 +375,6 @@ internal static class Program
         }
     }
 
-    /// <summary>The topic's current partition count, or <c>-1</c> if it could not be read.</summary>
     private static int PartitionCount(IAdminClient adminClient, string topic)
     {
         try
@@ -471,10 +395,6 @@ internal static class Program
         return string.IsNullOrWhiteSpace(value) ? fallback : value;
     }
 
-    /// <summary>
-    /// Fails loudly on a typo rather than silently creating a one-partition topic where three
-    /// were meant — a topic's partition count cannot be lowered again afterwards.
-    /// </summary>
     private static int EnvInt(string key, int fallback)
     {
         var raw = Environment.GetEnvironmentVariable(key);
@@ -494,7 +414,6 @@ internal static class Program
 
     private static string? GetArg(string[] args, string key)
     {
-        // Bounded by args.Length - 1 so a trailing key without a value cannot read past the end.
         for (var i = 0; i < args.Length - 1; i++)
         {
             if (args[i] == key)
@@ -516,7 +435,6 @@ internal static class Program
             return null;
         }
 
-        // Erase the echoed input line so only the consumer's rendering of it remains.
         if (!Console.IsOutputRedirected && Console.CursorTop > 0)
         {
             Console.SetCursorPosition(0, Console.CursorTop - 1);

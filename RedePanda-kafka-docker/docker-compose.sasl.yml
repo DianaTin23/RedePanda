@@ -1,46 +1,13 @@
 name: redpanda-chat-sasl
 
-# Derselbe Broker wie nebenan, aber mit TLS und SASL/SCRAM auf dem externen Listener.
-#
-# Wozu: README Abschnitt 11 behauptet, der Broker sei ein austauschbarer Backing Service, und
-# Abschnitt 14 schränkte das auf „konfigurierbar, aber nicht vorgeführt" ein. Genau in dieser Lücke
-# saß ein Fehler -- BrokerReadiness baute seinen Admin-Client ohne die Sicherheitseinstellungen,
-# also antwortete /health/ready gegen *jeden* abgesicherten Broker dauerhaft mit 503, und mit
-# maxUnavailable: 0 wurde daraus ein Rollout, der nie fertig wird. Ein Pfad, den niemand je
-# ausgeführt hat, ist nicht „ungetestet", sondern unbekannt.
-#
-# Vorher einmalig:
-#   ./make-tls.sh
-#
-# Starten:
-#   docker compose -f docker-compose.sasl.yml up -d
-#
-# Dagegen sprechen (Backend, Chat-Client, Topic-Job -- alle lesen dieselben Variablen):
-#   export REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19093
-#   export REDPANDA_SECURITY_PROTOCOL=SaslSsl
-#   export REDPANDA_SASL_MECHANISM=ScramSha512
-#   export REDPANDA_SASL_USERNAME=chat
-#   export REDPANDA_SASL_PASSWORD=chat-secret-pw
-#   export REDPANDA_SSL_CA_LOCATION=$PWD/tls/ca.crt
-#
-# Das Schlüsselmaterial in tls/ ist gitignored und wertlos: es wird von make-tls.sh erzeugt und ist
-# jederzeit neu erzeugbar. Das Passwort steht hier im Klartext, weil dieser Broker nichts schützt.
 services:
   redpanda:
-    # Identisch zu docker-compose.yml und zu redpanda.image im Chart -- check-digests.sh vergleicht
-    # die beiden gegeneinander.
     image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
     container_name: redpanda-sasl-0
 
     environment:
-      # Legt den Superuser beim ersten Start an. Ohne ihn stünde der Broker mit aktivem SASL da,
-      # und niemand könnte sich anmelden, um einen Benutzer anzulegen.
       RP_BOOTSTRAP_USER: "chat:chat-secret-pw:SCRAM-SHA-512"
 
-    # `rpk redpanda config set` statt `rpk redpanda start --set`: die Listener-TLS-Konfiguration ist
-    # eine Liste von Objekten, und `start --set` nimmt die weder als JSON-Array noch in indizierter
-    # Form an -- es reicht das Argument unverändert an das redpanda-Binary weiter, das mit
-    # „unrecognised option" abbricht. Beides nachgemessen, bevor es hier so steht.
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |

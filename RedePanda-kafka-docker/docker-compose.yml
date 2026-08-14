@@ -1,15 +1,8 @@
 name: redpanda-chat
 
-# Nur der Broker läuft hier, und das ist Absicht: der schnellste Weg in Abschnitt 4 der README
-# startet Backend und Frontend direkt auf dem Host. Es gibt hier also keinen Container, dem man ein
-# POD_NAME mitgeben könnte -- und auch keinen, der eines bräuchte. Ein Backend außerhalb von
-# Kubernetes leitet seine Consumer-GroupId aus Maschinenname *und Prozess-ID* ab; genau das hält
-# zwei lokal gestartete Instanzen an diesem einen Broker in zwei Gruppen. Siehe
-# BackendOptions.ResolvePodName.
 services:
   redpanda:
-    # Pinned by digest, not just by tag, so local development and the Helm chart agree on one
-    # exact image. Keep this in sync with redpanda.image in deploy/helm/redepanda/values.yaml.
+    # KEEP IN SYNC: redpanda.image in values.yaml (scripts/check-digests.sh prueft die Paritaet).
     image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
     container_name: redpanda-0
     command:

@@ -1,24 +1,10 @@
 #!/usr/bin/env bash
-# Mints a throwaway certificate authority and one broker certificate for the secured local broker
-# in docker-compose.sasl.yml.
-#
-#   ./make-tls.sh          # generate tls/ if it is not already there
-#   ./make-tls.sh --force  # regenerate it
-#
-# The material is written to ./tls/ and is gitignored. It is worth exactly nothing: it exists so
-# that the TLS and SASL code paths can be exercised on a laptop, and it is regenerated whenever
-# anyone wants it. Nothing here is a model for how to run a real broker.
-#
-# openssl comes from the pinned Redpanda image rather than from the host. That is one fewer thing
-# to have installed, and it is the same image the broker itself runs -- the repository already
-# takes this approach for `caddy adapt` in section 15 of the README.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TLS_DIR="${HERE}/tls"
 
-# Kept in step with docker-compose.yml and with redpanda.image in the chart's values.yaml.
-# check-digests.sh compares those two to each other; this one follows them by hand.
+# KEEP IN SYNC: docker-compose.yml und redpanda.image in values.yaml (scripts/check-digests.sh).
 IMAGE="docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d"
 
 FORCE=0
@@ -43,18 +29,10 @@ ENGINE="$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)"
 
 mkdir -p "${TLS_DIR}"
 
-# Generated inside the container and streamed out as a tar, rather than written into a bind mount.
-# A bind mount would need the container to run as the right uid, and there is no single right
-# answer to that: under rootless docker and podman the host user already *is* container root, so
-# passing --user breaks it, while under rootful docker omitting --user leaves root-owned files on
-# the host. Piping a tar through stdout sidesteps the question entirely and behaves the same on
-# all three.
 "${ENGINE}" run --rm --entrypoint sh "${IMAGE}" -c '
 set -eu
 cd "$(mktemp -d)"
 
-# The SANs are what the client actually checks. `localhost` and 127.0.0.1 cover a backend running
-# on the host; redpanda-0 covers one container talking to another.
 cat > san.cnf <<EOF
 [req]
 distinguished_name = dn
@@ -81,8 +59,6 @@ openssl x509 -req -in broker.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
 
 rm -f broker.csr san.cnf ca.srl
 
-# World-readable on purpose: the broker process inside the compose container is not the user that
-# generated these, and this material is throwaway by construction.
 chmod 644 ca.crt ca.key broker.crt broker.key
 
 tar -c ca.crt ca.key broker.crt broker.key

@@ -32,9 +32,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ---- Version --------------------------------------------------------------------------------
-
-# appVersion is quoted in Chart.yaml; the pattern tolerates it either way.
 APP_VERSION="$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}[[:space:]]*$/\1/p' \
     "${CHART_DIR}/Chart.yaml")"
 if [[ -z "${APP_VERSION}" ]]; then
@@ -54,14 +51,6 @@ DIRTY=false
 
 if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
     DIRTY=true
-    # A plain "-dirty" suffix would be mutable all over again: every edit would land under the
-    # same tag. Hashing the uncommitted content instead keeps one tag to one tree. `git diff
-    # HEAD` covers modifications and deletions; the file list adds the contents of untracked
-    # files, which no diff against HEAD can see.
-    #
-    # `-o` and not `-mo`: a deleted tracked file is "modified" to git, so -m listed a path that
-    # sha256sum then could not open, and xargs exited 123 -- killing the whole build under
-    # `set -e` before anything was built. Deletions are already in the diff above.
     DIRTY_HASH="$({
         git -C "${REPO_ROOT}" diff HEAD
         git -C "${REPO_ROOT}" ls-files -o --exclude-standard -z \
@@ -70,8 +59,6 @@ if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
     VERSION="${VERSION}-dirty.${DIRTY_HASH}"
 fi
 
-# Escape hatch, for building outside the release path entirely (a scratch image to poke at, a
-# tag someone else's tooling expects). It bypasses the version derivation, so say so.
 if [[ -n "${IMAGE_TAG:-}" ]]; then
     echo "!! IMAGE_TAG is set: building '${IMAGE_TAG}' instead of '${VERSION}'."
     echo "!! No release file is written and the result identifies no commit."
@@ -92,15 +79,8 @@ fi
 BACKEND="redepanda-backend:${VERSION}"
 FRONTEND="redepanda-frontend:${VERSION}"
 
-# The console client, and the image the chart's topic Job runs with --ensure-topic. It carries one
-# tag with the other two on purpose: the admin process must be the same build as the application
-# it administers, which is the whole point of it no longer being a shell script in a foreign image.
 CHATCLIENT="redepanda-chatclient:${VERSION}"
 
-# ---- Build ----------------------------------------------------------------------------------
-
-# Prefer podman when both are present: on this project's dev machines `docker` is often a
-# podman shim anyway, and being explicit avoids surprises about which store the image lands in.
 if command -v podman >/dev/null 2>&1; then
     ENGINE=podman
 elif command -v docker >/dev/null 2>&1; then
@@ -111,15 +91,11 @@ else
 fi
 
 echo "==> Building ${VERSION} with ${ENGINE}"
-# The backend and the chat client build from the repository root because both reference
-# RedePanda.Contracts. Only the frontend has a context of its own.
 "${ENGINE}" build -f "${REPO_ROOT}/src/RedePanda.Backend/Dockerfile" -t "${BACKEND}" "${REPO_ROOT}"
 "${ENGINE}" build -f "${REPO_ROOT}/src/RedePanda.ChatClient/Dockerfile" -t "${CHATCLIENT}" "${REPO_ROOT}"
 "${ENGINE}" build -t "${FRONTEND}" "${REPO_ROOT}/src/RedePanda.Frontend"
 
 echo "==> Built ${BACKEND}, ${CHATCLIENT} and ${FRONTEND}"
-
-# ---- Release file ---------------------------------------------------------------------------
 
 RELEASE_FILE=""
 if [[ -z "${IMAGE_TAG:-}" ]]; then
@@ -150,40 +126,10 @@ EOF
     echo "==> Wrote ${RELEASE_FILE#"${REPO_ROOT}/"}"
 fi
 
-# There is deliberately no rendered-manifest step here any more. deploy/k8s/rendered.yaml used to
-# be written from `helm template` so the release could also be installed without Helm, and it cost
-# more than it paid for:
-#
-#   * a rendered file cannot carry the chart's render-time `fail` guards, so the path that skipped
-#     Helm also skipped every check that makes a misconfiguration loud;
-#   * TLS has no off switch, so every render minted a certificate authority and four private keys
-#     and committed them here;
-#   * `helm template` always renders .Release.Revision as 1, so the topic Job kept one name and the
-#     second `kubectl apply` failed on an immutable field;
-#   * nothing detected drift, and it drifted -- by five missing Secrets and several hundred lines.
-#
-# Helm is the install path. The release artifact is deploy/releases/<version>.yaml, which is what
-# pins the immutable image tag and therefore what makes `helm rollback` restore a real build.
-
-# ---- Load into a local cluster ---------------------------------------------------------------
-
 if [[ -n "${LOAD_INTO}" ]]; then
     case "${LOAD_INTO}" in
         kind)
             if [[ "${ENGINE}" == "podman" ]]; then
-                # `kind load docker-image` reads the *Docker* store, which podman does not
-                # populate. Going through an archive is the supported route for a podman-built
-                # image.
-                #
-                # The retag is not cosmetic. Podman stores a locally built image under
-                # `localhost/<name>`, and `podman save` writes that name into the archive, so the
-                # node ends up holding `localhost/redepanda-backend:<tag>`. The chart asks for the
-                # bare `redepanda-backend:<tag>`, which containerd normalises to
-                # `docker.io/library/redepanda-backend:<tag>` -- a name the archive never carried.
-                # The kubelet then does the only thing left to it and tries to pull from Docker
-                # Hub, which fails with ImagePullBackOff on an image that is demonstrably already
-                # on the node. Saving under the fully qualified name is what makes the two agree.
-                # `docker save` adds no prefix, so the branch below needs none of this.
                 echo "==> Loading into kind cluster '${CLUSTER_NAME}' via image archive"
                 TMP="$(mktemp -d)"
                 trap 'rm -rf "${TMP}"' EXIT
@@ -203,11 +149,6 @@ if [[ -n "${LOAD_INTO}" ]]; then
         minikube)
             echo "==> Loading into minikube profile '${MINIKUBE_PROFILE}'"
             if [[ "${ENGINE}" == "podman" ]]; then
-                # Same `localhost/` prefix problem as the kind branch above, for the same reason:
-                # the name podman stores is the name minikube carries into the cluster, and the
-                # chart asks for the normalised one. Unlike the kind path this has not been
-                # exercised on a real cluster here -- there is no minikube on the dev machines --
-                # so it is the identical fix applied to an identical mechanism, not a tested one.
                 for image in "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}"; do
                     podman tag "${image}" "docker.io/library/${image}"
                 done
@@ -225,12 +166,7 @@ if [[ -n "${LOAD_INTO}" ]]; then
     echo "==> Images are available inside the cluster"
 fi
 
-# ---- What to run next -------------------------------------------------------------------------
-
 if [[ -n "${RELEASE_FILE}" ]]; then
-    # --description is the only per-revision field helm lets a value reach: `helm history` reads
-    # its APP VERSION column from Chart.yaml, which is identical on every revision and therefore
-    # useless for telling two releases apart.
     cat <<EOF
 
 Deploy this release:

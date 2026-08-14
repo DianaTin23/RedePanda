@@ -1,15 +1,14 @@
 <Project>
 
-    <!-- Central Package Management: every NuGet version for the repository lives here, and the
-         .csproj files carry bare <PackageReference Include="..." /> entries without a version. -->
+    <!-- Central Package Management: jede NuGet-Version steht hier, die .csproj tragen
+         <PackageReference Include="..." /> ohne Version. -->
     <PropertyGroup>
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- No net10.0 asset ships in this package; it resolves lib/net8.0, which is supported.
-             The container base image must stay glibc-based (see src/RedePanda.Backend/Dockerfile)
-             or librdkafka fails to load at the first ConsumerBuilder.Build(). -->
+        <!-- Bindet das Runtime-Basisimage an glibc: die nativen librdkafka-Assets laden weder
+             unter musl (alpine) noch chiseled. Siehe src/RedePanda.Backend/Dockerfile. -->
         <PackageVersion Include="Confluent.Kafka" Version="2.15.0" />
 
         <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />

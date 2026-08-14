@@ -41,8 +41,6 @@ PROJECTS=(
     "tests/RedePanda.Backend.Tests/RedePanda.Backend.Tests.csproj"
 )
 
-# A restore in locked mode still rewrites the file if it decides it may, so the lock files are
-# checksummed before and after as well. Belt and braces, and it costs nothing.
 before="$(cd "${REPO_ROOT}" && find . -name packages.lock.json -not -path './**/bin/*' -not -path './**/obj/*' -print0 \
     | sort -z | xargs -0 sha256sum | sha256sum)"
 

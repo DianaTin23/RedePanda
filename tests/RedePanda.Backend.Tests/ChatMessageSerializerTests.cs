@@ -3,10 +3,6 @@ using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
 
-/// <summary>
-/// The Kafka payload format is the contract between the backend and the console client. If it
-/// changes silently the two stop understanding each other, so it is pinned here.
-/// </summary>
 public class ChatMessageSerializerTests
 {
     [Fact]
@@ -51,7 +47,6 @@ public class ChatMessageSerializerTests
     [InlineData("[]")]
     public void UnreadablePayloadsReturnNullRatherThanThrowing(string payload)
     {
-        // A foreign or corrupt record on the topic must not take down the consumer loop.
         Assert.Null(ChatMessageSerializer.Deserialize(payload));
     }
 }

@@ -6,10 +6,6 @@ using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
 
-/// <summary>
-/// The produce path has to fail fast. librdkafka's <c>message.timeout.ms</c> defaults to five
-/// minutes, and the POST behind it holds a browser's composer for exactly as long.
-/// </summary>
 public class ChatProducerTests
 {
     [Fact]
@@ -20,11 +16,6 @@ public class ChatProducerTests
         Assert.Equal(8000, config.MessageTimeoutMs);
     }
 
-    /// <summary>
-    /// A per-request timeout at or above the message timeout would let a single in-flight request
-    /// consume the whole budget, leaving no room for the retry the message timeout is meant to
-    /// cover.
-    /// </summary>
     [Fact]
     public void OneRequestMayNotConsumeTheWholeBudget()
     {
@@ -34,12 +25,6 @@ public class ChatProducerTests
         Assert.True(config.RequestTimeoutMs < config.MessageTimeoutMs);
     }
 
-    /// <summary>
-    /// The frontend resumes a dropped SSE stream by discarding every offset it has already seen,
-    /// so a record that arrives out of order is not a duplicate to shrug at — it is dropped and
-    /// never shown. Idempotence is what stops librdkafka from delivering a retry out of order in
-    /// the first place, and it is the reason that filter is safe.
-    /// </summary>
     [Fact]
     public void ARetriedRecordMayNotOvertakeALaterOne()
     {
@@ -47,15 +32,9 @@ public class ChatProducerTests
 
         Assert.True(config.EnableIdempotence);
 
-        // Implied by idempotence rather than independent of it: librdkafka refuses to build a
-        // client that asks for both idempotence and a weaker acknowledgement.
         Assert.Equal(Acks.All, config.Acks);
     }
 
-    /// <summary>
-    /// A timeout is not a broken gateway: the request was never answered either way, and 504 is
-    /// what says so. Everything else the broker rejects outright stays 502.
-    /// </summary>
     [Theory]
     [InlineData(ErrorCode.Local_MsgTimedOut, StatusCodes.Status504GatewayTimeout)]
     [InlineData(ErrorCode.Local_TimedOut, StatusCodes.Status504GatewayTimeout)]
@@ -66,15 +45,6 @@ public class ChatProducerTests
         Assert.Equal(expected, ChatProducer.StatusCodeFor(new Error(code)));
     }
 
-    /// <summary>
-    /// The test that would have caught the bug: everything above only pins the shape of the
-    /// configuration, this one pins the behaviour. Port 1 is closed on every machine, so the
-    /// producer never reaches a broker and the only thing that can end the call is the timeout.
-    /// <para>
-    /// The assertion is deliberately loose — 15 s against a configured 2 s. It is not measuring
-    /// librdkafka's precision, it is separating "seconds" from the five minutes that shipped.
-    /// </para>
-    /// </summary>
     [Fact]
     public async Task ProducingToAnUnreachableBrokerGivesUpAfterTheTimeout()
     {

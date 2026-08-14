@@ -1,15 +1,5 @@
 namespace RedePanda.Backend.Tests;
 
-/// <summary>
-/// librdkafka calls the error callback once per broker connection attempt, so an unreachable
-/// broker wrote on the order of twenty lines a second per pod — burying the log at exactly the
-/// moment someone would go looking in it.
-/// <para>
-/// The throttle folds that repetition without hiding it, which is the part worth pinning: a
-/// suppressing logger that forgets what it suppressed is worse than a noisy one, because the
-/// quiet then reads as "it only happened once".
-/// </para>
-/// </summary>
 public class LogThrottleTests
 {
     [Fact]
@@ -33,14 +23,9 @@ public class LogThrottleTests
         }
     }
 
-    /// <summary>
-    /// The count is the whole point. Without it the next line through would claim a single event
-    /// where fifty happened.
-    /// </summary>
     [Fact]
     public void WhatWasHeldBackIsReportedOnTheNextMessageThrough()
     {
-        // Zero, so the interval has always elapsed and no test has to wait for it.
         var throttle = new LogThrottle(TimeSpan.Zero);
         Assert.True(throttle.ShouldLog(out _));
 
@@ -57,7 +42,6 @@ public class LogThrottleTests
         Assert.Equal(7, suppressed);
     }
 
-    /// <summary>And the count resets, rather than accumulating for the life of the process.</summary>
     [Fact]
     public void TheSuppressedCountStartsAgainAfterItIsReported()
     {

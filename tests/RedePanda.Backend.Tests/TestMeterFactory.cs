@@ -2,7 +2,6 @@ using System.Diagnostics.Metrics;
 
 namespace RedePanda.Backend.Tests;
 
-/// <summary>Minimal stand-in so the tests need no DI container.</summary>
 internal sealed class TestMeterFactory : IMeterFactory
 {
     private readonly List<Meter> _meters = [];

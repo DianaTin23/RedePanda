@@ -2,11 +2,6 @@ using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
 
-/// <summary>
-/// The buffer a joining browser is served from. Room separation is the same promise the
-/// broadcaster makes, and the offset filter is what keeps a reconnect from repeating a room the
-/// reader has already seen.
-/// </summary>
 public class ChatHistoryTests
 {
     private static ChatRecord Record(long offset, string room, string text) =>
@@ -48,17 +43,12 @@ public class ChatHistoryTests
     [Fact]
     public void RoomMatchingIsCaseSensitive()
     {
-        // Same rule as the broadcaster: a room is an opaque identifier, not a display name.
         var history = new ChatHistory(limit: 0, roomLimit: 0);
         history.Append(Record(0, "General", "hallo"));
 
         Assert.Empty(history.Snapshot("general", afterOffset: -1));
     }
 
-    /// <summary>
-    /// The <c>Last-Event-ID</c> path: a browser that reconnects must be told what it missed, not
-    /// handed the room a second time.
-    /// </summary>
     [Fact]
     public void SnapshotSkipsEverythingUpToTheGivenOffset()
     {
@@ -97,11 +87,6 @@ public class ChatHistoryTests
         Assert.Equal(["mittlere", "neueste"], backlog.Select(r => r.Message.Text));
     }
 
-    /// <summary>
-    /// Not a tautology: this runs the shipped default through the trim in <c>Append</c>. Every
-    /// replica holds this buffer, so putting it back to 0 breaks a test instead of quietly
-    /// multiplying the memory cost by the replica count.
-    /// </summary>
     [Fact]
     public void TheShippedDefaultKeepsTheBufferBounded()
     {
@@ -118,11 +103,6 @@ public class ChatHistoryTests
         Assert.Equal($"nachricht {BackendOptions.DefaultHistorySize + 49}", backlog[^1].Message.Text);
     }
 
-    /// <summary>
-    /// The bound that was missing. <c>CHAT_HISTORY_SIZE</c> trims the queue inside a room; nothing
-    /// ever trimmed the dictionary of rooms, and a room name arrives from a query string. Every
-    /// replica holds every room it has ever seen, so the growth happens on all of them at once.
-    /// </summary>
     [Fact]
     public void TheNumberOfRoomsIsBoundedByTheShippedDefault()
     {
@@ -139,10 +119,6 @@ public class ChatHistoryTests
         Assert.NotEmpty(history.Snapshot($"raum-{rooms - 1}", afterOffset: -1));
     }
 
-    /// <summary>
-    /// Which room goes when a new one arrives: the one whose last message is oldest, not the one
-    /// created first. A room that is still busy therefore survives rooms created after it.
-    /// </summary>
     [Fact]
     public void TheRoomWithTheOldestLastMessageIsDroppedFirst()
     {
@@ -150,7 +126,6 @@ public class ChatHistoryTests
         history.Append(Record(0, "zuerst", "hallo"));
         history.Append(Record(1, "danach", "hallo"));
 
-        // "zuerst" speaks again, so "danach" now holds the oldest message of the two.
         history.Append(Record(2, "zuerst", "immer noch da"));
         history.Append(Record(3, "neu", "hallo"));
 
@@ -159,10 +134,6 @@ public class ChatHistoryTests
         Assert.NotEmpty(history.Snapshot("neu", afterOffset: -1));
     }
 
-    /// <summary>
-    /// A message in a room that is already held is not a new room, so it must not evict anything —
-    /// otherwise a busy two-room chat would keep dropping the room it is not currently in.
-    /// </summary>
     [Fact]
     public void AMessageInAKnownRoomEvictsNothing()
     {
@@ -176,7 +147,6 @@ public class ChatHistoryTests
         Assert.NotEmpty(history.Snapshot("zwei", afterOffset: -1));
     }
 
-    /// <summary>Zero keeps the old behaviour available, as it does for the per-room limit.</summary>
     [Fact]
     public void ZeroMeansAnUnlimitedNumberOfRooms()
     {

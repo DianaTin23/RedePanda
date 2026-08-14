@@ -2,10 +2,6 @@ using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
 
-/// <summary>
-/// Covers the validation rules that the backend applies to every incoming message. These are
-/// the rules the HTTP endpoint depends on, so they are tested here rather than through HTTP.
-/// </summary>
 public class ChatMessageValidationTests
 {
     private static readonly DateTimeOffset ServerClock =
@@ -44,7 +40,6 @@ public class ChatMessageValidationTests
     }
 
     [Theory]
-    // Empty, whitespace-only and null are all rejected, for each of the three fields.
     [InlineData(null, "alice", "hallo", "room")]
     [InlineData("", "alice", "hallo", "room")]
     [InlineData("   ", "alice", "hallo", "room")]
@@ -92,7 +87,6 @@ public class ChatMessageValidationTests
     [Fact]
     public void LengthIsMeasuredAfterTrimming()
     {
-        // Padding a limit-length text with whitespace must not push it over the limit.
         var padded = "  " + new string('x', MaxTextLength) + "  ";
 
         var ok = TryCreate("general", "alice", padded, out var message, out _);
@@ -122,8 +116,6 @@ public class ChatMessageValidationTests
         Assert.True(ok);
         Assert.NotNull(message);
 
-        // The only way a timestamp can enter a ChatMessage is as an explicit argument, which the
-        // endpoint supplies from its own clock.
         Assert.Equal(ServerClock, message.Timestamp);
     }
 }

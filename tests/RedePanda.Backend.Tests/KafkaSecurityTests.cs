@@ -3,23 +3,11 @@ using RedePanda.Contracts;
 
 namespace RedePanda.Backend.Tests;
 
-/// <summary>
-/// What makes "the broker is swappable without a code change" true rather than merely plausible:
-/// any broker that is not the unauthenticated one in this chart needs TLS, credentials, or both.
-/// <para>
-/// Every case reads through an explicit lookup rather than the process environment — these tests
-/// run in parallel with everything else, and environment variables are process-global.
-/// </para>
-/// </summary>
 public class KafkaSecurityTests
 {
     private static Func<string, string?> Env(params (string Key, string Value)[] entries) =>
         key => entries.FirstOrDefault(e => e.Key == key).Value;
 
-    /// <summary>
-    /// Nothing configured must leave the config byte-for-byte what it was before any of this
-    /// existed: the bundled single-broker demo speaks plaintext and has to keep working untouched.
-    /// </summary>
     [Fact]
     public void AnUnconfiguredClientIsLeftAlone()
     {
@@ -59,11 +47,6 @@ public class KafkaSecurityTests
         Assert.Equal("s3cret", config.SaslPassword);
     }
 
-    /// <summary>
-    /// Everyone who has configured a Kafka client has typed <c>SASL_SSL</c> and
-    /// <c>SCRAM-SHA-512</c>, because that is what every broker's documentation writes. Rejecting
-    /// those spellings would be a puzzle, not a safeguard.
-    /// </summary>
     [Fact]
     public void TheSpellingsFromBrokerDocumentationAreAccepted()
     {
@@ -93,10 +76,6 @@ public class KafkaSecurityTests
         Assert.Null(config.SaslUsername);
     }
 
-    /// <summary>
-    /// Each of these is a pod that would otherwise start, fail every connection at runtime, and
-    /// report it as a broker problem. The message has to name the variable that is missing.
-    /// </summary>
     [Theory]
     [InlineData("REDPANDA_SASL_MECHANISM")]
     [InlineData("REDPANDA_SASL_USERNAME")]
@@ -118,11 +97,6 @@ public class KafkaSecurityTests
         Assert.Contains(missing, failure.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// A CA bundle alongside a protocol that never opens a TLS connection means someone believes
-    /// the traffic is encrypted while it is not — the one misconfiguration here worth refusing
-    /// outright rather than ignoring.
-    /// </summary>
     [Fact]
     public void ACaBundleWithoutTlsIsRefused()
     {
@@ -142,8 +116,6 @@ public class KafkaSecurityTests
     [InlineData("REDPANDA_SASL_MECHANISM", "Scram")]
     public void AnUnknownValueIsRejectedWithTheAcceptedOnes(string key, string value)
     {
-        // The overridden entry comes first: Env resolves a key to its first match, so putting it
-        // last would leave the valid value in place and test nothing.
         var failure = Assert.Throws<InvalidOperationException>(() =>
             KafkaSecurity.ApplyTo(new ClientConfig(), Env(
                 (key, value),
@@ -156,7 +128,6 @@ public class KafkaSecurityTests
         Assert.Contains(value, failure.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>The password must not travel into a log, an exception message included.</summary>
     [Fact]
     public void AFailureNeverRepeatsThePassword()
     {

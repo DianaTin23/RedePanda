@@ -6,6 +6,10 @@ installiert per **Helm**, instrumentiert per **OpenTelemetry** und ausgewertet i
 
 ![RedePanda](RedePanda.png)
 
+> **Diese README beschreibt, wie man RedePanda baut, installiert und bedient.**
+> Warum es so gebaut ist — die Entwurfsentscheidungen und die Fehler, die dahinterstehen —
+> steht in **[docs/](docs/README.md)**.
+
 ---
 
 ## 1. Gruppenmitglieder
@@ -67,20 +71,9 @@ Abschnitt 14 aufgeführt.
 | Browser → Prometheus | **HTTPS** `:9090` | `--web.config.file` |
 | Prometheus → Collector | HTTP-Scrape `:8888` | Selbsttelemetrie des Collectors — die einzige unverschlüsselte Strecke, siehe Abschnitt 14 |
 
-**Warum SSE und nicht SignalR:** SignalR bräuchte ein WebSocket-Upgrade durch den Proxy,
-Sticky Sessions und ab der zweiten Replica ein Backplane. Für einen reinen
-Server→Browser-Broadcast genügt SSE, funktioniert durch jeden Proxy und kommt ohne
-Client-Bibliothek aus.
-
-**Und es braucht auch bei mehreren Replicas keins von beidem.** Die `id` jedes Datenframes ist der
-Kafka-Offset — der gehört dem Broker, nicht einem einzelnen Pod. Ein Browser, dessen Verbindung
-abreißt und der auf einer *anderen* Replica wieder aufsetzt, schickt denselben `Last-Event-ID` mit
-und bekommt genau das, was er verpasst hat. Das Backplane ist Redpanda selbst, und `sessionAffinity`
-am Service wäre nicht nur unnötig, sondern schädlich: es würde einen Rollout künstlich verlängern.
-
-**Warum ein Topic für alle Räume:** Der Raum steht als Feld *und* als Kafka-Key in der
-Nachricht. Ein Topic heißt ein Init-Job; der Key sichert die Reihenfolge pro Raum, falls das
-Topic je mehr Partitionen bekommt. Gefiltert wird serverseitig im Backend.
+**Warum SSE und nicht SignalR**, warum es auch bei mehreren Replicas weder Sticky Sessions noch
+ein Backplane braucht, und warum ein einziges Topic für alle Räume genügt:
+siehe [docs/architecture.md](docs/architecture.md) und [docs/streaming.md](docs/streaming.md).
 
 ---
 
@@ -121,39 +114,26 @@ Die `.csproj`-Dateien enthalten deshalb nur noch `<PackageReference Include="…
 
 #### Reproduzierbarkeit: Lockfiles und Digests
 
-`Directory.Packages.props` pinnt nur, was direkt referenziert wird. Was diese Pakete ihrerseits
-mitbringen, stand vorher frei — im Testprojekt allein 52 transitive Pakete. Die committeten
-`packages.lock.json` schließen diese Lücke.
+Die committeten `packages.lock.json` pinnen den vollständigen Graphen inklusive der transitiven
+Pakete. Zwei Regeln im Alltag:
 
 - **Version geändert?** Ein normales `dotnet restore` schreibt die Lockfile neu. Das Ergebnis
   gehört mit in den Commit.
 - **Container-Build:** `dotnet restore --locked-mode` — eine nicht mehr passende Lockfile wird
   zum Build-Fehler (`NU1004`) statt zu einem stillen Upgrade.
 
-`global.json` ist bewusst auf **10.0.302** gepinnt, dasselbe Feature-Band, das die Nix-Shell
-liefert und auf das das SDK-Image im Backend-`Dockerfile` festgelegt ist. `latestPatch` lässt
-nur noch Patch-Stände zu. Ein Band-Sprung (10.0.4xx) ist damit eine bewusste Änderung an
-`flake.nix`, `global.json` und dem `FROM` des Build-Stages — nicht länger etwas, das ein
-beliebiger Rechner nebenbei mitbringt.
-
-Jedes Image aus einer Registry ist zusätzlich per **Digest** gepinnt, nicht nur per Tag: ein
-Tag kann auf anderen Inhalt umgehängt werden, ein Digest nicht. Gepinnt wird jeweils der
-Digest der Manifest-Liste, damit arm64 genauso funktioniert wie amd64.
+`global.json` ist auf **10.0.302** gepinnt, dasselbe Feature-Band wie die Nix-Shell und das
+SDK-Image im Backend-`Dockerfile`. Jedes Image aus einer Registry ist zusätzlich per **Digest**
+gepinnt, nicht nur per Tag.
 
 ```bash
+./scripts/check-repro.sh      # prueft alle vier Projekte gegen ihre Lockfiles
 ./scripts/check-digests.sh    # meldet, wenn ein Tag von seinem Digest weggewandert ist
 ```
 
-Das Skript schreibt nichts um; es gibt die Ersatzzeile aus. Es prüft außerdem, dass der Broker
-in `docker-compose.yml` und der Broker in `values.yaml` **derselbe Digest** sind — lokal und im
-Cluster derselbe Broker ist die eine Parität, die dieses Repo wirklich herstellen kann, und eine
-Behauptung im Kommentar ist keine Prüfung.
-
-Ausgenommen sind `redepanda-backend` und `redepanda-frontend`: die baut
-`scripts/build-images.sh` lokal, sie werden nie aus einer Registry geladen, und ein Digest
-würde `imagePullPolicy: IfNotPresent` brechen. Bei ihnen übernimmt der **Tag** die Aufgabe des
-Digests: er wird aus `appVersion` und dem Git-Commit abgeleitet (`0.1.0-g103b98b`) und nie
-wiederverwendet — ein Tag, ein Build. Siehe Abschnitt 6.
+Warum locked mode nicht dauerhaft an ist, warum der Manifest-Listen-Digest gepinnt wird und
+warum die beiden lokal gebauten Images keinen Digest tragen:
+siehe [docs/build.md](docs/build.md).
 
 ---
 
@@ -586,29 +566,21 @@ CA aus `/tmp/redepanda-ca.crt` in den eigenen Truststore.
 
 ### Was im Frontend absichtlich so ist
 
-- **Verlauf ohne History-Endpunkt.** Der Consumer liest ab `AutoOffsetReset.Earliest` und baut daraus
-  einen Puffer pro Raum; `GET /api/stream` schickt ihn als erste Frames, bevor der Live-Betrieb
-  beginnt. Es gibt bewusst kein zweites `GET /api/history`: ein separater Aufruf hätte eine Lücke
-  zwischen „Verlauf geladen" und „Stream offen" — genau dort ginge eine Nachricht verloren.
+- **Verlauf ohne History-Endpunkt.** `GET /api/stream` schickt den Raumverlauf als erste Frames,
+  bevor der Live-Betrieb beginnt. Ein separates `GET /api/history` gibt es bewusst nicht.
 - **Kein doppelter Verlauf beim Reconnect.** Jedes Datenframe trägt seinen Kafka-Offset als
-  SSE-`id`. `EventSource` schickt die zuletzt gesehene id beim automatischen Neuverbinden als
-  `Last-Event-ID` mit, und das Backend spielt nur nach, was danach kam.
-  Das deckt allerdings nur den Pfad ab, auf dem `EventSource` von sich aus neu verbindet. Ist der
-  Fehler *fatal* — der Pod ist weg, Caddy antwortet 502 —, gibt `EventSource` endgültig auf, und das
-  Frontend baut ein neues auf. An ein neues `EventSource` kann kein JavaScript einen Header hängen:
-  der Server sieht einen Erstbesucher und spielt den ganzen Raum noch einmal ein. Deshalb filtert
-  der Client zusätzlich selbst nach der `id` und rendert jeden Offset höchstens einmal. Beide Pfade
-  zusammen ergeben die Zusage, auf der die Punkte 7 bis 9 oben beruhen.
-- **Kein Build-Tooling, keine externen Requests.** Kein npm, kein CDN, keine Webfonts: das Frontend
-  besteht aus vier statischen Dateien, die Caddy ausliefert. Im Netzwerk-Tab tauchen nur diese
-  Dateien und `/api/...` auf — das ist die Grundlage für Punkt 3 oben und funktioniert auch in einem
-  Cluster ohne Internetzugang.
+  SSE-`id`; der Client filtert zusätzlich selbst danach. Das deckt beide Reconnect-Pfade ab und
+  ist die Grundlage für die Punkte 7 bis 9 oben.
+- **Kein Build-Tooling, keine externen Requests.** Kein npm, kein CDN, keine Webfonts: vier
+  statische Dateien, die Caddy ausliefert. Im Netzwerk-Tab tauchen nur diese und `/api/...` auf —
+  Grundlage für Punkt 3 oben, und lauffähig ohne Internetzugang.
 - **Hell und dunkel.** Standardmäßig folgt die Oberfläche der Systemeinstellung; der Schalter oben
-  rechts erzwingt ein Schema und merkt es sich. Praktisch für Screenshots, ohne das Betriebssystem
-  umzustellen.
-- **Farbe pro Name.** Der Farbton wird aus dem Nickname gehasht; Helligkeit und Sättigung kommen aus
-  dem Theme, damit jeder erzeugte Farbton auf beiden Hintergründen lesbar bleibt. Eigene Nachrichten
-  erkennt man an Position und Label „(du)", nicht an der Farbe allein.
+  rechts erzwingt ein Schema und merkt es sich. Praktisch für Screenshots.
+- **Farbe pro Name.** Der Farbton wird aus dem Nickname gehasht. Eigene Nachrichten erkennt man an
+  Position und Label „(du)", nicht an der Farbe allein.
+
+Warum es zwei Reconnect-Pfade gibt und warum der Client trotz `Last-Event-ID` zusätzlich filtern
+muss: [docs/frontend.md](docs/frontend.md#zwei-reconnect-pfade-nicht-einer).
 
 ---
 
@@ -696,7 +668,7 @@ schlimmer als eine fremde Konvention.
 
 ## 10. Observability: OTel-SDK → Collector → Prometheus
 
-Das Backend erzeugt vier fachliche Metriken über `Meter("RedePanda")` und schickt sie per OTLP
+Das Backend erzeugt fünf fachliche Metriken über `Meter("RedePanda")` und schickt sie per OTLP
 an den Collector. Der Collector übersetzt die Namen und stellt sie unter `:8889` bereit;
 Prometheus scrapt **nur den Collector**.
 
@@ -705,7 +677,11 @@ Prometheus scrapt **nur den Collector**.
 | `redepanda.messages.sent` | `Counter<long>` | `redepanda_messages_sent_total` |
 | `redepanda.messages.received` | `Counter<long>` | `redepanda_messages_received_total` |
 | `redepanda.kafka.errors` | `Counter<long>` | `redepanda_kafka_errors_total` |
+| `redepanda.streams.cut` | `Counter<long>` | `redepanda_streams_cut_total` |
 | `redepanda.active_connections` | `ObservableUpDownCounter<int>` | `redepanda_active_connections` |
+
+Die Namensregeln — punktgetrennt, ohne `_total`, ohne Einheit — sind an den Prometheus-Exporter
+des Collectors gebunden; siehe [docs/observability.md](docs/observability.md).
 
 ### PromQL für die Demo
 
@@ -752,10 +728,9 @@ sich ohne Rebuild der Anwendung austauschen. Preis: ein Pod und ein Netzwerk-Hop
 ### Bewusst nur Metriken
 
 Der Collector könnte auch Traces und Logs. Aktiviert ist **nur die Metrics-Pipeline**. Traces
-bräuchten Kontextpropagierung von Hand über die Kafka-Grenze — `Confluent.Kafka` hat keine
-stabile Auto-Instrumentierung — plus ein zweites Backend. Logs gehen nach stdout (12-Factor).
-Die Trace-Pipeline nachzurüsten wäre im vorhandenen Collector ein Receiver- und ein
-Exporter-Block; der Ausbaupfad steht offen.
+bräuchten Kontextpropagierung von Hand über die Kafka-Grenze, plus ein zweites Backend; Logs
+gehen nach stdout (12-Factor). Der Ausbaupfad steht offen —
+Begründung in [docs/observability.md](docs/observability.md#bewusst-nur-metriken).
 
 ---
 

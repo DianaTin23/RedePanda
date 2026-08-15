@@ -40,7 +40,6 @@ collect_pins() {
         "${REPO_ROOT}/src/RedePanda.Frontend/Dockerfile" \
         "${REPO_ROOT}/deploy/helm/redepanda/values.yaml" \
         "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.yml" \
-        "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.sasl.yml" \
         "${REPO_ROOT}/RedePanda-kafka-docker/make-tls.sh" \
     | sort -u
 }
@@ -74,7 +73,6 @@ broker_ref() {
 
 BROKER_SOURCES=(
     "RedePanda-kafka-docker/docker-compose.yml"
-    "RedePanda-kafka-docker/docker-compose.sasl.yml"
     "RedePanda-kafka-docker/make-tls.sh"
 )
 

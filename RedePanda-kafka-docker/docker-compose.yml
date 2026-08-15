@@ -5,20 +5,66 @@ services:
     # KEEP IN SYNC: redpanda.image in values.yaml (scripts/check-digests.sh prueft die Paritaet).
     image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
     container_name: redpanda-0
+
+    environment:
+      RP_BOOTSTRAP_USER: "chat:chat-secret-pw:SCRAM-SHA-512"
+
+    # Ein Broker, zwei externe Listener: 19092 Plaintext ohne Auth, 19093 TLS + SASL/SCRAM.
+    # 19093 entsteht nur, wenn tls/ Schluesselmaterial enthaelt -- sonst startet der Broker
+    # unveraendert im Plaintext-Betrieb. `./make-tls.sh` erzeugt das Material.
+    #
+    # Die Listener werden vollstaendig ueber redpanda.kafka_api gesetzt, nicht ueber
+    # --kafka-addr: der Flag baut die Liste beim Start neu auf und verwirft dabei
+    # authentication_method, womit SASL still auf allen Listenern gaelte.
+    entrypoint: ["/bin/bash", "-c"]
     command:
-      - redpanda
-      - start
-      - --mode=dev-container
-      - --smp=1
-      - --default-log-level=info
-      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr=internal://redpanda-0:9092,external://${ADVERTISED_HOST:-127.0.0.1}:19092
-      - --rpc-addr=redpanda-0:33145
-      - --advertise-rpc-addr=redpanda-0:33145
+      - |
+        set -e
+
+        rpk redpanda config set redpanda.enable_sasl true
+        rpk redpanda config set redpanda.superusers '["chat"]'
+        # enable_sasl schaltet sonst implizit die ACL-Pruefung mit ein, womit der
+        # unauthentifizierte 19092-Listener keine Topics mehr anlegen duerfte.
+        # Authentifizierung auf 19093 bleibt davon unberuehrt.
+        rpk redpanda config set redpanda.kafka_enable_authorization false
+
+        if [ -f /etc/redpanda/tls/broker.crt ]; then
+            echo "==> tls/ gefunden: SASL_SSL-Listener auf 19093 aktiv"
+            rpk redpanda config set redpanda.kafka_api \
+              '[{"name":"internal","address":"0.0.0.0","port":9092,"authentication_method":"none"},
+                {"name":"external","address":"0.0.0.0","port":19092,"authentication_method":"none"},
+                {"name":"secure","address":"0.0.0.0","port":19093,"authentication_method":"sasl"}]'
+            rpk redpanda config set redpanda.advertised_kafka_api \
+              '[{"name":"internal","address":"redpanda-0","port":9092},
+                {"name":"external","address":"${ADVERTISED_HOST:-127.0.0.1}","port":19092},
+                {"name":"secure","address":"${ADVERTISED_HOST:-127.0.0.1}","port":19093}]'
+            rpk redpanda config set redpanda.kafka_api_tls \
+              '[{"name":"secure","enabled":true,"cert_file":"/etc/redpanda/tls/broker.crt","key_file":"/etc/redpanda/tls/broker.key","require_client_auth":false}]'
+        else
+            echo "==> kein tls/: nur Plaintext. Fuer 19093: ./make-tls.sh, dann 'docker compose up -d --force-recreate'"
+            rpk redpanda config set redpanda.kafka_api \
+              '[{"name":"internal","address":"0.0.0.0","port":9092,"authentication_method":"none"},
+                {"name":"external","address":"0.0.0.0","port":19092,"authentication_method":"none"}]'
+            rpk redpanda config set redpanda.advertised_kafka_api \
+              '[{"name":"internal","address":"redpanda-0","port":9092},
+                {"name":"external","address":"${ADVERTISED_HOST:-127.0.0.1}","port":19092}]'
+        fi
+
+        exec rpk redpanda start \
+          --mode=dev-container \
+          --smp=1 \
+          --default-log-level=info \
+          --rpc-addr=redpanda-0:33145 \
+          --advertise-rpc-addr=redpanda-0:33145
+
     ports:
-      - "19092:19092"   # Kafka extern
+      - "19092:19092"   # Kafka extern, Plaintext
+      - "19093:19093"   # Kafka extern, SASL_SSL (nur mit tls/)
       - "9644:9644"     # Admin API (optional, rpk/Console)
+
     volumes:
+      - ./tls:/etc/redpanda/tls:ro
       - redpanda-data:/var/lib/redpanda/data
+
 volumes:
   redpanda-data:

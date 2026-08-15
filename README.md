@@ -189,13 +189,17 @@ dotnet run --project src/RedePanda.Backend
 
 ### Gegen einen abgesicherten Broker (TLS + SASL/SCRAM)
 
-Der mitgelieferte Broker oben spricht Plaintext. Wer die Behauptung aus Abschnitt 11 prüfen will —
-dass der Broker ein austauschbarer Backing Service ist —, braucht einen, der das nicht tut:
+Der Broker oben spricht auf `19092` Plaintext. Derselbe Container bringt auf `19093` einen zweiten
+Listener mit, der das nicht tut: TLS plus SASL/SCRAM. Er entsteht, sobald `tls/`
+Schlüsselmaterial enthält — vorher startet der Broker unverändert im reinen Plaintext-Betrieb.
+
+Wer die Behauptung aus Abschnitt 11 prüfen will — dass der Broker ein austauschbarer Backing
+Service ist —, ändert also **nichts am Broker**, sondern nur die Konfiguration der Clients:
 
 ```bash
 cd RedePanda-kafka-docker
 ./make-tls.sh                                          # einmalig: CA + Broker-Zertifikat nach tls/
-docker compose -f docker-compose.sasl.yml up -d
+docker compose --env-file env.local up -d --force-recreate
 cd ..
 
 export REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19093

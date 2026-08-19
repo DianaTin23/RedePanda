@@ -64,6 +64,12 @@ const instantFormat = new Intl.DateTimeFormat("de-DE", { dateStyle: "long", time
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+const prettyTrailSymbols = ["❤️", "🌈", "🎀", "✨"];
+const prettyTrailParticles = new Set();
+let prettyTrailIndex = 0;
+let prettyTrailX = Number.NEGATIVE_INFINITY;
+let prettyTrailY = Number.NEGATIVE_INFINITY;
+
 function readStoredTheme() {
     try {
         return localStorage.getItem(THEME_KEY);
@@ -102,6 +108,36 @@ for (const button of els.themeButtons) {
         }
     });
 }
+
+document.addEventListener("mousemove", (event) => {
+    if (resolvedTheme() !== "pretty") {
+        return;
+    }
+
+    const distance = Math.hypot(event.clientX - prettyTrailX, event.clientY - prettyTrailY);
+    if (distance < 18 || prettyTrailParticles.size >= 24) {
+        return;
+    }
+
+    prettyTrailX = event.clientX;
+    prettyTrailY = event.clientY;
+
+    const particle = document.createElement("span");
+    particle.className = "pretty-trail";
+    particle.textContent = prettyTrailSymbols[prettyTrailIndex % prettyTrailSymbols.length];
+    particle.setAttribute("aria-hidden", "true");
+    particle.style.left = `${event.clientX}px`;
+    particle.style.top = `${event.clientY}px`;
+    particle.style.setProperty("--trail-drift", `${(prettyTrailIndex % 5 - 2) * 7}px`);
+    prettyTrailIndex += 1;
+
+    prettyTrailParticles.add(particle);
+    document.body.append(particle);
+    particle.addEventListener("animationend", () => {
+        prettyTrailParticles.delete(particle);
+        particle.remove();
+    }, { once: true });
+}, { passive: true });
 
 function hueFor(name) {
     let hash = 0;

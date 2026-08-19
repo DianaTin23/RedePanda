@@ -363,6 +363,42 @@ input:disabled {
     border-color: var(--accent-hover);
 }
 
+.pretty-trail {
+    position: fixed;
+    z-index: 1000;
+    translate: -50% -50%;
+    font-size: 1.4rem;
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+    filter: drop-shadow(0 0.15rem 0.2rem rgb(75 16 45 / 0.2));
+    animation: pretty-trail-float 1100ms ease-out forwards;
+}
+
+@keyframes pretty-trail-float {
+    from {
+        opacity: 0.95;
+        transform: translate(0, 0) scale(0.75) rotate(-8deg);
+    }
+
+    to {
+        opacity: 0;
+        transform: translate(var(--trail-drift), -2.4rem) scale(1.2) rotate(12deg);
+    }
+}
+
+@keyframes pretty-trail-fade {
+    from {
+        opacity: 0.95;
+        transform: scale(0.85);
+    }
+
+    to {
+        opacity: 0;
+        transform: scale(1.05);
+    }
+}
+
 #stage {
     position: relative;
     display: grid;
@@ -794,5 +830,10 @@ input:disabled {
 @media (prefers-reduced-motion: reduce) {
     .status--connecting::before {
         animation: none;
+    }
+
+    .pretty-trail {
+        animation-name: pretty-trail-fade;
+        animation-duration: 600ms;
     }
 }

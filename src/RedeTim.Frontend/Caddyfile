@@ -42,6 +42,7 @@
 		root * /usr/share/caddy
 		encode zstd gzip
 		try_files {path} /index.html
+		header Cache-Control "no-cache"
 		file_server
 	}
 }

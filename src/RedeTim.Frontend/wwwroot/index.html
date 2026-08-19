@@ -12,7 +12,7 @@
     <meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)">
 
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=pretty-picker-2">
 </head>
 <body>
 <header class="topbar">
@@ -23,16 +23,25 @@
 
     <span id="status" class="status status--offline" role="status" aria-live="polite">getrennt</span>
 
-    <button type="button" id="theme" class="icon-button" aria-label="Farbschema wechseln"
-            title="Farbschema wechseln">
-        <svg class="icon icon--sun" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="4.2"/>
-            <path d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.4 5.4l1.8 1.8M16.8 16.8l1.8 1.8M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8"/>
-        </svg>
-        <svg class="icon icon--moon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M20.8 13.3A8.6 8.6 0 1 1 10.7 3.2a6.8 6.8 0 0 0 10.1 10.1z"/>
-        </svg>
-    </button>
+    <div class="theme-picker" role="group" aria-label="Farbschema auswählen">
+        <button type="button" class="icon-button theme-button" data-theme-option="light"
+                aria-label="Light Mode aktivieren" title="Light Mode" aria-pressed="false">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="4.2"/>
+                <path d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.4 5.4l1.8 1.8M16.8 16.8l1.8 1.8M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8"/>
+            </svg>
+        </button>
+        <button type="button" class="icon-button theme-button" data-theme-option="dark"
+                aria-label="Dark Mode aktivieren" title="Dark Mode" aria-pressed="false">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20.8 13.3A8.6 8.6 0 1 1 10.7 3.2a6.8 6.8 0 0 0 10.1 10.1z"/>
+            </svg>
+        </button>
+        <button type="button" class="icon-button theme-button" data-theme-option="pretty"
+                aria-label="Pretty-Modus aktivieren" title="Pretty-Modus" aria-pressed="false">
+            <span class="icon theme-icon--bow" aria-hidden="true"></span>
+        </button>
+    </div>
 </header>
 
 <main id="stage">
@@ -96,6 +105,6 @@
     <button type="button" id="leave" class="link">Raum verlassen</button>
 </footer>
 
-<script src="app.js"></script>
+<script src="app.js?v=pretty-picker-2"></script>
 </body>
 </html>

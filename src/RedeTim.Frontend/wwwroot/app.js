@@ -40,7 +40,7 @@ const els = {
     counter: document.getElementById("counter"),
     status: document.getElementById("status"),
     leave: document.getElementById("leave"),
-    theme: document.getElementById("theme"),
+    themeButtons: document.querySelectorAll("[data-theme-option]"),
 };
 
 let source = null;
@@ -73,10 +73,15 @@ function readStoredTheme() {
 }
 
 function applyTheme(theme) {
-    if (theme === "dark" || theme === "light") {
+    if (theme === "dark" || theme === "light" || theme === "pretty") {
         document.documentElement.dataset.theme = theme;
     } else {
         delete document.documentElement.dataset.theme;
+    }
+
+    const current = resolvedTheme();
+    for (const button of els.themeButtons) {
+        button.setAttribute("aria-pressed", String(button.dataset.themeOption === current));
     }
 }
 
@@ -87,14 +92,16 @@ function resolvedTheme() {
 
 applyTheme(readStoredTheme());
 
-els.theme.addEventListener("click", () => {
-    const next = resolvedTheme() === "dark" ? "light" : "dark";
-    applyTheme(next);
-    try {
-        localStorage.setItem(THEME_KEY, next);
-    } catch {
-    }
-});
+for (const button of els.themeButtons) {
+    button.addEventListener("click", () => {
+        const theme = button.dataset.themeOption;
+        applyTheme(theme);
+        try {
+            localStorage.setItem(THEME_KEY, theme);
+        } catch {
+        }
+    });
+}
 
 function hueFor(name) {
     let hash = 0;

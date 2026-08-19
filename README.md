@@ -4,7 +4,7 @@ Ein Browser-Chat, bei dem **Frontend** und **Backend** als zwei getrennte, selbs
 Deployments in Kubernetes laufen und über **Redpanda** (Kafka-Protokoll) miteinander sprechen —
 installiert per **Helm**, instrumentiert per **OpenTelemetry** und ausgewertet in **Prometheus**.
 
-![RedeTim](RedeTim.png)
+![RedeTim](src/RedeTim.Frontend/wwwroot/login-background-dark.png)
 
 > **Diese README beschreibt, wie man RedeTim baut, installiert und bedient.**
 > Warum es so gebaut ist — die Entwurfsentscheidungen und die Fehler, die dahinterstehen —
@@ -14,22 +14,20 @@ installiert per **Helm**, instrumentiert per **OpenTelemetry** und ausgewertet i
 
 ## 1. Gruppenmitglieder
 
-> ⚠️ **Vor der Abgabe ausfüllen.** Aus der Git-Historie sind bisher nur die GitHub-Konten
-> bekannt; für die Abgabe werden die Klarnamen (und ggf. Matrikelnummern) benötigt.
-
 | Name | GitHub |
 |---|---|
-| _(bitte eintragen)_ | [@deadmade](https://github.com/deadmade) |
-| _(bitte eintragen)_ | [@DianaTin23](https://github.com/DianaTin23) |
-| _(bitte eintragen)_ | [@maratin23](https://github.com/maratin23) |
+| Manuel Schülein | [@deadmade](https://github.com/deadmade) |
+| Diana Huynh | [@DianaTin23](https://github.com/DianaTin23) |
+| Mara Küfer | [@maratin23](https://github.com/maratin23) |
 
 ---
 
 ## 2. Projektziel und Architektur
 
-Zwei eigene Anwendungen, die **ausschließlich über Redpanda** Nachrichten austauschen. Das
-Frontend kennt Kafka nicht, das Backend kennt Prometheus nicht — beides ist Absicht und lässt
-sich in der Demo nachweisen.
+Zwei eigene Anwendungen: Das Browser-Frontend kommuniziert per HTTPS und SSE mit dem Backend;
+das Backend veröffentlicht und empfängt die Chatnachrichten über Redpanda. Das Frontend kennt
+Kafka nicht, das Backend kennt Prometheus nicht — beides ist Absicht und lässt sich in der Demo
+nachweisen.
 
 ```text
 Browser ──HTTPS──▶ Caddy (Frontend-Pod) ──proxy /api──▶ Backend-Pod ──Kafka──▶ Redpanda
@@ -243,7 +241,7 @@ Git-Commit, also `redetim-backend:0.1.0-g103b98b`. Er wird nie wiederverwendet. 
 schreibt das Skript die dazugehörige **Release-Datei** und gibt den Deploy-Befehl aus:
 
 ```text
-==> Built redetim-backend:0.1.0-g103b98b and redetim-frontend:0.1.0-g103b98b
+==> Built redetim-backend:0.1.0-g103b98b, redetim-chatclient:0.1.0-g103b98b and redetim-frontend:0.1.0-g103b98b
 ==> Wrote deploy/releases/0.1.0-g103b98b.yaml
 
 Deploy this release:
@@ -263,9 +261,9 @@ Manifesten `imagePullPolicy: IfNotPresent` **und** die Images müssen explizit g
 
 | Cluster | Befehl |
 |---|---|
-| kind | `kind load docker-image redetim-backend:$TAG redetim-frontend:$TAG` |
+| kind | `kind load docker-image redetim-backend:$TAG redetim-chatclient:$TAG redetim-frontend:$TAG` |
 | kind + Podman | `podman save` → `kind load image-archive` (macht das Skript automatisch) |
-| minikube | `minikube image load redetim-backend:$TAG redetim-frontend:$TAG` |
+| minikube | `minikube image load redetim-backend:$TAG redetim-chatclient:$TAG redetim-frontend:$TAG` |
 | Docker Desktop | nichts nötig — gemeinsamer Image-Store |
 
 `$TAG` ist die abgeleitete Version; mit `--load` erledigt das Skript diesen Schritt selbst.
@@ -278,10 +276,13 @@ Manifesten `imagePullPolicy: IfNotPresent` **und** die Images müssen explizit g
 ## 7. Installation mit Helm
 
 ```bash
+REL=$(command ls -t deploy/releases/*.yaml | head -1)
+VERSION=$(basename "$REL" .yaml)
+
 helm upgrade --install redetim ./deploy/helm/redetim \
   -n redetim --create-namespace --wait --timeout 10m \
-  -f deploy/releases/0.1.0-g103b98b.yaml \
-  --description "release 0.1.0-g103b98b"
+  -f "$REL" \
+  --description "release $VERSION"
 
 kubectl -n redetim get pods
 ```
@@ -590,7 +591,10 @@ muss: [docs/frontend.md](docs/frontend.md#zwei-reconnect-pfade-nicht-einer).
 
 ## 9. Konfiguration
 
-Alle Einstellungen kommen aus Umgebungsvariablen; im Cluster aus einer ConfigMap.
+Die laufzeitvariablen Anwendungsparameter kommen aus Umgebungsvariablen. Im Cluster stammen die
+nicht geheimen Werte überwiegend aus einer ConfigMap. Zugangsdaten werden per `secretKeyRef` aus
+einem Secret injiziert, `POD_NAME` kommt über die Downward API, und TLS-Zertifikate werden als
+Secret-Dateien gemountet.
 
 | Variable | Default | Verwendet von |
 |---|---|---|
@@ -744,7 +748,7 @@ Begründung in [docs/observability.md](docs/observability.md#bewusst-nur-metrike
 |---|---|---|
 | Codebase | ein Git-Repo, **eine** Beschreibung des Deployments (das Chart), sieben Wertekombinationen rendern sauber daraus | ein gerendertes Manifest ist nicht reproduzierbar: `tls.yaml` findet ohne Cluster nichts nachzuschlagen und mintet bei jedem Lauf neue Schlüssel. Deshalb liegt keines im Repo (Abschnitt 7) |
 | Dependencies | NuGet zentral deklariert und per `packages.lock.json` inklusive transitiver Pakete festgenagelt, Restore nur gegen nuget.org; alle Registry-Images per Digest gepinnt; Frontend bewusst ohne Build-Tooling (Vanilla JS) | erzwungen wird das nur, wo jemand `./scripts/check-repro.sh` aufruft, und ohne CI ruft es niemand von selbst auf. Im Alltag schreibt ein `dotnet test` die Lock-Dateien weiterhin um, statt zu scheitern — absichtlich, siehe Abschnitt 13 |
-| Config | ausschließlich Env-Variablen, im Cluster aus ConfigMap; Zugangsdaten getrennt davon aus einem Secret (`redpanda.auth.existingSecret`), nie aus `values.yaml` | kein Live-Reload: eine geänderte ConfigMap rollt die Pods über die `checksum/config`-Annotation, sie wird nicht im laufenden Prozess nachgelesen |
+| Config | laufzeitvariable Anwendungsparameter über Env-Variablen, im Cluster überwiegend aus der ConfigMap; Zugangsdaten getrennt davon per `secretKeyRef` aus einem Secret (`redpanda.auth.existingSecret`), `POD_NAME` aus der Downward API und TLS-Zertifikate als Secret-Mounts, nie geheime Werte aus `values.yaml` | kein Live-Reload: eine geänderte ConfigMap rollt die Pods über die `checksum/config`-Annotation, sie wird nicht im laufenden Prozess nachgelesen |
 | Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide ohne Codeänderung austauschbar, **und beide auch im Chart**: `redpanda.enabled=false` + `redpanda.external.bootstrapServers` bzw. `otelCollector.enabled=false` + `otelCollector.external.endpoint`, dessen privater CA das Backend über `otelCollector.external.caSecret` vertraut. TLS/SASL sind über `redpanda.auth` konfigurierbar und in Abschnitt 5 gegen einen echten SASL/TLS-Broker vorgeführt | der mitgelieferte Broker spricht weiterhin Plaintext, und das Chart lehnt die Kombination „abgesichertes Protokoll + mitgelieferter Broker" beim Rendern ab, weil sie nicht funktionieren kann. Ein fremder Collector schließt das mitgelieferte Prometheus aus: es kennt nur den mitgelieferten als Scrape-Ziel |
 | Build, Release, Run | drei getrennte Stufen mit identifizierbarem Release: unveränderlicher Image-Tag + Release-Datei, `helm rollback` funktioniert (siehe unten) | keine Registry: alte Images leben nur im Image-Store der Node. Kein CI (laut Aufgabe erlaubt) |
 | Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut. Ein Leser, der weiter als 256 Nachrichten zurückfällt, bekommt seinen Stream **beendet** statt still gekürzt — der Browser verbindet sich neu und holt die Lücke per `Last-Event-ID` nach (`redetim_streams_cut_total`) |
@@ -799,7 +803,7 @@ Konsolenclient — es waren einmal zwei, bevor der Admin-Prozess ein eigenes Ima
 - **Helm** (*graduated*) — die gesamte Anwendung wird darüber installiert, aktualisiert und
   deinstalliert; Parametrisierung über `values.yaml`.
 - **OpenTelemetry** (*graduated* seit **11.05.2026**, angekündigt am 21.05.2026; davor seit
-  26.08.2021 *incubating*) — das SDK im Backend erzeugt die vier fachlichen Metriken plus die
+  26.08.2021 *incubating*) — das SDK im Backend erzeugt die fünf fachlichen Metriken plus die
   ASP.NET-Core-HTTP-Instrumentierung und schickt sie per **OTLP** an den
   **OpenTelemetry Collector**.
 - **Prometheus** (*graduated*) — scrapt den Prometheus-Exporter des Collectors, speichert die
@@ -823,7 +827,7 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 # Glob stillschweigend -- REL wäre leer und die Fehlermeldung zeigte woanders hin.
 REL=$(command ls -t deploy/releases/*.yaml | head -1)
 
-dotnet test                                    # 129 Tests
+dotnet test                                    # 137 Tests
 helm lint deploy/helm/redetim -f "$REL"
 helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
   | kubeconform -strict -summary -kubernetes-version 1.32.0
@@ -978,10 +982,12 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
   startender Pod **pro Partition** zurückliest. Zwei Zahlen, weil sie Verschiedenes zählen — wer pro
   Partition genau `CHAT_HISTORY_SIZE` Sätze zurückliest, füllt keinen Raum mehr ganz, sobald zwei
   Räume aktiv sind.
-  Drei ehrliche Reste: die Zahl der Räume bleibt unbegrenzt; wer länger als 200 Nachrichten weg war,
-  bekommt beim Wiedereinstieg eine **Lücke** statt einer Dublette; und ein Raum, der weiter als
-  `CHAT_REPLAY_RECORDS` zurückliegt, ist nach einem Pod-Neustart aus dessen Sicht leer, obwohl er im
-  Topic noch steht. Mit `0` liest der Pod wieder den ganzen Topic, also das alte Verhalten.
+  Drei ehrliche Grenzen: Der Verlauf hält höchstens `CHAT_MAX_ROOMS` Räume (Default 200) und
+  verwirft beim nächsten neuen Raum den am längsten inaktiven; mit `0` ist diese Zahl unbegrenzt.
+  Wer länger als 200 Nachrichten weg war, bekommt beim Wiedereinstieg eine **Lücke** statt einer
+  Dublette. Und ein Raum, der weiter als `CHAT_REPLAY_RECORDS` zurückliegt, ist nach einem
+  Pod-Neustart aus dessen Sicht leer, obwohl er im Topic noch steht. Mit `0` liest der Pod wieder
+  den ganzen Topic, also das alte Verhalten.
 - **Der Pod wird erst `Ready`, wenn der Verlauf geladen ist.** Richtig so — sonst bekäme der erste
   Besucher nach einem Rollout eine halbe Historie —, aber es koppelt die Readiness an den Broker:
   existiert der Topic noch nicht, bleibt der Pod so lange `NotReady`, bis der Topic-Job durch ist.

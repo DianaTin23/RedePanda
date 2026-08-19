@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "redetim.fullname" . }}-create-topic-{{ .Release.Revision }}
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: topic-job
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "redetim.labels" . | nindent 8 }}
+        app.kubernetes.io/component: topic-job
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: create-topic
+          image: {{ include "redetim.image" (dict "ctx" . "component" "chatClient") | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["--ensure-topic"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "redetim.fullname" . }}-config
+          env:
+            {{- include "redetim.saslEnv" (dict "ctx" .) | nindent 12 }}
+            - name: TOPIC_WAIT_SECONDS
+              value: {{ .Values.topicJob.brokerWaitSeconds | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.redpanda.auth.caSecret }}
+            - name: broker-ca
+              mountPath: /etc/redetim/ca
+              readOnly: true
+            {{- end }}
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.redpanda.auth.caSecret }}
+        - name: broker-ca
+          secret:
+            secretName: {{ .Values.redpanda.auth.caSecret | quote }}
+        {{- end }}

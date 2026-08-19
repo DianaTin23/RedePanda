@@ -9,7 +9,7 @@ den Browser kommen, steht in [streaming.md](streaming.md).
 
 ## Eine Consumer-Group je Pod
 
-Jeder Pod erfindet seine eigene GroupId: `redepanda-backend-<POD_NAME>`. Das ist die
+Jeder Pod erfindet seine eigene GroupId: `redetim-backend-<POD_NAME>`. Das ist die
 Entscheidung, auf der die gesamte Skalierbarkeit ruht.
 
 Der Normalfall bei Kafka ist umgekehrt: Pods teilen sich eine Group und damit die Partitionen.
@@ -85,7 +85,7 @@ liefert, und eine leere Menge heißt, dass noch nichts zugewiesen ist.
 Ein Pod, der erst das halbe Topic gelesen hat, würde einem Browser ein halbes Gespräch zeigen.
 Deshalb bleibt er bis dahin aus den Service-Endpoints.
 
-Nachgeladene Nachrichten zählt `redepanda_messages_received_total` **nicht** mit. Sie wurden
+Nachgeladene Nachrichten zählt `redetim_messages_received_total` **nicht** mit. Sie wurden
 gezählt, als sie zum ersten Mal ankamen. Zählte man sie erneut, spränge der Zähler bei jedem
 Pod-Neustart um die gesamte Retention — er soll den laufenden Chat abbilden, nicht das eigene
 Nachladen.
@@ -139,7 +139,7 @@ Die zurückgehaltene Anzahl reist auf der nächsten durchgelassenen Zeile mit. E
 Log bleibt so ehrlich: es faltet Wiederholung, es versteckt sie nicht.
 
 **Metriken werden bewusst nicht mitgedrosselt.** Ein Zähler, der Ereignisse auslässt, ist kein
-Zähler mehr. `redepanda_kafka_errors_total` soll die echte Rate zeigen.
+Zähler mehr. `redetim_kafka_errors_total` soll die echte Rate zeigen.
 
 Zustellfehler erreichen den Error-Callback nicht — librdkafkas `error_cb` meldet nur Ereignisse
 auf Client-Ebene. Deshalb zählt `ProduceAsync` sie selbst, im `catch`.
@@ -217,7 +217,7 @@ begrenzt.
 
 ## Abgesicherte Broker
 
-`RedePanda.Contracts.KafkaSecurity` ist die einzige Stelle, an der TLS und SASL auf eine
+`RedeTim.Contracts.KafkaSecurity` ist die einzige Stelle, an der TLS und SASL auf eine
 `ClientConfig` abgebildet werden. Sie liest fünf Umgebungsvariablen:
 
 | Variable | Bedeutung |

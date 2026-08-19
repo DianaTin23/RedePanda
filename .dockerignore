@@ -1,5 +1,5 @@
 # This file must sit at the build context root, which for the backend *and* the chat client is
-# the repository root -- both reference RedePanda.Contracts. Excluding bin/ and obj/ is not just
+# the repository root -- both reference RedeTim.Contracts. Excluding bin/ and obj/ is not just
 # about image size: copying the host's obj/ into the build would overwrite the restore performed
 # inside the container with an asset file that points at host paths, and `dotnet publish
 # --no-restore` then fails on missing packages.
@@ -17,13 +17,13 @@
 deploy/
 scripts/
 tests/
-RedePanda-kafka-docker/
-# src/RedePanda.ChatClient/ is deliberately NOT excluded: it has its own image now, built from
+RedeTim-kafka-docker/
+# src/RedeTim.ChatClient/ is deliberately NOT excluded: it has its own image now, built from
 # this same context. It costs the backend build a few kilobytes of context and nothing in the
 # resulting image, which copies only what it names.
 #
 # The frontend stays out: its context is its own directory, not this one.
-src/RedePanda.Frontend/
+src/RedeTim.Frontend/
 
 *.md
 *.png

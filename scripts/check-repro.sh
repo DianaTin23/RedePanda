@@ -35,10 +35,10 @@ if ! command -v dotnet >/dev/null 2>&1; then
 fi
 
 PROJECTS=(
-    "src/RedePanda.Contracts/RedePanda.Contracts.csproj"
-    "src/RedePanda.Backend/RedePanda.Backend.csproj"
-    "src/RedePanda.ChatClient/RedePanda.ChatClient.csproj"
-    "tests/RedePanda.Backend.Tests/RedePanda.Backend.Tests.csproj"
+    "src/RedeTim.Contracts/RedeTim.Contracts.csproj"
+    "src/RedeTim.Backend/RedeTim.Backend.csproj"
+    "src/RedeTim.ChatClient/RedeTim.ChatClient.csproj"
+    "tests/RedeTim.Backend.Tests/RedeTim.Backend.Tests.csproj"
 )
 
 before="$(cd "${REPO_ROOT}" && find . -name packages.lock.json -not -path './**/bin/*' -not -path './**/obj/*' -print0 \

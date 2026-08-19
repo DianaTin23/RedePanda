@@ -1,6 +1,6 @@
 # Architektur
 
-RedePanda besteht aus zwei eigenständig geschriebenen und eigenständig ausgelieferten
+RedeTim besteht aus zwei eigenständig geschriebenen und eigenständig ausgelieferten
 Anwendungen, die **ausschließlich über Redpanda** miteinander reden. Das Frontend kennt Kafka
 nicht, das Backend kennt Prometheus nicht. Beides ist Absicht, und beides ist in der Demo
 nachweisbar.
@@ -75,7 +75,7 @@ genau dort ginge eine Nachricht verloren.
 
 ## Die geteilten Typen
 
-`RedePanda.Contracts` enthält das, worüber sich Backend und Konsolenclient einig sein müssen.
+`RedeTim.Contracts` enthält das, worüber sich Backend und Konsolenclient einig sein müssen.
 Es ist absichtlich klein.
 
 ### `ChatMessage`
@@ -127,7 +127,7 @@ darauf hinweist — sie sind die einzige Kontrolle, die es gibt.
 | Ort | hängt an | Was bei Drift passiert |
 |---|---|---|
 | `wwwroot/app.js` (Textlängengrenze) | `ChatMessage.DefaultMaxTextLength` | Der Client lässt mehr zu, als das Backend annimmt; der Nutzer sieht ein 400 statt einer Warnung im Eingabefeld. |
-| `RedePanda-kafka-docker/make-tls.sh` | `docker-compose.yml`, `redpanda.image` in `values.yaml` | Die lokale Broker-Version weicht von der im Cluster ab — Dev/Prod-Parität nur noch auf dem Papier. |
+| `RedeTim-kafka-docker/make-tls.sh` | `docker-compose.yml`, `redpanda.image` in `values.yaml` | Die lokale Broker-Version weicht von der im Cluster ab — Dev/Prod-Parität nur noch auf dem Papier. |
 | `ChatMetrics` (Instrumentnamen) | Suffixregeln des Prometheus-Exporters | Namen kommen mit falschem oder doppeltem Suffix in Prometheus an, die PromQL-Beispiele laufen leer. |
 | `Directory.Build.props` | XML erlaubt kein `--` im Kommentar | MSBuild meldet ein leeres `TargetFramework` aus einer völlig anderen Datei. |
 | `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. |
@@ -141,7 +141,7 @@ fehlende CI als bekannte Einschränkung.
 
 Es gibt vier Admin-Prozesse, alle als Kubernetes-Job:
 
-- Topic anlegen (`RedePanda.ChatClient --ensure-topic`)
+- Topic anlegen (`RedeTim.ChatClient --ensure-topic`)
 - die drei weiteren Aufgaben im `admin-job`
 
 Der Topic-Job ist **kein** Helm-Hook. Ein `post-install`-Hook wartete auf ein Backend, das

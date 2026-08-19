@@ -15,7 +15,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CHART_DIR="${REPO_ROOT}/deploy/helm/redepanda"
+CHART_DIR="${REPO_ROOT}/deploy/helm/redetim"
 RELEASE_DIR="${REPO_ROOT}/deploy/releases"
 
 LOAD_INTO=""
@@ -76,10 +76,10 @@ if [[ "${DIRTY}" == true ]]; then
     echo "!! The tag names the uncommitted content, but nothing in git does."
 fi
 
-BACKEND="redepanda-backend:${VERSION}"
-FRONTEND="redepanda-frontend:${VERSION}"
+BACKEND="redetim-backend:${VERSION}"
+FRONTEND="redetim-frontend:${VERSION}"
 
-CHATCLIENT="redepanda-chatclient:${VERSION}"
+CHATCLIENT="redetim-chatclient:${VERSION}"
 
 if command -v podman >/dev/null 2>&1; then
     ENGINE=podman
@@ -91,9 +91,9 @@ else
 fi
 
 echo "==> Building ${VERSION} with ${ENGINE}"
-"${ENGINE}" build -f "${REPO_ROOT}/src/RedePanda.Backend/Dockerfile" -t "${BACKEND}" "${REPO_ROOT}"
-"${ENGINE}" build -f "${REPO_ROOT}/src/RedePanda.ChatClient/Dockerfile" -t "${CHATCLIENT}" "${REPO_ROOT}"
-"${ENGINE}" build -t "${FRONTEND}" "${REPO_ROOT}/src/RedePanda.Frontend"
+"${ENGINE}" build -f "${REPO_ROOT}/src/RedeTim.Backend/Dockerfile" -t "${BACKEND}" "${REPO_ROOT}"
+"${ENGINE}" build -f "${REPO_ROOT}/src/RedeTim.ChatClient/Dockerfile" -t "${CHATCLIENT}" "${REPO_ROOT}"
+"${ENGINE}" build -t "${FRONTEND}" "${REPO_ROOT}/src/RedeTim.Frontend"
 
 echo "==> Built ${BACKEND}, ${CHATCLIENT} and ${FRONTEND}"
 
@@ -171,8 +171,8 @@ if [[ -n "${RELEASE_FILE}" ]]; then
 
 Deploy this release:
 
-  helm upgrade --install redepanda ${CHART_DIR#"${REPO_ROOT}/"} \\
-    -n redepanda --create-namespace --wait --timeout 10m \\
+  helm upgrade --install redetim ${CHART_DIR#"${REPO_ROOT}/"} \\
+    -n redetim --create-namespace --wait --timeout 10m \\
     -f ${RELEASE_FILE#"${REPO_ROOT}/"} \\
     --description "release ${VERSION}"
 EOF

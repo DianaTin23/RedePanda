@@ -1,6 +1,6 @@
 # Entwurfsdokumentation
 
-Diese Dokumente erklären, **warum** RedePanda so gebaut ist, wie es gebaut ist. Sie sind
+Diese Dokumente erklären, **warum** RedeTim so gebaut ist, wie es gebaut ist. Sie sind
 das Gegenstück zur [README](../README.md): die README sagt, wie man das System baut,
 installiert und bedient — hier steht die Begründung dahinter.
 

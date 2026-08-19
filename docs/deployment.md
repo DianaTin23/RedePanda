@@ -37,7 +37,7 @@ würde.
 Das Label `app.kubernetes.io/version` trägt die **Release**-Version, nicht `appVersion` des
 Charts. Die Frage, die dieses Label im Cluster beantworten muss, lautet „welcher Build läuft
 hier", und `appVersion` ist auf jeder Revision dieselbe Zeichenkette. Es zu ändern ist
-gefahrlos, weil es kein Selektor ist — `redepanda.selectorLabels` ist bewusst getrennt und
+gefahrlos, weil es kein Selektor ist — `redetim.selectorLabels` ist bewusst getrennt und
 enthält nur unveränderliche Identität, damit der Selektor eines Deployments nie wandert.
 
 ## TLS
@@ -153,7 +153,7 @@ Autoscaler. README Abschnitt 7 hat die zwei Befehle zum Einschalten.
 
 **Skaliert wird über CPU**, weil das Backend per Entwurf keinen `/metrics`-Endpunkt hat: Die
 einzige Metrik, an die ein einfacher HPA herankommt, ist die des kubelet. Die interessante Zahl
-wäre `redepanda_active_connections` je Pod, aber sie zu lesen bräuchte prometheus-adapter oder
+wäre `redetim_active_connections` je Pod, aber sie zu lesen bräuchte prometheus-adapter oder
 KEDA — eine ganze Zusatzkomponente, um eine Demo zu autoskalieren. Der Weg bleibt offen.
 
 Die Zielauslastung bezieht sich auf den CPU-**Request**, nicht auf das Limit und nicht auf den
@@ -266,10 +266,10 @@ dieselbe ConfigMap, dasselbe SASL-Secret wie der Topic-Job. Es gibt also keine z
 Konfigurationsquelle, die abweichen könnte.
 
 ```sh
-helm upgrade redepanda deploy/helm/redepanda -f "$REL" \
+helm upgrade redetim deploy/helm/redetim -f "$REL" \
   --set adminJob.enabled=true \
   --set-json 'adminJob.args=["--describe-topic"]'
-kubectl -n redepanda logs job/redepanda-admin-<revision>
+kubectl -n redetim logs job/redetim-admin-<revision>
 ```
 
 Auch hier trägt der Name die Revision, und das Pod-Template ist unveränderlich. Zwei
@@ -308,24 +308,24 @@ privater CA war damit nicht erreichbar — ohne Fehlermeldung, die das erklärt 
 
 ## Helpers
 
-`redepanda.fullname` kollabiert beim üblichen Release-Namen `redepanda` zu `redepanda`. Das ist
-es, was die Service-Namen in der README kurz hält: `redepanda-backend`,
-`redepanda-otel-collector`.
+`redetim.fullname` kollabiert beim üblichen Release-Namen `redetim` zu `redetim`. Das ist
+es, was die Service-Namen in der README kurz hält: `redetim-backend`,
+`redetim-otel-collector`.
 
 **Der Service-Name des Brokers ist bewusst nicht release-qualifiziert.** Er steht in
 `--advertise-kafka-addr` des Brokers und im Bootstrap-Vorgabewert jedes Clients; ein kurzer,
 stabiler Name hält beides lesbar und deckungsgleich mit der Dokumentation.
 
-`redepanda.securityProtocol` normalisiert die Schreibweise, indem es `_` und `-` entfernt —
+`redetim.securityProtocol` normalisiert die Schreibweise, indem es `_` und `-` entfernt —
 genauso wie `KafkaSecurity` im Code. Alles Unbekannte ist ein **harter Fehler**, und das ist der
 eigentliche Grund für den Helper. Die vorige Fassung verglich gegen zwei Zeichenketten und
 behandelte alles, was nicht passte, als „kein SASL" — ein Tippfehler im Protokollnamen führte
 also stillschweigend zu einem Deployment ohne Zugangsdaten.
 
-`redepanda.saslEnv` ist ein Helper und keine achtfach duplizierte Zeile, weil beide
+`redetim.saslEnv` ist ein Helper und keine achtfach duplizierte Zeile, weil beide
 Pod-Templates, die Kafka sprechen, ihn rendern.
 
-`redepanda.releaseAnnotations` lässt leere Werte weg, statt sie blank zu rendern, damit
+`redetim.releaseAnnotations` lässt leere Werte weg, statt sie blank zu rendern, damit
 `kubectl describe` still bleibt, wenn das Chart ohne Release-File gerendert wird — etwa bei
 `helm lint`.
 
@@ -334,7 +334,7 @@ Pod-Templates, die Kafka sprechen, ihn rendern.
 Das Image kommt von **docker.io und nicht von docker.redpanda.com**. Letzteres ist ein
 Pull-Through-Proxy vor demselben Repository und drosselt anonyme Manifest-Zugriffe so hart, dass
 der Digest sich nicht verlässlich auflösen oder nachprüfen lässt. Auf den Ursprung zu zeigen
-hält den Pin überprüfbar. `RedePanda-kafka-docker/docker-compose.yml` wurde mitgezogen, damit
+hält den Pin überprüfbar. `RedeTim-kafka-docker/docker-compose.yml` wurde mitgezogen, damit
 lokale Entwicklung und Chart sich weiter über ein Image einig sind — `check-digests.sh` prüft
 genau das, siehe [build.md](build.md#broker-parität).
 

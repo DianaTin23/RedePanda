@@ -1,12 +1,12 @@
-# RedePanda
+# RedeTim
 
 Ein Browser-Chat, bei dem **Frontend** und **Backend** als zwei getrennte, selbst geschriebene
 Deployments in Kubernetes laufen und über **Redpanda** (Kafka-Protokoll) miteinander sprechen —
 installiert per **Helm**, instrumentiert per **OpenTelemetry** und ausgewertet in **Prometheus**.
 
-![RedePanda](RedePanda.png)
+![RedeTim](RedeTim.png)
 
-> **Diese README beschreibt, wie man RedePanda baut, installiert und bedient.**
+> **Diese README beschreibt, wie man RedeTim baut, installiert und bedient.**
 > Warum es so gebaut ist — die Entwurfsentscheidungen und die Fehler, die dahinterstehen —
 > steht in **[docs/](docs/README.md)**.
 
@@ -143,23 +143,23 @@ Der schnellste Weg, den Chat zu sehen — nur Redpanda im Container, alles ander
 
 ```bash
 # 1. Broker starten
-cd RedePanda-kafka-docker
+cd RedeTim-kafka-docker
 docker compose --env-file env.local up -d
 
 # 2. Topic anlegen -- derselbe Admin-Prozess, den im Cluster der Topic-Job ausführt.
-#    (`rpk topic create redepanda-chat -p 1 -r 1 -X brokers=127.0.0.1:19092` tut dasselbe.)
+#    (`rpk topic create redetim-chat -p 1 -r 1 -X brokers=127.0.0.1:19092` tut dasselbe.)
 REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 \
-dotnet run --project src/RedePanda.ChatClient -- --ensure-topic
+dotnet run --project src/RedeTim.ChatClient -- --ensure-topic
 
 # 3. Backend starten
 REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 \
 OTEL_SDK_DISABLED=true \
 ASPNETCORE_URLS=http://127.0.0.1:5080 \
-dotnet run --project src/RedePanda.Backend
+dotnet run --project src/RedeTim.Backend
 
 # 4. Konsolenclient in einem zweiten Terminal
 REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 \
-dotnet run --project src/RedePanda.ChatClient -- --nick alice --room general
+dotnet run --project src/RedeTim.ChatClient -- --nick alice --room general
 ```
 
 Eine Nachricht über das Backend schicken und im Client mitlesen:
@@ -184,7 +184,7 @@ lokal sehen will, gibt Kestrel dieselben zwei Variablen wie das Chart:
 ASPNETCORE_URLS=https://127.0.0.1:5443 \
 ASPNETCORE_Kestrel__Certificates__Default__Path=/pfad/tls.crt \
 ASPNETCORE_Kestrel__Certificates__Default__KeyPath=/pfad/tls.key \
-dotnet run --project src/RedePanda.Backend
+dotnet run --project src/RedeTim.Backend
 ```
 
 ### Gegen einen abgesicherten Broker (TLS + SASL/SCRAM)
@@ -197,7 +197,7 @@ Wer die Behauptung aus Abschnitt 11 prüfen will — dass der Broker ein austaus
 Service ist —, ändert also **nichts am Broker**, sondern nur die Konfiguration der Clients:
 
 ```bash
-cd RedePanda-kafka-docker
+cd RedeTim-kafka-docker
 ./make-tls.sh                                          # einmalig: CA + Broker-Zertifikat nach tls/
 docker compose --env-file env.local up -d --force-recreate
 cd ..
@@ -207,12 +207,12 @@ export REDPANDA_SECURITY_PROTOCOL=SaslSsl
 export REDPANDA_SASL_MECHANISM=ScramSha512
 export REDPANDA_SASL_USERNAME=chat
 export REDPANDA_SASL_PASSWORD=chat-secret-pw
-export REDPANDA_SSL_CA_LOCATION=$PWD/RedePanda-kafka-docker/tls/ca.crt
+export REDPANDA_SSL_CA_LOCATION=$PWD/RedeTim-kafka-docker/tls/ca.crt
 
-dotnet run --project src/RedePanda.ChatClient -- --print-config     # was wirklich ankommt
-dotnet run --project src/RedePanda.ChatClient -- --ensure-topic
+dotnet run --project src/RedeTim.ChatClient -- --print-config     # was wirklich ankommt
+dotnet run --project src/RedeTim.ChatClient -- --ensure-topic
 OTEL_SDK_DISABLED=true ASPNETCORE_URLS=http://127.0.0.1:5080 \
-  dotnet run --project src/RedePanda.Backend
+  dotnet run --project src/RedeTim.Backend
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5080/health/ready   # 200
 ```
 
@@ -239,17 +239,17 @@ Das Passwort steht im Klartext in der Compose-Datei, weil dieser Broker nichts s
 ```
 
 Der Tag wird **abgeleitet, nicht gewählt**: `appVersion` aus `Chart.yaml` plus der kurze
-Git-Commit, also `redepanda-backend:0.1.0-g103b98b`. Er wird nie wiederverwendet. Am Ende
+Git-Commit, also `redetim-backend:0.1.0-g103b98b`. Er wird nie wiederverwendet. Am Ende
 schreibt das Skript die dazugehörige **Release-Datei** und gibt den Deploy-Befehl aus:
 
 ```text
-==> Built redepanda-backend:0.1.0-g103b98b and redepanda-frontend:0.1.0-g103b98b
+==> Built redetim-backend:0.1.0-g103b98b and redetim-frontend:0.1.0-g103b98b
 ==> Wrote deploy/releases/0.1.0-g103b98b.yaml
 
 Deploy this release:
 
-  helm upgrade --install redepanda deploy/helm/redepanda \
-    -n redepanda --create-namespace --wait --timeout 10m \
+  helm upgrade --install redetim deploy/helm/redetim \
+    -n redetim --create-namespace --wait --timeout 10m \
     -f deploy/releases/0.1.0-g103b98b.yaml \
     --description "release 0.1.0-g103b98b"
 ```
@@ -263,9 +263,9 @@ Manifesten `imagePullPolicy: IfNotPresent` **und** die Images müssen explizit g
 
 | Cluster | Befehl |
 |---|---|
-| kind | `kind load docker-image redepanda-backend:$TAG redepanda-frontend:$TAG` |
+| kind | `kind load docker-image redetim-backend:$TAG redetim-frontend:$TAG` |
 | kind + Podman | `podman save` → `kind load image-archive` (macht das Skript automatisch) |
-| minikube | `minikube image load redepanda-backend:$TAG redepanda-frontend:$TAG` |
+| minikube | `minikube image load redetim-backend:$TAG redetim-frontend:$TAG` |
 | Docker Desktop | nichts nötig — gemeinsamer Image-Store |
 
 `$TAG` ist die abgeleitete Version; mit `--load` erledigt das Skript diesen Schritt selbst.
@@ -278,12 +278,12 @@ Manifesten `imagePullPolicy: IfNotPresent` **und** die Images müssen explizit g
 ## 7. Installation mit Helm
 
 ```bash
-helm upgrade --install redepanda ./deploy/helm/redepanda \
-  -n redepanda --create-namespace --wait --timeout 10m \
+helm upgrade --install redetim ./deploy/helm/redetim \
+  -n redetim --create-namespace --wait --timeout 10m \
   -f deploy/releases/0.1.0-g103b98b.yaml \
   --description "release 0.1.0-g103b98b"
 
-kubectl -n redepanda get pods
+kubectl -n redetim get pods
 ```
 
 Die Release-Datei ist **Pflicht**, nicht optional. Ohne sie bricht das Chart mit einer klaren
@@ -297,8 +297,8 @@ Run scripts/build-images.sh, then deploy with -f deploy/releases/<version>.yaml
 Was läuft gerade?
 
 ```bash
-kubectl -n redepanda get pods -L app.kubernetes.io/version
-kubectl -n redepanda get deploy redepanda-backend -o jsonpath='{..image}'
+kubectl -n redetim get pods -L app.kubernetes.io/version
+kubectl -n redetim get deploy redetim-backend -o jsonpath='{..image}'
 ```
 
 **Helm ist der Installationsweg**, und zwar der einzige. Es lag früher zusätzlich ein
@@ -322,18 +322,18 @@ wiederherstellen lässt. Wer die Manifeste ansehen will, rendert sie sich — in
 daraus nicht:
 
 ```bash
-helm template redepanda deploy/helm/redepanda -n redepanda -f "$REL" | less
+helm template redetim deploy/helm/redetim -n redetim -f "$REL" | less
 ```
 
 Deinstallation:
 
 ```bash
-helm uninstall redepanda -n redepanda
+helm uninstall redetim -n redetim
 ```
 
 > Das **PVC des Brokers bleibt absichtlich stehen.** PVCs aus `volumeClaimTemplates` gehören
 > dem StatefulSet-Controller, nicht dem Helm-Release; Kubernetes löscht sie bewusst nicht mit.
-> Wer wirklich bei null anfangen will: `kubectl -n redepanda delete pvc --all`.
+> Wer wirklich bei null anfangen will: `kubectl -n redetim delete pvc --all`.
 >
 > Die **TLS-Secrets gehören dagegen dem Release** und verschwinden mit ihm. Eine
 > Neuinstallation stellt also eine neue CA aus, und der Browser fragt einmal neu nach.
@@ -345,12 +345,12 @@ Server-Zertifikate — Frontend, Backend, Collector, Prometheus. Jedes landet in
 Secret vom Typ `kubernetes.io/tls`, zusammen mit der CA:
 
 ```bash
-kubectl -n redepanda get secret -l app.kubernetes.io/instance=redepanda | grep -E 'ca|tls'
-# redepanda-ca                    Opaque              2
-# redepanda-backend-tls           kubernetes.io/tls   3
-# redepanda-frontend-tls          kubernetes.io/tls   3
-# redepanda-otel-collector-tls    kubernetes.io/tls   3
-# redepanda-prometheus-tls        kubernetes.io/tls   3
+kubectl -n redetim get secret -l app.kubernetes.io/instance=redetim | grep -E 'ca|tls'
+# redetim-ca                    Opaque              2
+# redetim-backend-tls           kubernetes.io/tls   3
+# redetim-frontend-tls          kubernetes.io/tls   3
+# redetim-otel-collector-tls    kubernetes.io/tls   3
+# redetim-prometheus-tls        kubernetes.io/tls   3
 ```
 
 **Warum kein cert-manager.** Er wäre in einem Cluster, der ihn ohnehin betreibt, die richtige
@@ -370,10 +370,10 @@ akzeptieren. Auf der Kommandozeile geht es sauberer — `scripts/demo.sh` schrei
 Start selbst heraus:
 
 ```bash
-kubectl -n redepanda get secret redepanda-ca \
-  -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/redepanda-ca.crt
+kubectl -n redetim get secret redetim-ca \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/redetim-ca.crt
 
-curl --cacert /tmp/redepanda-ca.crt https://localhost:8443/healthz
+curl --cacert /tmp/redetim-ca.crt https://localhost:8443/healthz
 ```
 
 **Rotieren:** Secrets löschen, upgraden. Die `checksum/tls`-Annotation auf allen vier
@@ -381,9 +381,9 @@ Pod-Templates sorgt dafür, dass die Pods dabei wirklich neu starten — sonst w
 Zertifikat weiter ausliefern, während die Gegenstellen schon nur noch der neuen CA trauen.
 
 ```bash
-kubectl -n redepanda delete secret redepanda-ca redepanda-frontend-tls \
-  redepanda-backend-tls redepanda-otel-collector-tls redepanda-prometheus-tls
-helm upgrade redepanda ./deploy/helm/redepanda -n redepanda \
+kubectl -n redetim delete secret redetim-ca redetim-frontend-tls \
+  redetim-backend-tls redetim-otel-collector-tls redetim-prometheus-tls
+helm upgrade redetim ./deploy/helm/redetim -n redetim \
   -f deploy/releases/<version>.yaml --wait
 ```
 
@@ -398,14 +398,14 @@ Jede Installation und jedes Upgrade ist eine Helm-Revision. Weil jede Revision e
 unveränderlichen Image-Tag mitbringt, holt ein Rollback wirklich den alten Stand zurück:
 
 ```bash
-helm history redepanda -n redepanda
+helm history redetim -n redetim
 # REVISION  STATUS      DESCRIPTION
 # 1         superseded  release 0.1.0-ga1b2c3d
 # 2         deployed    release 0.1.0-g103b98b
 
-helm rollback redepanda 1 -n redepanda
-kubectl -n redepanda get deploy redepanda-frontend -o jsonpath='{..image}'
-# redepanda-frontend:0.1.0-ga1b2c3d
+helm rollback redetim 1 -n redetim
+kubectl -n redetim get deploy redetim-frontend -o jsonpath='{..image}'
+# redetim-frontend:0.1.0-ga1b2c3d
 ```
 
 Die Spalte `DESCRIPTION` kommt aus `--description` im Deploy-Befehl. `APP VERSION` taugt dafür
@@ -423,7 +423,7 @@ Die Spalte `DESCRIPTION` kommt aus `--description` im Deploy-Befehl. `APP VERSIO
 | `prometheus.enabled` | `true` | Prometheus-Pod. **Setzt `otelCollector.enabled` voraus** |
 | `backend.replicas` | `2` | Backend-Pods. Ab 2 überlebt der Chat den Ausfall eines Pods; wird ignoriert, solange `backend.autoscaling.enabled` gesetzt ist |
 | `backend.autoscaling.enabled` | `false` | HPA auf CPU-Basis. **Braucht metrics-server**, siehe unten |
-| `chat.topic` | `redepanda-chat` | Topicname für Backend, Client und Init-Job |
+| `chat.topic` | `redetim-chat` | Topicname für Backend, Client und Init-Job |
 | `chat.maxMessageLength` | `500` | maximale Nachrichtenlänge |
 | `chat.historySize` | `200` | Nachrichten pro Raum im Speicher **jedes** Pods; `0` = alles, was im Topic liegt |
 | `chat.produceTimeoutMs` | `10000` | Obergrenze für das Senden einer Nachricht; darüber antwortet das Backend mit 504 |
@@ -445,17 +445,17 @@ Backing Service, sondern ein Bestandteil der Anwendung.
 
 ```bash
 # Kein Broker im Chart, dafür ein vorhandener anderswo:
-helm upgrade --install redepanda ./deploy/helm/redepanda -n redepanda \
+helm upgrade --install redetim ./deploy/helm/redetim -n redetim \
   -f deploy/releases/<version>.yaml \
   --set redpanda.enabled=false \
   --set redpanda.external.bootstrapServers=kafka.example.com:9093
 
 # Mit Authentifizierung. Die Zugangsdaten kommen aus einem Secret, das man selbst anlegt --
 # nicht über --set, weil Werte in `helm get values` und in der Shell-History landen:
-kubectl -n redepanda create secret generic broker-creds \
+kubectl -n redetim create secret generic broker-creds \
   --from-literal=username=chat --from-literal=password=…
 
-helm upgrade --install redepanda ./deploy/helm/redepanda -n redepanda \
+helm upgrade --install redetim ./deploy/helm/redetim -n redetim \
   -f deploy/releases/<version>.yaml \
   --set redpanda.enabled=false \
   --set redpanda.external.bootstrapServers=kafka.example.com:9093 \
@@ -493,11 +493,11 @@ kubectl -n kube-system patch deployment metrics-server --type=json \
 kubectl -n kube-system rollout status deploy/metrics-server
 
 # Das Tor: erst wenn hier Zahlen stehen, lohnt der HPA.
-kubectl top pods -n redepanda
+kubectl top pods -n redetim
 
-helm upgrade redepanda ./deploy/helm/redepanda -n redepanda -f "$REL" \
+helm upgrade redetim ./deploy/helm/redetim -n redetim -f "$REL" \
   --set backend.autoscaling.enabled=true
-kubectl -n redepanda get hpa redepanda-backend
+kubectl -n redetim get hpa redetim-backend
 ```
 
 `TARGETS` muss eine Zahl sein, kein `<unknown>`. Ist der HPA an, lässt das Deployment `replicas:`
@@ -513,11 +513,11 @@ korrigierte ihn sofort wieder.
 ```
 
 Öffnet die Port-Forwards für Frontend (8443 und 8080), Prometheus (9090) und Collector (8889)
-und schreibt die Release-CA nach `/tmp/redepanda-ca.crt`.
+und schreibt die Release-CA nach `/tmp/redetim-ca.crt`.
 
 Alles läuft über TLS mit einer CA, die kein Browser kennt. Beim ersten Aufruf kommt deshalb
 eine Zertifikatswarnung — einmal je Port akzeptieren. Wer sie nicht sehen will, importiert die
-CA aus `/tmp/redepanda-ca.crt` in den eigenen Truststore.
+CA aus `/tmp/redetim-ca.crt` in den eigenen Truststore.
 
 1. **Zwei Browserfenster** auf <https://localhost:8443>, beide Raum `general`, verschiedene
    Namen → beide sehen jede Nachricht.
@@ -534,16 +534,16 @@ CA aus `/tmp/redepanda-ca.crt` in den eigenen Truststore.
    # 308 -> https://localhost:8443/
    ```
 6. **Konsolenclient** parallel laufen lassen → liest dieselben Nachrichten mit.
-7. **Prometheus** auf <https://localhost:9090>, Abfrage `redepanda_messages_sent_total` →
-   steigt sichtbar mit. Unter *Status → Targets* muss `redepanda-otel-collector:8889` mit
+7. **Prometheus** auf <https://localhost:9090>, Abfrage `redetim_messages_sent_total` →
+   steigt sichtbar mit. Unter *Status → Targets* muss `redetim-otel-collector:8889` mit
    Schema `https` auf **UP** stehen — das ist der Beleg, dass auch der Scrape verschlüsselt und
    gegen die CA geprüft ist und nicht nur die Browser-Strecke.
 8. **Einen von zwei Backend-Pods löschen.** Vier Fenster im selben Raum öffnen (bei zweien ist es
    ein Münzwurf, ob sie überhaupt auf verschiedenen Pods landen — kube-proxy entscheidet das pro
    TCP-Verbindung), dann:
    ```bash
-   kubectl -n redepanda get pods -l app.kubernetes.io/component=backend
-   kubectl -n redepanda delete pod <einer der beiden>
+   kubectl -n redetim get pods -l app.kubernetes.io/component=backend
+   kubectl -n redetim delete pod <einer der beiden>
    ```
    Die Fenster am **anderen** Pod merken davon nichts. Die am gelöschten verbinden neu, landen auf
    der überlebenden Replica und lesen dort weiter — **ohne** dass der bereits gelesene Verlauf ein
@@ -552,15 +552,15 @@ CA aus `/tmp/redepanda-ca.crt` in den eigenen Truststore.
    gesehen hat.
 9. **Rollout ohne Ausfall.** Währenddessen weitertippen:
    ```bash
-   kubectl -n redepanda rollout restart deploy/redepanda-backend
-   kubectl -n redepanda rollout status deploy/redepanda-backend
+   kubectl -n redetim rollout restart deploy/redetim-backend
+   kubectl -n redetim rollout status deploy/redetim-backend
    ```
    Es dürfen nie beide Pods gleichzeitig fehlen (`maxUnavailable: 0`), und im Chat darf weder eine
    Lücke noch eine Dublette entstehen.
 10. **Reconnect-Anzeige.** Erst wenn das Backend *ganz* weg ist, zeigt das Frontend sein
    Ausfallverhalten:
    ```bash
-   kubectl -n redepanda scale deploy/redepanda-backend --replicas=0
+   kubectl -n redetim scale deploy/redetim-backend --replicas=0
    ```
    Es zeigt „verbinde neu…", blendet einen Hinweis über dem Eingabefeld ein und sperrt es, bis der
    Stream wieder steht. Es versucht es dabei selbst erneut — mit wachsendem Abstand (1, 2, 4, 8,
@@ -595,7 +595,7 @@ Alle Einstellungen kommen aus Umgebungsvariablen; im Cluster aus einer ConfigMap
 | Variable | Default | Verwendet von |
 |---|---|---|
 | `REDPANDA_BOOTSTRAP_SERVERS` | `redpanda:9092` | Backend, Konsolenclient |
-| `REDPANDA_TOPIC` | `redepanda-chat` | Backend, Konsolenclient, Topic-Job |
+| `REDPANDA_TOPIC` | `redetim-chat` | Backend, Konsolenclient, Topic-Job |
 | `REDPANDA_SECURITY_PROTOCOL` | `Plaintext` | Backend, Konsolenclient, Topic-Job |
 | `REDPANDA_SASL_MECHANISM` | — (Pflicht bei SASL) | dieselben drei |
 | `REDPANDA_SASL_USERNAME` | aus dem Secret (Pflicht bei SASL) | dieselben drei |
@@ -610,18 +610,18 @@ Alle Einstellungen kommen aus Umgebungsvariablen; im Cluster aus einer ConfigMap
 | `CHAT_REPLICATION_FACTOR` | `1` | Topic-Job |
 | `TOPIC_WAIT_SECONDS` | `180` | Topic-Job (Warten auf den Broker) |
 | `ASPNETCORE_URLS` | `https://+:8443` (Image: `http://+:8080`) | Backend |
-| `ASPNETCORE_Kestrel__Certificates__Default__Path` | `/etc/redepanda/tls/tls.crt` | Backend (Kestrel) |
-| `ASPNETCORE_Kestrel__Certificates__Default__KeyPath` | `/etc/redepanda/tls/tls.key` | Backend (Kestrel) |
+| `ASPNETCORE_Kestrel__Certificates__Default__Path` | `/etc/redetim/tls/tls.crt` | Backend (Kestrel) |
+| `ASPNETCORE_Kestrel__Certificates__Default__KeyPath` | `/etc/redetim/tls/tls.key` | Backend (Kestrel) |
 | `POD_NAME` | im Cluster Pflicht (fieldRef), lokal `MachineName-PID` | Backend (Consumer-GroupId) |
 | `LOG_LEVEL` | `Information` | Backend |
-| `BACKEND_HOST` | `redepanda-backend:8443` | Frontend (Caddyfile) |
+| `BACKEND_HOST` | `redetim-backend:8443` | Frontend (Caddyfile) |
 | `PUBLIC_HTTPS_PORT` | `8443` | Frontend (Ziel-Port der `308`-Weiterleitung) |
-| `TLS_CERT_FILE` / `TLS_KEY_FILE` / `TLS_CA_FILE` | `/etc/redepanda/tls/{tls.crt,tls.key,ca.crt}` | Frontend (Caddyfile) |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` / `TLS_CA_FILE` | `/etc/redetim/tls/{tls.crt,tls.key,ca.crt}` | Frontend (Caddyfile) |
 | `FRONTEND_LOG_LEVEL` | `INFO` | Frontend (Caddy: Access-Log **und** Runtime-Log) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `https://redepanda-otel-collector:4317` | Backend |
-| `SSL_CERT_FILE` | `/etc/redepanda/ca-bundle/ca-bundle.crt` | Backend (prüft den Collector; **nicht** `OTEL_EXPORTER_OTLP_CERTIFICATE`, siehe Abschnitt 14) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `https://redetim-otel-collector:4317` | Backend |
+| `SSL_CERT_FILE` | `/etc/redetim/ca-bundle/ca-bundle.crt` | Backend (prüft den Collector; **nicht** `OTEL_EXPORTER_OTLP_CERTIFICATE`, siehe Abschnitt 14) |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | Backend |
-| `OTEL_SERVICE_NAME` | `redepanda-backend` | Backend (→ Prometheus-Label `job`) |
+| `OTEL_SERVICE_NAME` | `redetim-backend` | Backend (→ Prometheus-Label `job`) |
 | `OTEL_METRIC_EXPORT_INTERVAL` | `5000` (ms) | Backend |
 | `OTEL_RESOURCE_ATTRIBUTES` | `service.instance.id=$(POD_NAME)` | Backend (→ Label `instance`) |
 | `OTEL_SDK_DISABLED` | `false` | Backend (Not-Aus für eine Demo ohne Collector) |
@@ -644,7 +644,7 @@ zweite Wahrheit für etwas anzulegen, das der Anwendung gar nicht gehört. Desha
 Cluster nicht startbar wäre. Das Chart überschreibt beides.
 
 Die fünf Verbindungsvariablen (`REDPANDA_SECURITY_PROTOCOL` bis `REDPANDA_SSL_CA_LOCATION`) liest
-dagegen `KafkaSecurity` in `RedePanda.Contracts` — einmal für alle **sieben** Kafka-Clients im Repo,
+dagegen `KafkaSecurity` in `RedeTim.Contracts` — einmal für alle **sieben** Kafka-Clients im Repo,
 weil `ClientConfig` die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration ist.
 Ohne Konfiguration ändert die Klasse nichts; unvollständig konfiguriert bricht sie beim Start ab
 und nennt die fehlende Variable.
@@ -672,17 +672,17 @@ schlimmer als eine fremde Konvention.
 
 ## 10. Observability: OTel-SDK → Collector → Prometheus
 
-Das Backend erzeugt fünf fachliche Metriken über `Meter("RedePanda")` und schickt sie per OTLP
+Das Backend erzeugt fünf fachliche Metriken über `Meter("RedeTim")` und schickt sie per OTLP
 an den Collector. Der Collector übersetzt die Namen und stellt sie unter `:8889` bereit;
 Prometheus scrapt **nur den Collector**.
 
 | Instrument in C# | Typ | Name in Prometheus |
 |---|---|---|
-| `redepanda.messages.sent` | `Counter<long>` | `redepanda_messages_sent_total` |
-| `redepanda.messages.received` | `Counter<long>` | `redepanda_messages_received_total` |
-| `redepanda.kafka.errors` | `Counter<long>` | `redepanda_kafka_errors_total` |
-| `redepanda.streams.cut` | `Counter<long>` | `redepanda_streams_cut_total` |
-| `redepanda.active_connections` | `ObservableUpDownCounter<int>` | `redepanda_active_connections` |
+| `redetim.messages.sent` | `Counter<long>` | `redetim_messages_sent_total` |
+| `redetim.messages.received` | `Counter<long>` | `redetim_messages_received_total` |
+| `redetim.kafka.errors` | `Counter<long>` | `redetim_kafka_errors_total` |
+| `redetim.streams.cut` | `Counter<long>` | `redetim_streams_cut_total` |
+| `redetim.active_connections` | `ObservableUpDownCounter<int>` | `redetim_active_connections` |
 
 Die Namensregeln — punktgetrennt, ohne `_total`, ohne Einheit — sind an den Prometheus-Exporter
 des Collectors gebunden; siehe [docs/observability.md](docs/observability.md).
@@ -690,20 +690,20 @@ des Collectors gebunden; siehe [docs/observability.md](docs/observability.md).
 ### PromQL für die Demo
 
 ```promql
-redepanda_messages_sent_total
-rate(redepanda_messages_received_total[1m])
+redetim_messages_sent_total
+rate(redetim_messages_received_total[1m])
 histogram_quantile(0.95, rate(http_server_request_duration_seconds_bucket[1m]))
 
 # Eine Zeitreihe je Pod — das instance-Label ist der Pod-Name. Die Summe ist die Zahl der offenen
 # Browserfenster, die Einzelwerte zeigen, wie kube-proxy sie auf die Replicas verteilt hat.
-redepanda_active_connections
-sum(redepanda_active_connections)
-sum by (instance) (redepanda_active_connections)
+redetim_active_connections
+sum(redetim_active_connections)
+sum by (instance) (redetim_active_connections)
 
 # Der direkteste Beleg für den Fan-out: jede Replica konsumiert *jede* Nachricht unter eigener
 # Group-ID, also ist das Verhältnis ungefähr die Replica-Zahl. Teilten sich die Pods eine Gruppe,
 # stünde hier 1 — und die Hälfte der Browser sähe nichts.
-sum(rate(redepanda_messages_received_total[1m])) / sum(rate(redepanda_messages_sent_total[1m]))
+sum(rate(redetim_messages_received_total[1m])) / sum(rate(redetim_messages_sent_total[1m]))
 ```
 
 ### Beleg, dass der Weg wirklich über den Collector führt
@@ -711,12 +711,12 @@ sum(rate(redepanda_messages_received_total[1m])) / sum(rate(redepanda_messages_s
 Der reine Anstieg eines Zählers würde auch bei direktem Scraping so aussehen. Zwei Nachweise:
 
 ```bash
-# 1. Prometheus-Targets: redepanda-otel-collector:8889 muss UP sein, Schema https
+# 1. Prometheus-Targets: redetim-otel-collector:8889 muss UP sein, Schema https
 open https://localhost:9090/targets
 
 # 2. Das Backend hat gar keinen /metrics-Endpunkt
-kubectl -n redepanda port-forward deploy/redepanda-backend 5443:8443
-curl -i --cacert /tmp/redepanda-ca.crt https://localhost:5443/metrics     # -> 404
+kubectl -n redetim port-forward deploy/redetim-backend 5443:8443
+curl -i --cacert /tmp/redetim-ca.crt https://localhost:5443/metrics     # -> 404
 ```
 
 Die CA-Datei stammt aus `scripts/demo.sh`; ohne das Skript liegt sie einen Befehl entfernt
@@ -747,7 +747,7 @@ Begründung in [docs/observability.md](docs/observability.md#bewusst-nur-metrike
 | Config | ausschließlich Env-Variablen, im Cluster aus ConfigMap; Zugangsdaten getrennt davon aus einem Secret (`redpanda.auth.existingSecret`), nie aus `values.yaml` | kein Live-Reload: eine geänderte ConfigMap rollt die Pods über die `checksum/config`-Annotation, sie wird nicht im laufenden Prozess nachgelesen |
 | Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide ohne Codeänderung austauschbar, **und beide auch im Chart**: `redpanda.enabled=false` + `redpanda.external.bootstrapServers` bzw. `otelCollector.enabled=false` + `otelCollector.external.endpoint`, dessen privater CA das Backend über `otelCollector.external.caSecret` vertraut. TLS/SASL sind über `redpanda.auth` konfigurierbar und in Abschnitt 5 gegen einen echten SASL/TLS-Broker vorgeführt | der mitgelieferte Broker spricht weiterhin Plaintext, und das Chart lehnt die Kombination „abgesichertes Protokoll + mitgelieferter Broker" beim Rendern ab, weil sie nicht funktionieren kann. Ein fremder Collector schließt das mitgelieferte Prometheus aus: es kennt nur den mitgelieferten als Scrape-Ziel |
 | Build, Release, Run | drei getrennte Stufen mit identifizierbarem Release: unveränderlicher Image-Tag + Release-Datei, `helm rollback` funktioniert (siehe unten) | keine Registry: alte Images leben nur im Image-Store der Node. Kein CI (laut Aufgabe erlaubt) |
-| Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut. Ein Leser, der weiter als 256 Nachrichten zurückfällt, bekommt seinen Stream **beendet** statt still gekürzt — der Browser verbindet sich neu und holt die Lücke per `Last-Event-ID` nach (`redepanda_streams_cut_total`) |
+| Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut. Ein Leser, der weiter als 256 Nachrichten zurückfällt, bekommt seinen Stream **beendet** statt still gekürzt — der Browser verbindet sich neu und holt die Lücke per `Last-Event-ID` nach (`redetim_streams_cut_total`) |
 | Port Binding | Backend `:8443`, Frontend `:8443` (plus `:8080` nur für die `308`-Weiterleitung), kein externer Webserver nötig. TLS terminiert der Prozess selbst — es gibt keinen vorgelagerten Terminator, den das Deployment mitbringen müsste | das Zertifikat kommt als Secret-Mount von außen; das Image allein kann kein TLS und startet deshalb per Default auf `:8080` |
 | Concurrency | **Beide** Deployments laufen mit 2 Replicas, PodDisruptionBudget, `preStop`-Drain und Rollout ohne Unterbrechung (`maxUnavailable: 0`) — der SSE-Pfad ist damit von Caddy bis Kafka redundant, nicht nur an seinem hinteren Ende. Backend zusätzlich: Consumer-GroupId pro Pod ⇒ echter Fan-out, HPA optional, kein Sticky-Session-Bedarf, weil die SSE-`id` der Kafka-Offset ist. Caddy spricht zum Backend auf `versions 1.1` — über HTTP/2 liefe jeder Stream eines Pods über *eine* TCP-Verbindung und damit auf *einer* Backend-Replica | Offsets sind **pro Partition** eindeutig, nicht brokerweit. Bei `chat.partitions > 1` trägt die Konstruktion nur, weil beide Producer nach Raum keyen und ein Raum damit auf einer Partition bleibt. Jede Replica liest 100 % des Topics: der Fan-out skaliert das Ausliefern, nicht das Lesen. HPA braucht metrics-server und ist per Default aus |
 | Disposability | SIGTERM: Consumer `Close()` (auf 5 s begrenzt, sonst wird der Broker nicht mehr abgewartet), Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten. Frontend analog: Caddy hat `grace_period 5s`, sonst wartete es unbegrenzt auf SSE-Antworten, die per Definition nie fertig werden | das Budget ist 40 s, nicht 30: `ChatProducer.Dispose()` flusht bis zu 5 s **nachdem** `Host.StopAsync` zurückgekehrt ist, und `Close()` darf 5 s brauchen, also `preStop` 5 s + 25 s + 5 s + 5 s < Grace Period 45 s. Der `Close()`-Term ist neu begrenzt: `HostOptions.ShutdownTimeout` bricht ihn nicht ab (der Timeout kündigt ein Token, das dieser Aufruf gar nicht entgegennimmt), also lief er gegen einen unerreichbaren Broker über das ganze Budget hinaus in ein stilles SIGKILL. Die Readiness hängt am Broker: ohne erreichbaren Broker wird der Pod nie `Ready` — richtig so, aber es macht eine Broker-Störung zu einem Rollout, der stehen bleibt |
@@ -824,28 +824,28 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 REL=$(command ls -t deploy/releases/*.yaml | head -1)
 
 dotnet test                                    # 129 Tests
-helm lint deploy/helm/redepanda -f "$REL"
-helm template redepanda deploy/helm/redepanda -n redepanda -f "$REL" \
+helm lint deploy/helm/redetim -f "$REL"
+helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
   | kubeconform -strict -summary -kubernetes-version 1.32.0
 
 # Der HPA ist per Default aus und wird sonst nie gerendert — also die zweite Kombination
 # ausdrücklich mitprüfen, sonst validiert niemand backend-hpa.yaml:
-helm lint deploy/helm/redepanda -f "$REL" --set backend.autoscaling.enabled=true
-helm template redepanda deploy/helm/redepanda -n redepanda -f "$REL" \
+helm lint deploy/helm/redetim -f "$REL" --set backend.autoscaling.enabled=true
+helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
   --set backend.autoscaling.enabled=true \
   | kubeconform -strict -summary -kubernetes-version 1.32.0
 
 # Mit HPA darf im Deployment kein `replicas:` stehen, ohne HPA muss es dort stehen. Sonst
 # überschreiben sich Helm und der Autoscaler gegenseitig, und die Pod-Zahl pendelt.
-helm template redepanda deploy/helm/redepanda -f "$REL" \
+helm template redetim deploy/helm/redetim -f "$REL" \
   --set backend.autoscaling.enabled=true \
   --show-only templates/backend.yaml | grep -c '^  replicas:'    # erwartet: 0
-helm template redepanda deploy/helm/redepanda -f "$REL" \
+helm template redetim deploy/helm/redetim -f "$REL" \
   --show-only templates/backend.yaml | grep '^  replicas:'       # erwartet: replicas: 2
 
 # Ohne Release-Datei muss das Chart abbrechen — das ist der Schutz gegen ein
 # unidentifizierbares Image im Cluster, also selbst prüfenswert:
-helm template redepanda deploy/helm/redepanda   # erwartet: Fehler "no release selected"
+helm template redetim deploy/helm/redetim   # erwartet: Fehler "no release selected"
 # Achtung: `helm lint` fängt das nicht — Helm 4 stuft ein `fail` im Template auf INFO herab
 # und meldet trotzdem "0 chart(s) failed". Nur `helm template` bricht wirklich ab.
 
@@ -909,51 +909,51 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 - [ ] Leere Nachricht und Nachricht > `MAX_MESSAGE_LENGTH` → HTTP 400
 - [ ] Frontend hat keinerlei Kafka-Zugriff (Netzwerk-Tab: nur `/api`)
 - [ ] `kubectl get pods -l app.kubernetes.io/component=backend` → **zwei** Pods, beide `Ready`
-- [ ] `redepanda_active_connections` steht mit **zwei** `instance`-Labels da; `sum(...)` = Zahl der
+- [ ] `redetim_active_connections` steht mit **zwei** `instance`-Labels da; `sum(...)` = Zahl der
       offenen Fenster
 - [ ] `sum(rate(received[1m])) / sum(rate(sent[1m]))` ≈ 2 → jede Replica bekommt jede Nachricht
 - [ ] **Einen von zwei** Backend-Pods löschen → die Fenster am anderen Pod merken nichts, die am
       gelöschten setzen ohne doppelten Verlauf auf der überlebenden Replica auf
-- [ ] `kubectl rollout restart deploy/redepanda-backend` während des Tippens → keine Lücke, keine
+- [ ] `kubectl rollout restart deploy/redetim-backend` während des Tippens → keine Lücke, keine
       Dublette, nie beide Pods gleichzeitig weg
-- [ ] `kubectl get pdb redepanda-backend` → `ALLOWED DISRUPTIONS` = 1
+- [ ] `kubectl get pdb redetim-backend` → `ALLOWED DISRUPTIONS` = 1
 - [ ] `kubectl get pods -l app.kubernetes.io/component=frontend` → **zwei** Pods; einen davon
       löschen, während zwei Fenster streamen → keins der beiden verliert seinen Stream
-- [ ] `kubectl get pdb redepanda-frontend` → `ALLOWED DISRUPTIONS` = 1
+- [ ] `kubectl get pdb redetim-frontend` → `ALLOWED DISRUPTIONS` = 1
 - [ ] `kubectl scale sts/redpanda --replicas=0`, dann eine Nachricht senden → binnen ~10 s eine
       Fehlermeldung (HTTP 504), **nicht** ein Fenster, das minutenlang hängt. Danach wieder auf 1
-- [ ] `kubectl get job -o jsonpath='{..containers[0].image}'` → `redepanda-chatclient`, nicht das
+- [ ] `kubectl get job -o jsonpath='{..containers[0].image}'` → `redetim-chatclient`, nicht das
       Redpanda-Image; `helm upgrade` ein zweites Mal → der Job loggt „already exists" und wird
       `Completed`
-- [ ] `kubectl exec deploy/redepanda-backend -- env | grep POD_NAME` → gesetzt. Zum Gegenprobieren
+- [ ] `kubectl exec deploy/redetim-backend -- env | grep POD_NAME` → gesetzt. Zum Gegenprobieren
       das `env:`-Feld aus dem Deployment entfernen → der Pod startet **nicht** und sagt, warum
 - [ ] Gegen einen fremden Broker: `--set redpanda.enabled=false --set
       redpanda.external.bootstrapServers=…` → kein Broker-StatefulSet, Backend wird trotzdem
       `Ready`, Topic-Job `Completed`
 - [ ] `scale --replicas=0` → Banner, Backoff und „Erneut verbinden" sind weiterhin vorführbar
-- [ ] Nur mit metrics-server: `kubectl top pods -n redepanda` liefert Zahlen und die HPA-`TARGETS`
+- [ ] Nur mit metrics-server: `kubectl top pods -n redetim` liefert Zahlen und die HPA-`TARGETS`
       sind keine `<unknown>`
-- [ ] `kubectl -n redepanda logs deploy/redepanda-frontend` zeigt je eine JSON-Zeile pro
+- [ ] `kubectl -n redetim logs deploy/redetim-frontend` zeigt je eine JSON-Zeile pro
       Browser-Request — und **keine** für `/healthz`, obwohl beide Probes alle 10 s pollen
 - [ ] Collector-Pod `Ready`, Logs ohne `permanent error` / `connection refused`
-- [ ] Prometheus-Target `redepanda-otel-collector:8889` = `UP`, Schema `https`
-- [ ] `curl --cacert /tmp/redepanda-ca.crt https://localhost:8443/healthz` → `ok`, **ohne** `-k`.
+- [ ] Prometheus-Target `redetim-otel-collector:8889` = `UP`, Schema `https`
+- [ ] `curl --cacert /tmp/redetim-ca.crt https://localhost:8443/healthz` → `ok`, **ohne** `-k`.
       Dasselbe für `https://localhost:8889/metrics` und `https://localhost:9090/-/ready`
 - [ ] `curl -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost:8080/` → `308` auf die
       `https`-Adresse
 - [ ] Zertifikate überleben ein Upgrade: den Hash vor und nach `helm upgrade` vergleichen
-      (`kubectl get secret redepanda-backend-tls -o jsonpath='{.data.tls\.crt}' | sha256sum`) →
+      (`kubectl get secret redetim-backend-tls -o jsonpath='{.data.tls\.crt}' | sha256sum`) →
       identisch, und `kubectl get pods` zeigt keine neuen Neustarts
 - [ ] Rotation greift: die fünf TLS-Secrets löschen, `helm upgrade` → alle vier Deployments
       rollen, danach verifiziert `curl --cacert` wieder mit der **neuen** CA
 - [ ] Im Netzwerk-Tab des Browsers ist jede Zeile `https`, inklusive des SSE-Streams
-- [ ] `redepanda_messages_sent_total` steigt; `redepanda_active_connections` fällt beim
+- [ ] `redetim_messages_sent_total` steigt; `redetim_active_connections` fällt beim
       Schließen eines Fensters
 - [ ] Backend hat **keinen** `/metrics`-Endpunkt (`curl` → 404)
 - [ ] `helm upgrade` ohne `-f deploy/releases/<version>.yaml` bricht mit der Tag-Meldung ab
 - [ ] **Rollback-Probe:** zweites Release mit sichtbarer Änderung bauen und deployen →
-      `helm history` zeigt beide, `helm rollback redepanda 1` → `kubectl get deploy
-      redepanda-frontend -o jsonpath='{..image}'` nennt wieder den **alten** Tag und der
+      `helm history` zeigt beide, `helm rollback redetim 1` → `kubectl get deploy
+      redetim-frontend -o jsonpath='{..image}'` nennt wieder den **alten** Tag und der
       Browser zeigt den alten Stand
 - [ ] `helm uninstall` entfernt alles bis auf das PVC
 - [ ] README von einer unbeteiligten Person nachvollzogen
@@ -965,7 +965,7 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 
 - **Der HPA ist per Default aus.** Er misst gegen `metrics.k8s.io`, und das liefert nur ein Cluster
   mit metrics-server — den weder kind noch Docker Desktop mitbringen. Angeschaltet skaliert er auf
-  CPU, nicht auf `redepanda_active_connections`: das Backend hat bewusst keinen `/metrics`-Endpunkt,
+  CPU, nicht auf `redetim_active_connections`: das Backend hat bewusst keinen `/metrics`-Endpunkt,
   die interessantere Metrik käme also nur über prometheus-adapter oder KEDA. Ein Ausbaupfad, keine
   Lücke — aber eben auch keine Vorführung.
 - **`topologySpreadConstraints` sind auf einem Ein-Node-Cluster beweisbar wirkungslos.** Sie stehen
@@ -1035,7 +1035,7 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 - **`chat.maxMessageLength` wirkt nur halb.** Der Server liest es aus der Umgebung, das Frontend hat
   die 500 in `index.html` und `app.js` fest stehen und kennt keinen Konfigurationsendpunkt. Wer den
   Server-Wert erhöht, bekommt ein Eingabefeld, das trotzdem bei 500 abschneidet.
-- **`RedePanda.ChatClient` hat kein Testprojekt.** Die Admin-Prozesse sind gegen einen echten Broker
+- **`RedeTim.ChatClient` hat kein Testprojekt.** Die Admin-Prozesse sind gegen einen echten Broker
   vorgeführt (Abschnitt 5), aber nicht durch Unit-Tests abgesichert — dieselbe Form von Lücke, aus
   der der Readiness-Fehler entstanden ist.
 
@@ -1061,8 +1061,8 @@ Wertekombinationen durch.
 
 Inzwischen auf einem echten Cluster nachgefahren (kind mit rootless Podman, Installation und
 anschließendes Upgrade): alle Pods erreichen `Ready`, der Topic-Job läuft durch und legt
-`redepanda-chat` an, beide Prometheus-Targets stehen auf `up` — darunter der **HTTPS-Scrape** auf
-`:8889` —, der **OTLP-Push über TLS** liefert 260 Zeitreihen unter `job="redepanda-backend"`, und
+`redetim-chat` an, beide Prometheus-Targets stehen auf `up` — darunter der **HTTPS-Scrape** auf
+`:8889` —, der **OTLP-Push über TLS** liefert 260 Zeitreihen unter `job="redetim-backend"`, und
 der **Handshake zwischen Caddy und Kestrel** trägt einen `POST /api/messages` bis auf das Topic
 (`202`, Nachricht mit Key `general` auf Offset 0). Alles davon mit `curl --cacert` gegen die
 Release-CA, also verifiziert und nicht mit `-k` übersprungen. Das Upgrade auf Revision 2
@@ -1127,12 +1127,12 @@ stehen bleiben, statt still zu sein:
 
 ```bash
 # 1. Kommt überhaupt etwas am Collector an?
-kubectl -n redepanda logs deploy/redepanda-otel-collector
+kubectl -n redetim logs deploy/redetim-otel-collector
 #    ausführlicher: --set otelCollector.debugVerbosity=detailed
 
 # 2. Steht der Name da, und heißt er richtig?
-kubectl -n redepanda port-forward deploy/redepanda-otel-collector 8889:8889
-curl --cacert /tmp/redepanda-ca.crt https://localhost:8889/metrics | grep redepanda_
+kubectl -n redetim port-forward deploy/redetim-otel-collector 8889:8889
+curl --cacert /tmp/redetim-ca.crt https://localhost:8889/metrics | grep redetim_
 
 # 3. Ist das Target UP?  https://localhost:9090/targets
 # 4. Erst dann PromQL.
@@ -1145,12 +1145,12 @@ steht bewusst nicht im Service, und `port-forward svc/...` löst Ports über die
 falsche Werkzeug, gleich doppelt: es beantwortet die Access-Log-Frage nicht (eine Konfiguration
 ganz ohne Access-Log ist gültig), und es *provisioniert* die Konfiguration, öffnet also die
 Zertifikatsdateien — die es außerhalb eines Pods nicht gibt. Es scheitert dann mit
-`open /etc/redepanda/tls/tls.crt: no such file or directory` an einem völlig intakten Caddyfile.
+`open /etc/redetim/tls/tls.crt: no such file or directory` an einem völlig intakten Caddyfile.
 `caddy adapt` zeigt stattdessen, was der Server tatsächlich bekommt, und ist aus demselben Grund
 auch der Check im Dockerfile:
 
 ```bash
-podman run --rm -v "$PWD/src/RedePanda.Frontend/Caddyfile:/Caddyfile:ro" \
+podman run --rm -v "$PWD/src/RedeTim.Frontend/Caddyfile:/Caddyfile:ro" \
   docker.io/library/caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 \
   caddy adapt --config /Caddyfile --adapter caddyfile
 ```
@@ -1160,7 +1160,7 @@ Drei Dinge müssen in der Ausgabe stehen:
 - unter `apps.http.servers.srv1` ein `logs`-Objekt (`{"default_logger_name":"log0"}`). Fehlt es,
   loggt der Server keinen einzigen Request — egal was im globalen Block steht. **`srv1`, nicht
   `srv0`:** `srv0` ist seit der TLS-Umstellung der Weiterleitungs-Listener auf `:8080`.
-- unter `apps.tls.certificates.load_files` das Paar aus `/etc/redepanda/tls`. Fehlt es, liefe der
+- unter `apps.tls.certificates.load_files` das Paar aus `/etc/redetim/tls`. Fehlt es, liefe der
   Server ohne Zertifikat an.
 - im `reverse_proxy`-Handler ein `transport.tls.ca.pem_files` mit der CA. Fehlt **das**, prüft
   Caddy das Backend-Zertifikat gegen den System-Truststore — und der kennt die Release-CA nicht.
@@ -1179,10 +1179,10 @@ Drei Dinge müssen in der Ausgabe stehen:
 | `DllNotFoundException` beim Start | Backend-Image auf Alpine/Chiseled gebaut; librdkafka braucht glibc |
 | Frontend-Logs zeigen keine Requests | Die `log`-Direktive steht im **globalen** Block. Dort konfiguriert sie Caddys Runtime-Logger und erzeugt keine einzige Request-Zeile. Access-Logs gibt es nur mit `log` **im Site-Block** — und `caddy validate` meldet die fehlende Zeile nicht |
 | Browser: „Ihre Verbindung ist nicht privat" / `NET::ERR_CERT_AUTHORITY_INVALID` | Erwartet. Die CA gehört diesem Release, kein Truststore kennt sie. Einmal je Port akzeptieren oder die CA importieren → Abschnitt 7, „Zertifikate" |
-| `curl: (60) unable to get local issuer certificate` | Ohne `--cacert` prüft curl gegen den System-Truststore. Die CA aus `redepanda-ca` herausschreiben — `scripts/demo.sh` tut das beim Start |
+| `curl: (60) unable to get local issuer certificate` | Ohne `--cacert` prüft curl gegen den System-Truststore. Die CA aus `redetim-ca` herausschreiben — `scripts/demo.sh` tut das beim Start |
 | `curl: (60) … doesn't match target host name` | Der Aufruf nutzt einen Namen, der nicht im Zertifikat steht. Drin sind der Service-Name in allen vier Cluster-Schreibweisen, `localhost` und `127.0.0.1` — also `https://localhost:…` statt der Pod-IP |
-| Frontend `CrashLoopBackOff`, `open /etc/redepanda/tls/tls.crt: no such file` | Das TLS-Secret ist nicht gemountet oder heißt anders. `kubectl get secret redepanda-frontend-tls` |
-| Backend `CrashLoopBackOff`, Kestrel meldet ein fehlendes Zertifikat | Dasselbe für `redepanda-backend-tls`, oder `ASPNETCORE_Kestrel__Certificates__Default__*` zeigt ins Leere |
+| Frontend `CrashLoopBackOff`, `open /etc/redetim/tls/tls.crt: no such file` | Das TLS-Secret ist nicht gemountet oder heißt anders. `kubectl get secret redetim-frontend-tls` |
+| Backend `CrashLoopBackOff`, Kestrel meldet ein fehlendes Zertifikat | Dasselbe für `redetim-backend-tls`, oder `ASPNETCORE_Kestrel__Certificates__Default__*` zeigt ins Leere |
 | Caddy: `tls: failed to verify certificate: x509: certificate signed by unknown authority` | Der Upstream präsentiert ein Zertifikat einer anderen CA. Passiert nach einer halben Rotation: Secrets gelöscht, aber nicht alle Pods neu gestartet → `kubectl rollout restart` für alle vier |
 | Prometheus-Target `8889` `DOWN`, `x509` oder `http: server gave HTTP response to HTTPS client` | `scheme: https` und `tls_config` im Scrape-Config fehlen, oder der Collector serviert dort noch Klartext |
 | Nach `helm upgrade` starten alle Pods neu, obwohl nichts geändert wurde | Erwartet, aber nur **einmal** nach der allerersten Installation: `checksum/tls` hasht dort noch ein Wegwerf-Rendering, weil `lookup` beim Install noch nichts findet |
@@ -1192,13 +1192,13 @@ Drei Dinge müssen in der Ausgabe stehen:
 ## Projektstruktur
 
 ```text
-src/RedePanda.Contracts/    ChatMessage + Validierung + Wire-Format + KafkaSecurity (geteilt)
-src/RedePanda.Backend/      ASP.NET Core: SSE, Kafka, OpenTelemetry
-src/RedePanda.Frontend/     Caddyfile + Vanilla-JS-Frontend (index.html, style.css, app.js, favicon.svg)
-src/RedePanda.ChatClient/   Konsolenclient und Admin-Prozess (`--ensure-topic`, siehe Abschnitt 11)
+src/RedeTim.Contracts/    ChatMessage + Validierung + Wire-Format + KafkaSecurity (geteilt)
+src/RedeTim.Backend/      ASP.NET Core: SSE, Kafka, OpenTelemetry
+src/RedeTim.Frontend/     Caddyfile + Vanilla-JS-Frontend (index.html, style.css, app.js, favicon.svg)
+src/RedeTim.ChatClient/   Konsolenclient und Admin-Prozess (`--ensure-topic`, siehe Abschnitt 11)
 tests/                      xUnit
-deploy/helm/redepanda/      Helm-Chart
+deploy/helm/redetim/      Helm-Chart
 deploy/releases/            generierte Release-Dateien (Image-Tags + Commit pro Build)
 scripts/                    build-images.sh, check-digests.sh, demo.sh
-RedePanda-kafka-docker/     Redpanda für lokale Entwicklung ohne Kubernetes
+RedeTim-kafka-docker/     Redpanda für lokale Entwicklung ohne Kubernetes
 ```

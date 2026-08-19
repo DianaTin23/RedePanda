@@ -8,7 +8,7 @@
 
     <ItemGroup>
         <!-- Bindet das Runtime-Basisimage an glibc: die nativen librdkafka-Assets laden weder
-             unter musl (alpine) noch chiseled. Siehe src/RedePanda.Backend/Dockerfile. -->
+             unter musl (alpine) noch chiseled. Siehe src/RedeTim.Backend/Dockerfile. -->
         <PackageVersion Include="Confluent.Kafka" Version="2.15.0" />
 
         <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />

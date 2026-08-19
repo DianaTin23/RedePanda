@@ -1,4 +1,4 @@
-# RedePanda — Umbauplan bis zur Abgabe (07.09., 24:00)
+# RedeTim — Umbauplan bis zur Abgabe (07.09., 24:00)
 
 Arbeitsdokument für die Gruppe. Abgehakt wird direkt hier per Commit.
 
@@ -38,7 +38,7 @@ eine CA, die das Chart bei der ersten Installation selbst ausstellt.
 
 Was unten deshalb nicht mehr stimmt: Frontend und Backend hören auf `:8443` statt `:8080`
 (`:8080` antwortet nur noch mit `308`), `ASPNETCORE_URLS` ist `https://+:8443`,
-`BACKEND_HOST` ist `redepanda-backend:8443`, `OTEL_EXPORTER_OTLP_ENDPOINT` ist `https://…:4317`,
+`BACKEND_HOST` ist `redetim-backend:8443`, `OTEL_EXPORTER_OTLP_ENDPOINT` ist `https://…:4317`,
 und der Caddyfile-Auszug in 4.5 zeigt eine ältere Fassung. **Maßgeblich ist die README**,
 Abschnitt 3 für die Strecken und Abschnitt 7 für die Zertifikate; dieses Dokument bleibt als
 Planungsstand stehen und wird nicht nachgezogen.
@@ -78,8 +78,8 @@ beide auf dem Default 30 s stehen; der Collector braucht explizit
 ohne Cluster — dafür `kubeconform`.
 
 Empirisch bestätigt wurde außerdem der gesamte Abschnitt 4.7: die vier Instrumente kommen als
-`redepanda_messages_sent_total`, `redepanda_messages_received_total`, `redepanda_kafka_errors_total`
-und `redepanda_active_connections` an — ohne `_total_total`, ohne `_ratio`.
+`redetim_messages_sent_total`, `redetim_messages_received_total`, `redetim_kafka_errors_total`
+und `redetim_active_connections` an — ohne `_total_total`, ohne `_ratio`.
 
 ---
 
@@ -139,12 +139,12 @@ ist: hier diskutieren, nicht während der Implementierung umschwenken.
 | # | Entscheidung | Begründung |
 |---|---|---|
 | E1 | **SSE statt SignalR** für Live-Nachrichten | SignalR braucht WebSocket-Upgrade durch den Proxy, Sticky Sessions und bei >1 Replica ein Backplane. SSE ist ~40 Zeilen Backend, braucht keine Client-Library und funktioniert durch jeden Proxy. Für einen reinen Server→Browser-Broadcast reicht es exakt. |
-| E2 | **Redpanda als eigenes StatefulSet im Chart**, nicht das offizielle Chart | Wir haben in `RedePanda-kafka-docker/docker-compose.yml` bereits eine funktionierende Flag-Kombination (`--mode=dev-container --smp=1`). Die übernehmen wir 1:1. Das offizielle Chart ist auf Produktionscluster ausgelegt und zieht mehr Ressourcen und Konfiguration nach, als wir demonstrieren wollen. |
+| E2 | **Redpanda als eigenes StatefulSet im Chart**, nicht das offizielle Chart | Wir haben in `RedeTim-kafka-docker/docker-compose.yml` bereits eine funktionierende Flag-Kombination (`--mode=dev-container --smp=1`). Die übernehmen wir 1:1. Das offizielle Chart ist auf Produktionscluster ausgelegt und zieht mehr Ressourcen und Konfiguration nach, als wir demonstrieren wollen. |
 | E3 | **Konsolenclient bleibt erhalten** | Ist bestehende Arbeit und belegt in der Demo schön, dass Backend und Client wirklich dasselbe Kafka-Topic teilen. Er wird nur auf Env-Konfiguration umgestellt, sonst nicht angefasst. |
 | E4 | **Ein Topic, Raum als Feld + Kafka-Key** | Einfacher zu deployen (ein Init-Job) und die Raumtrennung filtert das Backend serverseitig. Key = `Room` sichert die Reihenfolge pro Raum, falls das Topic je mehr Partitionen bekommt. |
 | E5 | **Backend läuft mit 2 Replicas**, dazu PDB, Rollout-Strategie und optionaler HPA | ~~1 Replica, Skalierung nur dokumentiert~~ — siehe Nachtrag C1. Mehrere Replicas funktionieren nicht nur (E6), sie funktionieren *nachweisbar*: die SSE-`id` ist der Kafka-Offset, gilt also replicaübergreifend, und der Wiedereinstieg auf einem anderen Pod ist derselbe Codepfad wie der auf demselben. Der HPA bleibt per Default aus, weil kind und Docker Desktop keinen metrics-server mitbringen. |
 | E6 | **Consumer-GroupId bleibt pro Pod eindeutig** | `Consumer.cs:25` macht das heute schon richtig (`"kchat-" + Guid`). Beim Umbau **nicht** auf eine feste Group-ID vereinheitlichen — sonst bekäme bei mehreren Replicas jede Nachricht nur ein Pod und die anderen Browser sehen nichts. Im Backend nehmen wir statt des GUID den Pod-Namen (deterministisch, besser zu debuggen). |
-| E7 | **Prometheus minimal selbst deployen**, nicht kube-prometheus-stack | Ein Deployment + ConfigMap mit `static_configs`; einziges Scrape-Ziel ist `redepanda-otel-collector:8889`. Der Stack würde 20 Minuten Cluster-Ressourcen fressen für Features (Operator, ServiceMonitor-CRDs, Alertmanager), die wir nicht zeigen. Der Collector macht ServiceMonitors ohnehin überflüssig, weil er die einzige Scrape-Quelle ist. |
+| E7 | **Prometheus minimal selbst deployen**, nicht kube-prometheus-stack | Ein Deployment + ConfigMap mit `static_configs`; einziges Scrape-Ziel ist `redetim-otel-collector:8889`. Der Stack würde 20 Minuten Cluster-Ressourcen fressen für Features (Operator, ServiceMonitor-CRDs, Alertmanager), die wir nicht zeigen. Der Collector macht ServiceMonitors ohnehin überflüssig, weil er die einzige Scrape-Quelle ist. |
 | E9 | **OpenTelemetry-SDK + Collector statt `prometheus-net`** | Das Backend kennt Prometheus nicht mehr, sondern nur einen OTLP-Endpunkt aus einer Env-Variable — das ist 12-Factor „Backing Services" im Reinformat, dieselbe Argumentation wie bei Redpanda. Der Collector ist der austauschbare Teil: das Monitoring-Backend lässt sich ohne Backend-Rebuild wechseln. Zusätzlich ist OpenTelemetry seit 11.05.2026 CNCF *graduated*, also eine weitere bewertbare CNCF-Technologie statt einer Community-Library. Preis: ein Pod und ein Hop mehr, ca. +4–6 h Aufwand. |
 | E10 | **Nur Metriken — keine Traces, keine Logs über OTLP** | Der Collector könnte alle drei Signale, wir schalten bewusst nur die Metrics-Pipeline ein. Traces bräuchten Kontext-Propagierung von Hand über die Kafka-Grenze (`Confluent.Kafka` hat keine Auto-Instrumentierung) plus ein zweites Backend (Jaeger/Tempo) — nicht vor dem 07.09. Logs bleiben auf stdout, siehe 12-Factor. |
 | E8 | **Manifeste = Helm-Templates**, zusätzlich ein gerendertes `deploy/k8s/rendered.yaml` | Die Aufgabe verlangt Manifeste; Templates *sind* Manifeste. Das gerenderte File erlaubt trotzdem `kubectl apply -f` ohne Helm und dient als Beleg. Kein doppelter Pflegeaufwand, weil generiert. |
@@ -154,19 +154,19 @@ ist: hier diskutieren, nicht während der Implementierung umschwenken.
 ## 2. Zielstruktur des Repos
 
 ```text
-RedePanda/
+RedeTim/
 ├── README.md                      # Hauptdokumentation (Abgabe-relevant)
 ├── PLAN.md                        # dieses Dokument
-├── RedePanda.sln
+├── RedeTim.sln
 ├── src/
-│   ├── RedePanda.Contracts/       # ChatMessage + Validierung (shared)
-│   ├── RedePanda.Backend/         # ASP.NET Core Web API
-│   ├── RedePanda.Frontend/        # index.html, app.js, style.css, Caddyfile
-│   └── RedePanda.ChatClient/      # bisheriger Konsolenclient (umgezogen)
+│   ├── RedeTim.Contracts/       # ChatMessage + Validierung (shared)
+│   ├── RedeTim.Backend/         # ASP.NET Core Web API
+│   ├── RedeTim.Frontend/        # index.html, app.js, style.css, Caddyfile
+│   └── RedeTim.ChatClient/      # bisheriger Konsolenclient (umgezogen)
 ├── tests/
-│   └── RedePanda.Backend.Tests/   # xUnit
+│   └── RedeTim.Backend.Tests/   # xUnit
 ├── deploy/
-│   ├── helm/redepanda/
+│   ├── helm/redetim/
 │   │   ├── Chart.yaml
 │   │   ├── values.yaml
 │   │   └── templates/
@@ -183,7 +183,7 @@ RedePanda/
 ├── scripts/
 │   ├── build-images.sh / .ps1     # Build + in den lokalen Cluster laden
 │   └── demo.sh / .ps1             # Port-Forwards für die Vorführung
-└── RedePanda-kafka-docker/        # bleibt: Redpanda für lokale Entwicklung ohne k8s
+└── RedeTim-kafka-docker/        # bleibt: Redpanda für lokale Entwicklung ohne k8s
 ```
 
 ---
@@ -197,8 +197,8 @@ der planbare Teil. Wenn wir uns verschätzen, wollen wir das in Woche 1 merken.
 ### Phase 0 — Repo-Umbau (11.–13.08.)
 
 - [x] Verzeichnisstruktur nach Abschnitt 2 anlegen, `git mv` für den bestehenden Client
-- [x] `RedePanda.sln` auf die neuen Pfade aktualisieren
-- [x] `RedePanda.Contracts` mit dem neuen Modell:
+- [x] `RedeTim.sln` auf die neuen Pfade aktualisieren
+- [x] `RedeTim.Contracts` mit dem neuen Modell:
       ```csharp
       public record ChatMessage(string Room, string Nickname, string Text, DateTimeOffset Timestamp);
       ```
@@ -210,7 +210,7 @@ der planbare Teil. Wenn wir uns verschätzen, wollen wir das in Woche 1 merken.
 - [x] `.dockerignore` für Backend und Frontend
 
 **Fertig, wenn:** `dotnet build` grün ist und der Konsolenclient mit
-`REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 dotnet run --project src/RedePanda.ChatClient`
+`REDPANDA_BOOTSTRAP_SERVERS=127.0.0.1:19092 dotnet run --project src/RedeTim.ChatClient`
 gegen das Compose-Redpanda chattet.
 
 ### Phase 1 — Walking Skeleton im Cluster (14.–17.08.) ⬅ kritischste Phase
@@ -218,17 +218,17 @@ gegen das Compose-Redpanda chattet.
 Ziel: **alles deployed, nichts kann Chat.** Erst wenn das steht, kommt Logik dazu.
 
 - [x] Backend-Projekt mit *nur* `GET /health/live` → `200 OK`
-- [x] Frontend: statische `index.html` mit „RedePanda" + `Caddyfile` mit Proxy auf `/api`
+- [x] Frontend: statische `index.html` mit „RedeTim" + `Caddyfile` mit Proxy auf `/api`
 - [x] Zwei Dockerfiles (Multi-Stage, `USER` non-root, Backend `:8080`, Frontend `:8080` via Caddy (non-root, UID 65532))
 - [x] `scripts/build-images.sh` — baut beide Images und lädt sie in den lokalen Cluster
 - [x] Helm-Chart mit Backend, Frontend, Redpanda-StatefulSet, ConfigMap, Topic-Job,
       **OTel-Collector** (Pipeline schon verdrahtet, aber noch schickt niemand etwas hin)
-- [x] `helm upgrade --install redepanda ./deploy/helm/redepanda -n redepanda --create-namespace`
+- [x] `helm upgrade --install redetim ./deploy/helm/redetim -n redetim --create-namespace`
 - [x] Port-Forward → Seite lädt, `/api/health/live` antwortet durch den Caddy-Proxy
 
 **Fertig, wenn:** alle Pods `Running`/`Ready`, der Topic-Job `Completed`, und
 `kubectl exec` in den Backend-Pod erreicht `redpanda:9092` **sowie
-`redepanda-otel-collector:4317`**.
+`redetim-otel-collector:4317`**.
 
 > **Warum der Collector schon hier und nicht erst in Phase 3:** Was am Collector Zeit
 > frisst, sind Deployment-Themen — `readOnlyRootFilesystem`, non-root-UID, Config-Mount,
@@ -270,26 +270,26 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
       und `WithMetrics` liegen im Wurzel-Namespace, sonst CS1061):
       ```csharp
       builder.Services.AddOpenTelemetry()
-          .ConfigureResource(r => r.AddService("redepanda-backend"))
+          .ConfigureResource(r => r.AddService("redetim-backend"))
           .WithMetrics(m => m
               .AddAspNetCoreInstrumentation()
-              .AddMeter("RedePanda")
+              .AddMeter("RedeTim")
               .AddOtlpExporter());
       ```
 - [x] **Kein `/metrics`-Endpunkt im Backend mehr** — kein `MapMetrics()`, kein Scrape-Port,
       keine Prometheus-Annotationen am Backend-Service. Das Backend pusht ausschließlich.
       Muss explizit dastehen, sonst baut es jemand „sicherheitshalber" trotzdem ein.
-- [x] Vier fachliche Instrumente über `System.Diagnostics.Metrics.Meter("RedePanda")`,
+- [x] Vier fachliche Instrumente über `System.Diagnostics.Metrics.Meter("RedeTim")`,
       **mit Punkten, ohne `_total`, ohne Unit** (Herleitung siehe 4.7):
 
 | Instrument in C# | Typ | Name in Prometheus |
 |---|---|---|
-| `redepanda.messages.sent` | `Counter<long>` | `redepanda_messages_sent_total` |
-| `redepanda.messages.received` | `Counter<long>` | `redepanda_messages_received_total` |
-| `redepanda.kafka.errors` | `Counter<long>` | `redepanda_kafka_errors_total` |
-| `redepanda.active_connections` | `ObservableGauge<int>` | `redepanda_active_connections` |
+| `redetim.messages.sent` | `Counter<long>` | `redetim_messages_sent_total` |
+| `redetim.messages.received` | `Counter<long>` | `redetim_messages_received_total` |
+| `redetim.kafka.errors` | `Counter<long>` | `redetim_kafka_errors_total` |
+| `redetim.active_connections` | `ObservableGauge<int>` | `redetim_active_connections` |
 
-- [x] `redepanda.active_connections` als **ObservableGauge** implementieren, dessen Callback
+- [x] `redetim.active_connections` als **ObservableGauge** implementieren, dessen Callback
       die `.Count`-Property der SSE-Subscriber-Collection im `ChatBroadcaster` liest — nicht
       als `UpDownCounter`. Ein Zähler, den man selbst hoch- und runterzählt, driftet bei jedem
       Client-Abbruch, der am `finally` vorbeigeht, und heilt nie wieder. Der Callback liest
@@ -301,13 +301,13 @@ Räumen nicht — und der Konsolenclient dieselben Nachrichten mitliest.
 - [x] OTel-Collector scharfschalten: Ports 4317 (OTLP/gRPC), 8889 (Prometheus-Exporter),
       8888 (Collector-Eigenmetriken), 13133 (`health_check`). Per `values.yaml` abschaltbar.
 - [x] Prometheus-Deployment + Scrape-Config im Chart, per `values.yaml` abschaltbar.
-      Einziger Diff zum ursprünglichen Plan: Ziel ist `redepanda-otel-collector:8889`
-      statt `redepanda-backend:8080`. **`honor_labels: true` ist Pflicht** (siehe 4.7).
+      Einziger Diff zum ursprünglichen Plan: Ziel ist `redetim-otel-collector:8889`
+      statt `redetim-backend:8080`. **`honor_labels: true` ist Pflicht** (siehe 4.7).
       `values.yaml` bekommt damit zwei Toggles statt einem — und Prometheus ohne Collector
       ergibt keinen Sinn mehr, die Abhängigkeit gehört dokumentiert.
 - [ ] Screenshot fürs README: Zähler steigt während der Demo sichtbar an — **plus ein
       zweiter Beleg, dass der Weg wirklich über den Collector geht** (Prometheus-Targets-Seite
-      mit `redepanda-otel-collector:8889` = `UP`, oder `curl` auf `:8889/metrics`).
+      mit `redetim-otel-collector:8889` = `UP`, oder `curl` auf `:8889/metrics`).
       Ohne den zweiten Beleg ist auf dem Bild nicht unterscheidbar, ob nicht doch direkt
       gescrapt wird — und genau der Unterschied ist der Mehrwert des Umbaus.
 
@@ -378,14 +378,14 @@ Was bei Caddy stattdessen zählt — alles drei nachgemessen:
         output stdout
         format json
     }
-    handle /api/* { reverse_proxy {$BACKEND_HOST:redepanda-backend:8080} }
+    handle /api/* { reverse_proxy {$BACKEND_HOST:redetim-backend:8080} }
     handle /healthz { log_skip; respond "ok" 200 }
     handle { root * /usr/share/caddy; try_files {path} /index.html; file_server }
 }
 ```
 
 (Die `handle`-Einzeiler mit `;` sind hier Kurzschreibweise fürs Lesen — Caddyfile kennt kein
-Semikolon als Trenner. Der echte Stand steht in `src/RedePanda.Frontend/Caddyfile`.)
+Semikolon als Trenner. Der echte Stand steht in `src/RedeTim.Frontend/Caddyfile`.)
 
 ⚠ **Nachgetragen (12.08.):** `log` im globalen Block konfiguriert einen *benannten Logger* für
 Caddys eigene Prozessereignisse. Access-Logs entstehen ausschließlich aus einem `log` **im
@@ -409,8 +409,8 @@ sich nginx mit `host not found in upstream`.
 **4.2 Images landen nicht im Cluster.** Lokal gebaute Images kennt der Cluster nicht →
 `ImagePullBackOff`. Deshalb `imagePullPolicy: IfNotPresent` **und** explizit laden:
 ```bash
-kind load docker-image redepanda-backend:$TAG redepanda-frontend:$TAG    # kind
-minikube image load redepanda-backend:$TAG redepanda-frontend:$TAG       # minikube
+kind load docker-image redetim-backend:$TAG redetim-frontend:$TAG    # kind
+minikube image load redetim-backend:$TAG redetim-frontend:$TAG       # minikube
 ```
 Docker Desktop mit aktiviertem Kubernetes braucht das nicht. Alle drei Wege ins README.
 
@@ -497,22 +497,22 @@ usw.) werden still ignoriert — die gäbe es nur mit `UseOtlpExporter()`.
 | Variable | Default | Verwendet von |
 |---|---|---|
 | `REDPANDA_BOOTSTRAP_SERVERS` | `redpanda:9092` | Backend, Konsolenclient |
-| `REDPANDA_TOPIC` | `redepanda-chat` | Backend, Konsolenclient, Topic-Job |
+| `REDPANDA_TOPIC` | `redetim-chat` | Backend, Konsolenclient, Topic-Job |
 | `MAX_MESSAGE_LENGTH` | `500` | Backend |
 | `ASPNETCORE_URLS` | `http://+:8080` | Backend |
 | `POD_NAME` | (fieldRef) | Backend (Consumer-GroupId) |
 | `LOG_LEVEL` | `Information` | Backend |
-| `BACKEND_HOST` | `redepanda-backend:8080` | Frontend (Caddyfile) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://redepanda-otel-collector:4317` | Backend |
+| `BACKEND_HOST` | `redetim-backend:8080` | Frontend (Caddyfile) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://redetim-otel-collector:4317` | Backend |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | Backend |
-| `OTEL_SERVICE_NAME` | `redepanda-backend` | Backend (→ Prometheus-Label `job`) |
+| `OTEL_SERVICE_NAME` | `redetim-backend` | Backend (→ Prometheus-Label `job`) |
 | `OTEL_METRIC_EXPORT_INTERVAL` | `5000` (ms) | Backend |
 | `OTEL_RESOURCE_ATTRIBUTES` | `service.instance.id=$(POD_NAME)` | Backend (→ Label `instance`) |
 | `OTEL_SDK_DISABLED` | `false` | Backend (Not-Aus für eine Demo ohne Collector) |
 
 ⚠ **`service.namespace` bewusst NICHT setzen.** Der Prometheus-Exporter des Collectors baut
 das `job`-Label als `<service.namespace>/<service.name>` — mit gesetztem Namespace hieße das
-Label plötzlich `redepanda/redepanda-backend` und jede PromQL-Abfrage aus dem README liefert
+Label plötzlich `redetim/redetim-backend` und jede PromQL-Abfrage aus dem README liefert
 leer. Der Namespace steckt ohnehin schon im Pod-Namen.
 
 **4.6 Der OTLP-Pfad ist im Demo-Zeitraum unsichtbar.** Das .NET-SDK exportiert Metriken
@@ -540,11 +540,11 @@ Collectors. Dessen Default-Strategie `UnderscoreEscapingWithSuffixes` zerlegt de
 allen Zeichen außer `[a-zA-Z0-9:]` — also an Punkten **und** Unterstrichen —, hängt bei
 monotonen Countern `_total` an und fügt Unit-Suffixe hinzu. Daraus folgen drei Regeln:
 
-1. **Kein `_total` im Instrumentnamen.** Sonst wird aus `redepanda_messages_sent_total`
-   am Ende `redepanda_messages_sent_total_total`.
+1. **Kein `_total` im Instrumentnamen.** Sonst wird aus `redetim_messages_sent_total`
+   am Ende `redetim_messages_sent_total_total`.
 2. **Keine Unit setzen** — oder nur eine Annotations-Unit in geschweiften Klammern
    (`{connections}`, `{messages}`). Besonders tückisch: Unit `"1"` an einem Gauge erzeugt
-   `redepanda_active_connections_ratio`. Naheliegend gewählt, komplett falscher Name.
+   `redetim_active_connections_ratio`. Naheliegend gewählt, komplett falscher Name.
 3. **Die Strategie explizit hinschreiben** statt sich auf den Default zu verlassen:
    `exporters.prometheus.translation_strategy: UnderscoreEscapingWithSuffixes`.
    (`add_metric_suffixes` ist dafür deprecated und wirkungslos, sobald `translation_strategy`
@@ -560,7 +560,7 @@ Zwei weitere Effekte, die beim ersten PromQL-Versuch für Verwirrung sorgen:
   `http_request_duration_seconds`, und `http_server_active_requests` statt
   `http_requests_in_progress`. Fürs Dashboard und den Screenshot relevant.
 - Resource-Attribute landen als separate `target_info`-Metrik, nicht als Label an jeder
-  Serie. Wer `pod=` direkt an `redepanda_messages_sent_total` sucht, findet nichts.
+  Serie. Wer `pod=` direkt an `redetim_messages_sent_total` sucht, findet nichts.
   `resource_to_telemetry_conversion.enabled: true` wäre der Schalter — brauchen wir aber
   nicht, weil `job` und `instance` ohnehin aus `service.name`/`service.instance.id` gesetzt
   werden.
@@ -639,9 +639,9 @@ Ehrlichkeit war in der Aufgabenstellung ausdrücklich erwünscht, deshalb die dr
 - [ ] Frontend hat keinerlei Kafka-Zugriff (nachweisbar: nur `/api`-Aufrufe im Netzwerk-Tab)
 - [ ] `kubectl delete pod <backend>` → Frontend verbindet sich neu, Chat läuft weiter
 - [ ] Collector-Pod `Ready`, Collector-Logs ohne `permanent error` / `connection refused`
-- [ ] Prometheus-Target `redepanda-otel-collector:8889` = `UP`
-- [ ] `redepanda_messages_sent_total` und `redepanda_messages_received_total` steigen während
-      der Demo; `redepanda_active_connections` fällt beim Schließen eines Browserfensters wieder
+- [ ] Prometheus-Target `redetim-otel-collector:8889` = `UP`
+- [ ] `redetim_messages_sent_total` und `redetim_messages_received_total` steigen während
+      der Demo; `redetim_active_connections` fällt beim Schließen eines Browserfensters wieder
 - [ ] Metriknamen exakt wie in der Aufgabenstellung — kein doppeltes `_total`, kein `_ratio`
 - [ ] Backend-Pod hat **keinen** `/metrics`-Endpunkt mehr (`curl` liefert 404) — der Beleg,
       dass wirklich gepusht und nicht doch gescrapt wird
@@ -671,7 +671,7 @@ das war die falsche Schublade. Es ist inzwischen umgesetzt, siehe Nachtrag C1–
 vorhandenen Collector aktivieren** (ein Receiver-/Exporter-Block plus
 `service.pipelines.traces` — der billigste Zusatzpunkt, den wir noch hätten; zeigt, dass der
 Collector eine Architekturentscheidung mit Ausbaupfad ist und kein Overhead), und den HPA gegen
-`redepanda_active_connections` statt gegen CPU laufen lassen — dafür bräuchte es allerdings
+`redetim_active_connections` statt gegen CPU laufen lassen — dafür bräuchte es allerdings
 prometheus-adapter oder KEDA, also eine ganze Komponente mehr.
 
 ---
@@ -686,7 +686,7 @@ Nach Phase 1 laufen zwei Stränge weitgehend unabhängig:
   (Collector-Config, Prometheus-Deployment + Scrape-Config, `values.yaml`-Toggles,
   Probes/securityContext für beide neuen Pods), Helm-Feinschliff, Scripts
 - **Vertrag zwischen den Strängen — vor Phase 3 festzurren:** Service-Name
-  `redepanda-otel-collector`, Port `4317`, Protokoll gRPC, Instrumentnamen mit Punkten ohne
+  `redetim-otel-collector`, Port `4317`, Protokoll gRPC, Instrumentnamen mit Punkten ohne
   `_total`. Solange der steht, kann Strang A gegen einen lokal per Docker gestarteten
   Collector entwickeln und Strang B gegen `telemetrygen` — ohne aufeinander zu warten.
   Ohne diesen Vertrag blockieren sich beide Stränge gegenseitig; das ist der einzige echte
@@ -767,25 +767,25 @@ Passende `prometheus.yml` — der einzige Diff zum ursprünglichen Plan ist die 
 
 ```yaml
 scrape_configs:
-  - job_name: redepanda-otel
+  - job_name: redetim-otel
     honor_labels: true      # PFLICHT, sonst exported_job/exported_instance (siehe 4.7)
     scrape_interval: 5s     # 5s statt 15s, damit die Zähler in der Demo sichtbar steigen
     static_configs:
-      - targets: ['redepanda-otel-collector:8889']
+      - targets: ['redetim-otel-collector:8889']
 
   - job_name: otel-collector          # Pipeline-Gesundheit des Collectors selbst
     static_configs:
-      - targets: ['redepanda-otel-collector:8888']
+      - targets: ['redetim-otel-collector:8888']
 ```
 
 **Debugging-Reihenfolge, wenn eine Metrik nicht ankommt** — von hinten nach vorn, sonst
 sucht man an der falschen Stelle:
 
-1. `kubectl -n redepanda logs deploy/redepanda-otel-collector` — kommt überhaupt etwas an?
+1. `kubectl -n redetim logs deploy/redetim-otel-collector` — kommt überhaupt etwas an?
    (`OTELCOL_DEBUG_VERBOSITY=detailed` setzen, dann wird jede Metrik geloggt)
-2. `kubectl -n redepanda port-forward deploy/redepanda-otel-collector 8889:8889`
+2. `kubectl -n redetim port-forward deploy/redetim-otel-collector 8889:8889`
    → `curl localhost:8889/metrics` — steht der Name da, und heißt er richtig?
-3. Prometheus-Targets-Seite — ist `redepanda-otel-collector:8889` auf `UP`?
+3. Prometheus-Targets-Seite — ist `redetim-otel-collector:8889` auf `UP`?
 4. Erst dann PromQL.
 
 Für den Health-Port `13133` gegen `deploy/` forwarden, nicht gegen `svc/` — der Port steht

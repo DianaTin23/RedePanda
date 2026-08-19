@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <RootNamespace>RedeTim.Backend</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Versions pinned in Directory.Packages.props, which also carries the note on why
+             Confluent.Kafka constrains the container base image (see Dockerfile). -->
+        <PackageReference Include="Confluent.Kafka" />
+
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../RedeTim.Contracts/RedeTim.Contracts.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="RedeTim.Backend.Tests" />
+    </ItemGroup>
+
+</Project>

@@ -35,12 +35,12 @@ fi
 
 collect_pins() {
     grep -rhoE '[a-zA-Z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}' \
-        "${REPO_ROOT}/src/RedePanda.Backend/Dockerfile" \
-        "${REPO_ROOT}/src/RedePanda.ChatClient/Dockerfile" \
-        "${REPO_ROOT}/src/RedePanda.Frontend/Dockerfile" \
-        "${REPO_ROOT}/deploy/helm/redepanda/values.yaml" \
-        "${REPO_ROOT}/RedePanda-kafka-docker/docker-compose.yml" \
-        "${REPO_ROOT}/RedePanda-kafka-docker/make-tls.sh" \
+        "${REPO_ROOT}/src/RedeTim.Backend/Dockerfile" \
+        "${REPO_ROOT}/src/RedeTim.ChatClient/Dockerfile" \
+        "${REPO_ROOT}/src/RedeTim.Frontend/Dockerfile" \
+        "${REPO_ROOT}/deploy/helm/redetim/values.yaml" \
+        "${REPO_ROOT}/RedeTim-kafka-docker/docker-compose.yml" \
+        "${REPO_ROOT}/RedeTim-kafka-docker/make-tls.sh" \
     | sort -u
 }
 
@@ -72,11 +72,11 @@ broker_ref() {
 }
 
 BROKER_SOURCES=(
-    "RedePanda-kafka-docker/docker-compose.yml"
-    "RedePanda-kafka-docker/make-tls.sh"
+    "RedeTim-kafka-docker/docker-compose.yml"
+    "RedeTim-kafka-docker/make-tls.sh"
 )
 
-CHART_BROKER="$(broker_ref "${REPO_ROOT}/deploy/helm/redepanda/values.yaml")"
+CHART_BROKER="$(broker_ref "${REPO_ROOT}/deploy/helm/redetim/values.yaml")"
 
 if [[ -z "${CHART_BROKER}" ]]; then
     echo "?? broker parity: no pin found in the chart, so nothing could be compared against it"

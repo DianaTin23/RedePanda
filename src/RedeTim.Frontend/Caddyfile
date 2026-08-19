@@ -1,0 +1,57 @@
+{
+	auto_https off
+
+	admin off
+	persist_config off
+
+	grace_period 5s
+
+	log {
+		output stdout
+		format json
+		level {$FRONTEND_LOG_LEVEL:INFO}
+	}
+}
+
+:8443 {
+	tls {$TLS_CERT_FILE:/etc/redetim/tls/tls.crt} {$TLS_KEY_FILE:/etc/redetim/tls/tls.key}
+
+	log {
+		output stdout
+		format json
+		level {$FRONTEND_LOG_LEVEL:INFO}
+	}
+
+	handle /api/* {
+		reverse_proxy {$BACKEND_HOST:redetim-backend:8443} {
+			transport http {
+				versions 1.1
+
+				tls
+				tls_trust_pool file {$TLS_CA_FILE:/etc/redetim/tls/ca.crt}
+			}
+		}
+	}
+
+	handle /healthz {
+		log_skip
+		respond "ok" 200
+	}
+
+	handle {
+		root * /usr/share/caddy
+		encode zstd gzip
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+:8080 {
+	log {
+		output stdout
+		format json
+		level {$FRONTEND_LOG_LEVEL:INFO}
+	}
+
+	redir https://{host}:{$PUBLIC_HTTPS_PORT:8443}{uri} 308
+}

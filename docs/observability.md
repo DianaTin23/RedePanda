@@ -14,17 +14,17 @@ Fünf, nicht vier. Vier Counter in `ChatMetrics` und ein observabler UpDownCount
 
 | Instrument in C# | Typ | Name in Prometheus |
 |---|---|---|
-| `redepanda.messages.sent` | `Counter<long>` | `redepanda_messages_sent_total` |
-| `redepanda.messages.received` | `Counter<long>` | `redepanda_messages_received_total` |
-| `redepanda.kafka.errors` | `Counter<long>` | `redepanda_kafka_errors_total` |
-| `redepanda.streams.cut` | `Counter<long>` | `redepanda_streams_cut_total` |
-| `redepanda.active_connections` | `ObservableUpDownCounter<int>` | `redepanda_active_connections` |
+| `redetim.messages.sent` | `Counter<long>` | `redetim_messages_sent_total` |
+| `redetim.messages.received` | `Counter<long>` | `redetim_messages_received_total` |
+| `redetim.kafka.errors` | `Counter<long>` | `redetim_kafka_errors_total` |
+| `redetim.streams.cut` | `Counter<long>` | `redetim_streams_cut_total` |
+| `redetim.active_connections` | `ObservableUpDownCounter<int>` | `redetim_active_connections` |
 
-`redepanda_streams_cut_total` ist einen Alarm wert, sobald es mehr als selten vorkommt: Es
+`redetim_streams_cut_total` ist einen Alarm wert, sobald es mehr als selten vorkommt: Es
 heißt, dass Leser dem Raum nicht folgen können. Wie es zustande kommt, steht in
 [streaming.md](streaming.md#backpressure-was-passiert-wenn-ein-browser-nicht-mitkommt).
 
-Warum `redepanda_messages_received_total` beim Nachladen nicht mitzählt, steht in
+Warum `redetim_messages_received_total` beim Nachladen nicht mitzählt, steht in
 [kafka.md](kafka.md#wann-ein-pod-bereit-ist).
 
 ### Namensregeln
@@ -38,7 +38,7 @@ Backend. Daraus folgen drei Regeln für die Instrumentnamen im Code:
 
 Im Collector steht `translation_strategy: UnderscoreEscapingWithSuffixes` ausdrücklich da,
 statt sich auf das Vorgabeverhalten zu verlassen. Das ist die Zeile, die aus
-`redepanda.messages.sent` am Ende `redepanda_messages_sent_total` macht.
+`redetim.messages.sent` am Ende `redetim_messages_sent_total` macht.
 
 Zusätzlich zu den eigenen Metriken liefert die ASP.NET-Core-Instrumentierung die
 HTTP-Serverhistogramme. Der Kestrel-Meter wird **einzeln** hinzugefügt:
@@ -73,7 +73,7 @@ das SDK dort wieder eine bei jedem Neustart wechselnde Instance-ID.
 
 **`service.namespace` wird bewusst nicht gesetzt.** Der Prometheus-Exporter des Collectors baut
 das `job`-Label als `<service.namespace>/<service.name>`. Gesetzt würde daraus überall
-`redepanda/redepanda-backend`, und die PromQL-Beispiele der README liefen ins Leere.
+`redetim/redetim-backend`, und die PromQL-Beispiele der README liefen ins Leere.
 
 Auf der Prometheus-Seite gehört `honor_labels: true` dazu. Der Collector setzt `job` und
 `instance` bereits aus `service.name` und `service.instance.id`. Ohne `honor_labels`

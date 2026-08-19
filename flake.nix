@@ -1,5 +1,5 @@
 {
-  description = "RedePanda — .NET 10 terminal chat over Redpanda (Kafka-compatible)";
+  description = "RedeTim — .NET 10 terminal chat over Redpanda (Kafka-compatible)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -49,13 +49,13 @@
           DOTNET_NOLOGO = 1;
 
           shellHook = ''
-            echo "RedePanda dev shell — .NET $(dotnet --version); rpk, kubectl, helm on PATH"
-            echo "  broker:  cd RedePanda-kafka-docker && docker compose --env-file env.local up -d"
+            echo "RedeTim dev shell — .NET $(dotnet --version); rpk, kubectl, helm on PATH"
+            echo "  broker:  cd RedeTim-kafka-docker && docker compose --env-file env.local up -d"
             echo "  topics:  rpk topic list -X brokers=localhost:19092"
             echo "  chat:    REDPANDA_BOOTSTRAP_SERVERS=localhost:19092 \\"
-            echo "           dotnet run --project src/RedePanda.ChatClient -- --nick alice"
+            echo "           dotnet run --project src/RedeTim.ChatClient -- --nick alice"
             echo "  build:   ./scripts/build-images.sh --load kind"
-            echo "  chart:   helm template redepanda deploy/helm/redepanda -f deploy/releases/<version>.yaml"
+            echo "  chart:   helm template redetim deploy/helm/redetim -f deploy/releases/<version>.yaml"
           '';
         };
       });

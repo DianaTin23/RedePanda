@@ -70,7 +70,7 @@ Den Stream zu beenden ist dagegen reparabel:
 2. `EventSource` verbindet sich von selbst neu, mit `Last-Event-ID`.
 3. Der Replay füllt die Lücke exakt.
 
-Der Abbruch wird gezählt (`redepanda_stream_cuts_total`) und geloggt. `TryComplete` steht dabei
+Der Abbruch wird gezählt (`redetim_stream_cuts_total`) und geloggt. `TryComplete` steht dabei
 **innerhalb** der Bedingung: Es liefert nur beim ersten Mal `true`, sodass ein bereits
 abgeschnittener und noch nicht entsorgter Abonnent nicht für den Rest seines Lebens einmal pro
 Nachricht loggen und zählen kann.
@@ -172,7 +172,7 @@ kennt. Er wirkt nur, wenn ein puffernder Proxy davorsteht — Caddy streamt SSE 
 
 ## Die Verbindungsmetrik
 
-`redepanda.active_connections` ist ein *observable* UpDownCounter, kein von Hand hoch- und
+`redetim.active_connections` ist ein *observable* UpDownCounter, kein von Hand hoch- und
 heruntergezählter. Ein manueller Zähler driftet dauerhaft, sobald ein Verbindungsabbruch am
 `finally`-Block vorbeirutscht. Der Callback liest bei jedem Export die tatsächliche Größe und
 meldet ab Prozessstart `0` statt „keine Daten".

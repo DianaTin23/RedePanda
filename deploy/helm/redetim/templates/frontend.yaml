@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "redetim.fullname" . }}-frontend
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  minReadySeconds: 5
+
+  selector:
+    matchLabels:
+      {{- include "redetim.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "redetim.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+      annotations:
+        checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
+        {{- include "redetim.releaseAnnotations" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds }}
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "redetim.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 14 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: caddy
+          image: {{ include "redetim.image" (dict "ctx" . "component" "frontend") | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: https
+              containerPort: 8443
+            - name: http-redirect
+              containerPort: 8080
+          env:
+            - name: BACKEND_HOST
+              value: "{{ include "redetim.fullname" . }}-backend:8443"
+            - name: FRONTEND_LOG_LEVEL
+              value: {{ .Values.frontend.logLevel | quote }}
+            - name: PUBLIC_HTTPS_PORT
+              value: {{ .Values.tls.publicHttpsPort | quote }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tls
+              mountPath: {{ include "redetim.tlsMountPath" . }}
+              readOnly: true
+            - name: caddy-data
+              mountPath: /data
+            - name: caddy-config
+              mountPath: /config
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ include "redetim.fullname" . }}-frontend-tls
+        - name: caddy-data
+          emptyDir: {}
+        - name: caddy-config
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "redetim.fullname" . }}-frontend
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "redetim.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+    - name: http-redirect
+      port: 8080
+      targetPort: http-redirect
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "redetim.fullname" . }}-frontend
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  maxUnavailable: 1
+
+  selector:
+    matchLabels:
+      {{- include "redetim.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}

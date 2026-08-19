@@ -33,7 +33,7 @@ Code und Doku heraus referenziert** — beim Umsortieren die Verweise mitziehen.
 nix develop                    # Dev-Shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo
 
 dotnet build                   # TreatWarningsAsErrors=true, keine Ausnahmen im Repo
-dotnet test                    # gesamte Suite (RedePanda.Backend.Tests, xunit v3)
+dotnet test                    # gesamte Suite (RedeTim.Backend.Tests, xunit v3)
 dotnet test --filter "FullyQualifiedName~ChatHistoryTests"   # eine Klasse
 dotnet test --filter "FullyQualifiedName~ChatHistoryTests.RoomsAreKeptApart"  # ein Test
 
@@ -45,8 +45,8 @@ Chart-Validierung (die Release-Datei ist Pflicht, sonst bricht das Rendern absic
 
 ```bash
 REL=$(command ls -t deploy/releases/*.yaml | head -1)
-helm lint deploy/helm/redepanda -f "$REL"
-helm template redepanda deploy/helm/redepanda -n redepanda -f "$REL" \
+helm lint deploy/helm/redetim -f "$REL"
+helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
   | kubeconform -strict -summary -kubernetes-version 1.32.0
 ```
 
@@ -72,9 +72,9 @@ Browser ──HTTPS──▶ Caddy (Frontend) ──proxy /api──▶ Backend 
                                             OTel-Collector ──HTTPS :8889──▶ Prometheus
 ```
 
-Vier Projekte: `RedePanda.Contracts` (geteiltes Wire-Format + `KafkaSecurity`),
-`RedePanda.Backend` (ASP.NET Core Minimal API), `RedePanda.ChatClient` (Konsolenclient **und**
-Admin-Prozess: `--ensure-topic`, `--describe-topic`, `--print-config`), `RedePanda.Frontend`
+Vier Projekte: `RedeTim.Contracts` (geteiltes Wire-Format + `KafkaSecurity`),
+`RedeTim.Backend` (ASP.NET Core Minimal API), `RedeTim.ChatClient` (Konsolenclient **und**
+Admin-Prozess: `--ensure-topic`, `--describe-topic`, `--print-config`), `RedeTim.Frontend`
 (nur Caddyfile + vier statische Dateien, kein Build-Tooling).
 
 Zwei Trennungen tragen den Entwurf und sind vorführbar:
@@ -88,7 +88,7 @@ Zwei Trennungen tragen den Entwurf und sind vorführbar:
 Diese Eigenschaften sind der Grund, warum das System skaliert. Wer sie bricht, bekommt keinen
 Fehler, sondern ein System, das falsch läuft:
 
-- **Eine Consumer-Group je Pod** (`redepanda-backend-<POD_NAME>`) ⇒ Fan-out, nicht
+- **Eine Consumer-Group je Pod** (`redetim-backend-<POD_NAME>`) ⇒ Fan-out, nicht
   Lastausgleich. Eine geteilte Group ließe die Browser an allen anderen Pods in einem Raum
   sitzen, der sich nie aktualisiert. `POD_NAME` hat deshalb im Cluster keinen Default —
   `ResolvePodName` **wirft**, wenn `KUBERNETES_SERVICE_HOST` gesetzt und `POD_NAME` leer ist.
@@ -147,7 +147,7 @@ per `secretKeyRef` aus `redpanda.auth.existingSecret`. Vollständige Tabelle: RE
   sonst überschreiben sich Helm und Autoscaler gegenseitig.
 - **Manuelle Kopplungen ohne Prüfung** (Tabelle in `docs/architecture.md#manuelle-kopplungen`):
   die Textlängengrenze in `app.js` hängt an `ChatMessage.DefaultMaxTextLength`;
-  `RedePanda-kafka-docker/docker-compose.yml` und `redpanda.image` in `values.yaml` müssen
+  `RedeTim-kafka-docker/docker-compose.yml` und `redpanda.image` in `values.yaml` müssen
   dasselbe Broker-Image benennen (`check-digests.sh` prüft das).
 - **`TreatWarningsAsErrors=true` ohne eine einzige Ausnahme** im Repo: kein `#pragma warning`,
   kein `[SuppressMessage]`, kein `NoWarn`.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NAMESPACE="${NAMESPACE:-redepanda}"
-RELEASE="${RELEASE:-redepanda}"
+NAMESPACE="${NAMESPACE:-redetim}"
+RELEASE="${RELEASE:-redetim}"
 CA_FILE="${CA_FILE:-${TMPDIR:-/tmp}/${RELEASE}-ca.crt}"
 
 pids=()
@@ -38,11 +38,11 @@ forward "deploy/${RELEASE}-otel-collector" 8889:8889 "collector"
 echo
 echo "Two browser windows on https://localhost:8443, same room  -> both see the message."
 echo "Two browser windows, different rooms                      -> no mixing."
-echo "Prometheus query: redepanda_messages_sent_total"
+echo "Prometheus query: redetim_messages_sent_total"
 echo
 echo "From the shell, verified against the release CA:"
 echo "  curl --cacert ${CA_FILE} https://localhost:8443/healthz"
-echo "  curl --cacert ${CA_FILE} https://localhost:8889/metrics | grep redepanda_"
+echo "  curl --cacert ${CA_FILE} https://localhost:8889/metrics | grep redetim_"
 echo "  curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\\n' http://localhost:8080/"
 echo
 echo "Press Ctrl+C to stop."

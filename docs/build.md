@@ -130,7 +130,7 @@ Paritätsprüfung, die einige der Kopien abdeckt, liest sich exakt wie eine, die
 
 ### Backend und Konsolenclient
 
-Beide bauen aus dem Wurzelverzeichnis, weil beide `RedePanda.Contracts` referenzieren. Nur das
+Beide bauen aus dem Wurzelverzeichnis, weil beide `RedeTim.Contracts` referenzieren. Nur das
 Frontend hat einen eigenen Kontext.
 
 **Restore vor dem Kopieren der Quellen**, damit eine Codeänderung die Paketschicht nicht
@@ -226,8 +226,8 @@ Archiv ist die unterstützte Route für ein mit podman gebautes Image.
 
 Das Umtaggen davor ist nicht kosmetisch. Podman legt ein lokal gebautes Image unter
 `localhost/<name>` ab, und `podman save` schreibt diesen Namen ins Archiv — der Node hielte also
-`localhost/redepanda-backend:<tag>`. Das Chart fragt nach dem blanken
-`redepanda-backend:<tag>`, was containerd zu `docker.io/library/redepanda-backend:<tag>`
+`localhost/redetim-backend:<tag>`. Das Chart fragt nach dem blanken
+`redetim-backend:<tag>`, was containerd zu `docker.io/library/redetim-backend:<tag>`
 normalisiert: ein Name, den das Archiv nie trug. Der kubelet tut daraufhin das Einzige, was ihm
 bleibt, und versucht von Docker Hub zu ziehen — `ImagePullBackOff` für ein Image, das
 nachweislich schon auf dem Node liegt.

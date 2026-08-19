@@ -1,0 +1,69 @@
+{{- if .Values.adminJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "redetim.fullname" . }}-admin-{{ .Release.Revision }}
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin-job
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ .Values.adminJob.ttlSecondsAfterFinished }}
+
+  activeDeadlineSeconds: {{ .Values.adminJob.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "redetim.labels" . | nindent 8 }}
+        app.kubernetes.io/component: admin-job
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: admin
+          image: {{ include "redetim.image" (dict "ctx" . "component" "chatClient") | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: {{ toJson .Values.adminJob.args }}
+
+          stdin: {{ .Values.adminJob.interactive }}
+          tty: {{ .Values.adminJob.interactive }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "redetim.fullname" . }}-config
+          env:
+            {{- include "redetim.saslEnv" (dict "ctx" .) | nindent 12 }}
+            - name: TOPIC_WAIT_SECONDS
+              value: {{ .Values.adminJob.brokerWaitSeconds | quote }}
+            {{- with .Values.adminJob.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.redpanda.auth.caSecret }}
+            - name: broker-ca
+              mountPath: /etc/redetim/ca
+              readOnly: true
+            {{- end }}
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.redpanda.auth.caSecret }}
+        - name: broker-ca
+          secret:
+            secretName: {{ .Values.redpanda.auth.caSecret | quote }}
+        {{- end }}
+{{- end }}

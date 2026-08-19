@@ -219,7 +219,7 @@ Kopiert werden:
 die Konfiguration, lädt also die TLS-App und öffnet die Zertifikatsdateien. Die werden erst beim
 Deployment aus einem Secret gemountet und existieren zur Bauzeit nicht — `validate` scheitert
 deshalb an einem völlig intakten Caddyfile mit
-„open /etc/redepanda/tls/tls.crt: no such file or directory". `adapt` benutzt denselben Parser
+„open /etc/redetim/tls/tls.crt: no such file or directory". `adapt` benutzt denselben Parser
 und weist dieselben Syntax- und Direktivenfehler zurück, ohne das Dateisystem anzufassen. Genau
 das ist die Fehlerklasse, die ein Build noch abfangen kann.
 
@@ -235,7 +235,7 @@ Start seine TLS-App und durchläuft deren Storage-Verzeichnis. Ohne diese Variab
 Pfaden ein `emptyDir`.
 
 **Zertifikat und Schlüssel sind nicht eingebacken.** Sie werden aus dem Secret des Charts unter
-`/etc/redepanda/tls` gemountet. Ein Zertifikat ist Deployment-Konfiguration; ein Image, das eins
+`/etc/redetim/tls` gemountet. Ein Zertifikat ist Deployment-Konfiguration; ein Image, das eins
 trüge, wäre ein Release, das sich nur ein einziges Mal ausrollen ließe (12-Factor III).
 
 Allgemeines zu Digest-Pinning und Reproduzierbarkeit steht in [build.md](build.md).

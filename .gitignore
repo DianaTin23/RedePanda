@@ -433,13 +433,13 @@ FodyWeavers.xsd
 .idea_modules/
 
 # env files
-RedePanda-kafka-docker/env.lan
+RedeTim-kafka-docker/env.lan
 
 # Schlüsselmaterial für den SASL_SSL-Listener des lokalen Brokers (docker-compose.yml). Erzeugt von
 # make-tls.sh, jederzeit neu erzeugbar, und für nichts außerhalb einer Entwicklermaschine gültig --
 # es gehört also nicht ins Repository. Ein gerendertes Manifest lag hier einmal aus genau diesem
 # Grund fälschlich mit drin; siehe Abschnitt 7 der README.
-RedePanda-kafka-docker/tls/
+RedeTim-kafka-docker/tls/
 # Nix
 .direnv/
 /result

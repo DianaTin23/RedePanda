@@ -100,7 +100,7 @@ Fehler, sondern ein System, das falsch läuft:
 - **`ChatMessageSerializer` ist die einzige Stelle mit `JsonSerializer`-Optionen.** Backend und
   Konsolenclient dürfen nicht eigenständig serialisieren.
 - **`KafkaSecurity.ApplyTo` gilt für *jeden* Kafka-Client im Repo** (Producer, Consumer, Admin
-  — sieben Stellen). Ein neuer Client ohne diesen Aufruf funktioniert gegen den Plaintext-Demo-
+  — neun Stellen). Ein neuer Client ohne diesen Aufruf funktioniert gegen den Plaintext-Demo-
   Broker und scheitert still gegen jeden abgesicherten; genau so entstand der Readiness-Bug.
   `BrokerReadinessTests` prüft das pro Client.
 - **Es gibt kein `GET /api/history`.** Der Verlauf sind die ersten Frames von `/api/stream`.

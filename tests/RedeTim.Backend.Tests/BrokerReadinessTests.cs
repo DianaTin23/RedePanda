@@ -21,6 +21,8 @@ public class BrokerReadinessTests
         { "readiness admin client", (o, read) => BrokerReadiness.BuildConfig(o, read) },
         { "producer", (o, read) => ChatProducer.BuildConfig(o, read) },
         { "consumer", (o, read) => ChatConsumerService.BuildConfig(o, read) },
+        { "presence producer", (o, read) => PresenceProducer.BuildConfig(o, read) },
+        { "presence consumer", (o, read) => PresenceConsumerService.BuildConfig(o, read) },
     };
 
     [Theory]

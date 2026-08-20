@@ -38,6 +38,18 @@ chat:
   # Wie weit ein startender Pod zurueckliest, **je Partition**. 0 = das ganze Topic.
   replayRecords: 2000
 
+# Log-komprimiertes zweites Topic: haelt nur den aktuellen Praesenz-Stand (Key = Raum+Nickname),
+# nicht die Chat-Historie. Begruendung: docs/kafka.md.
+presence:
+  topic: redetim-presence
+  partitions: 1
+  replicationFactor: 1
+  # Sekunden ohne Erneuerung, bevor eine Namensreservierung ausserhalb einer sauberen
+  # Trennung als frei gilt (Sicherheitsnetz fuer Absturz/Verbindungsabbruch). Deutlich groesser
+  # als das SSE-Heartbeat-Intervall (15s), damit ein einzelner verpasster Refresh den Namen
+  # nicht sofort freigibt.
+  ttlSeconds: 45
+
 backend:
   # Lokal gebaut, nie aus einer Registry gezogen. Tag kommt aus der Release-Datei.
   image:

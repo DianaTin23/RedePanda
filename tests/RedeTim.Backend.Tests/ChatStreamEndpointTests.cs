@@ -20,12 +20,13 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
         {
             builder.ConfigureServices(services =>
             {
-                var consumer = services.SingleOrDefault(
-                    d => d.ImplementationType == typeof(ChatConsumerService));
-
-                if (consumer is not null)
+                foreach (var type in new[] { typeof(ChatConsumerService), typeof(PresenceConsumerService) })
                 {
-                    services.Remove(consumer);
+                    var descriptor = services.SingleOrDefault(d => d.ImplementationType == type);
+                    if (descriptor is not null)
+                    {
+                        services.Remove(descriptor);
+                    }
                 }
             });
         }

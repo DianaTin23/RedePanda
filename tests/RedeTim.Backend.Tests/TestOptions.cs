@@ -13,6 +13,8 @@ internal static class TestOptions
         HistorySize = historySize,
         MaxRooms = BackendOptions.DefaultMaxRooms,
         ReplayRecords = BackendOptions.DefaultReplayRecords,
+        PresenceTopic = "unused-in-these-tests-presence",
+        PresenceTtlSeconds = BackendOptions.DefaultPresenceTtlSeconds,
         ProduceTimeoutMs = BackendOptions.DefaultProduceTimeoutMs,
         LogLevel = BackendOptions.DefaultLogLevel,
     };

@@ -29,6 +29,11 @@ builder.Services.AddSingleton<ChatProducer>();
 builder.Services.AddSingleton<BrokerReadiness>();
 builder.Services.AddHostedService<ChatConsumerService>();
 
+builder.Services.AddSingleton<PresenceStore>();
+builder.Services.AddSingleton<PresenceProducer>();
+builder.Services.AddSingleton<IPresenceProducer>(sp => sp.GetRequiredService<PresenceProducer>());
+builder.Services.AddHostedService<PresenceConsumerService>();
+
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
 
 builder.Services.AddOpenTelemetry()
@@ -79,10 +84,44 @@ app.MapPost("/api/messages", async (
     return Results.Accepted();
 });
 
+app.MapPost("/api/join", async (
+    JoinRequest request,
+    PresenceStore store,
+    IPresenceProducer producer,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    if (!ChatMessage.TryNormalizeRoomAndNickname(
+            request.Room, request.Nickname, out var room, out var nickname, out var error))
+    {
+        return Results.BadRequest(new { error });
+    }
+
+    if (store.IsTaken(room, nickname, DateTimeOffset.UtcNow))
+    {
+        return Results.Conflict(new { error = $"'{nickname}' is already taken in '{room}'." });
+    }
+
+    try
+    {
+        await producer.RenewAsync(room, nickname, ct);
+    }
+    catch (ProduceException<string, string> e)
+    {
+        logger.LogError("Presence produce failed: {Reason}", e.Error.Reason);
+        return Results.StatusCode(PresenceProducer.StatusCodeFor(e.Error));
+    }
+
+    return Results.Ok();
+});
+
 app.MapGet("/api/stream", IResult (
     HttpContext context,
     string? room,
+    string? nickname,
     ChatBroadcaster broadcaster,
+    IPresenceProducer presenceProducer,
+    ILogger<Program> logger,
     IHostApplicationLifetime lifetime) =>
 {
     if (string.IsNullOrWhiteSpace(room))
@@ -101,12 +140,24 @@ app.MapGet("/api/stream", IResult (
             ? seen
             : -1;
 
+    var trimmedRoom = room.Trim();
+
+    // A missing or oversized nickname just means "don't track presence for this connection" —
+    // presence is a soft UX gate behind POST /api/join, not a security boundary the stream
+    // itself must enforce, so there is no reason to fail the whole connection over it.
+    var trimmedNickname = nickname?.Trim();
+    var presence =
+        !string.IsNullOrEmpty(trimmedNickname) && trimmedNickname.Length <= ChatMessage.MaxNicknameLength
+            ? new PresenceSession(presenceProducer, trimmedRoom, trimmedNickname, logger)
+            : null;
+
     return TypedResults.ServerSentEvents(
         ChatStream.Create(
             broadcaster,
-            room.Trim(),
+            trimmedRoom,
             ChatStream.DefaultHeartbeatInterval,
             lastEventId,
+            presence,
             lifetime.ApplicationStopping));
 });
 

@@ -609,6 +609,10 @@ Secret-Dateien gemountet.
 | `CHAT_HISTORY_SIZE` | `200` (`0` = alles im Topic) | Backend (Nachrichten **je Raum**) |
 | `CHAT_MAX_ROOMS` | `200` (`0` = unbegrenzt) | Backend (Räume gleichzeitig im Verlauf) |
 | `CHAT_REPLAY_RECORDS` | `2000` (`0` = alles im Topic) | Backend (Rücklesen beim Start, **je Partition**) |
+| `REDPANDA_PRESENCE_TOPIC` | `redetim-presence` | Backend, Topic-Job (log-komprimiert, Präsenz) |
+| `PRESENCE_TTL_SECONDS` | `45` | Backend (Reservierung ohne Erneuerung wird nach dieser Zeit frei) |
+| `PRESENCE_PARTITIONS` | `1` | Topic-Job |
+| `PRESENCE_REPLICATION_FACTOR` | `1` | Topic-Job |
 | `PRODUCE_TIMEOUT_MS` | `10000` | Backend (Producer, `message.timeout.ms`) |
 | `CHAT_PARTITIONS` | `1` | Topic-Job |
 | `CHAT_REPLICATION_FACTOR` | `1` | Topic-Job |
@@ -648,14 +652,15 @@ zweite Wahrheit für etwas anzulegen, das der Anwendung gar nicht gehört. Desha
 Cluster nicht startbar wäre. Das Chart überschreibt beides.
 
 Die fünf Verbindungsvariablen (`REDPANDA_SECURITY_PROTOCOL` bis `REDPANDA_SSL_CA_LOCATION`) liest
-dagegen `KafkaSecurity` in `RedeTim.Contracts` — einmal für alle **sieben** Kafka-Clients im Repo,
+dagegen `KafkaSecurity` in `RedeTim.Contracts` — einmal für alle **neun** Kafka-Clients im Repo,
 weil `ClientConfig` die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration ist.
 Ohne Konfiguration ändert die Klasse nichts; unvollständig konfiguriert bricht sie beim Start ab
 und nennt die fehlende Variable.
 
 Die Zahl stand hier lange auf „fünf", und das war nicht bloß ungenau: die beiden nicht mitgezählten
 Stellen waren die Admin-Clients, und einer davon wurde tatsächlich ohne diese Einstellungen gebaut
-(Abschnitt 5). Ein Test in `BrokerReadinessTests` prüft die Eigenschaft deshalb jetzt für jeden
+(Abschnitt 5). Mit dem Presence-Topic (Abschnitt 9) kamen zwei weitere Backend-Clients hinzu —
+macht neun. Ein Test in `BrokerReadinessTests` prüft die Eigenschaft deshalb jetzt für jeden
 Client des Backends einzeln, statt sie zu behaupten. Zugangsdaten stehen dabei **nie** in der ConfigMap: sie kommen
 über `secretKeyRef` aus einem Secret, das man selbst anlegt (Schlüssel `username`, `password`).
 
@@ -827,7 +832,7 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 # Glob stillschweigend -- REL wäre leer und die Fehlermeldung zeigte woanders hin.
 REL=$(command ls -t deploy/releases/*.yaml | head -1)
 
-dotnet test                                    # 137 Tests
+dotnet test                                    # 192 Tests
 helm lint deploy/helm/redetim -f "$REL"
 helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
   | kubeconform -strict -summary -kubernetes-version 1.32.0
@@ -911,6 +916,15 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 - [ ] Browser neu laden → der Verlauf des Raums ist wieder da, in richtiger Reihenfolge
 - [ ] `kubectl delete pod <backend>` → nach dem Reconnect **keine** doppelten Nachrichten
 - [ ] Leere Nachricht und Nachricht > `MAX_MESSAGE_LENGTH` → HTTP 400
+- [ ] Als Nickname `claude` (auch `Claude`, `CLAUDE`) betreten → HTTP 400, Raum wird nicht
+      betreten
+- [ ] Zwei Browserfenster, gleicher Raum, gleicher Nickname → das zweite `POST /api/join` liefert
+      HTTP 409, unabhängig davon, welcher Backend-Pod die Anfrage bedient
+- [ ] Tab mit aktivem Nickname schließen (bzw. „Raum verlassen") → Nickname ist sofort wieder frei
+      nutzbar, ohne auf `PRESENCE_TTL_SECONDS` zu warten
+- [ ] `rpk topic delete redetim-presence` bei laufendem Backend → Chat funktioniert weiter,
+      `/health/ready` bleibt `ready`, neue `POST /api/join`-Aufrufe schlagen fehl oder lassen
+      jeden Namen zu, bis der Topic-Job das Topic beim nächsten `helm upgrade` neu anlegt
 - [ ] Frontend hat keinerlei Kafka-Zugriff (Netzwerk-Tab: nur `/api`)
 - [ ] `kubectl get pods -l app.kubernetes.io/component=backend` → **zwei** Pods, beide `Ready`
 - [ ] `redetim_active_connections` steht mit **zwei** `instance`-Labels da; `sum(...)` = Zahl der
@@ -998,6 +1012,15 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
   `/etc/redpanda/redpanda.yaml`.
 - **Kein Ingress und keine Authentifizierung.** Port-Forward genügt für die Demo. TLS gibt es
   dagegen auf jeder HTTP-Strecke — mit den beiden folgenden Ausnahmen.
+- **Die Nickname-Sperre pro Raum ist Best-Effort, nicht linearisierbar.** `POST /api/join` prüft
+  und reserviert nicht atomar, und die periodische Erneuerung während des Streams prüft beim
+  Auffrischen nicht erneut, ob die Reservierung noch demselben Aufrufer gehört — ein seltenes
+  Rennen kann einen Namen zurückerobern. Ohne Authentifizierung (siehe oben) umgeht außerdem ein
+  roher `curl POST /api/messages` die Sperre vollständig, weil sie nur der Join-Endpunkt und die
+  SSE-Verbindung durchsetzen. Das Presence-Topic degradiert zudem bewusst weich: scheitert sein
+  Consumer dauerhaft, bleibt der Pod `Ready` und Chat funktioniert weiter, aber die Sperre wird
+  bis zur Erholung wirkungslos (Details: [docs/kafka.md](docs/kafka.md#presence-topic)). Für
+  eine Demo ohne Anmeldung ist das die richtige Abwägung, nicht die einer Bank.
 - **Die Selbsttelemetrie des Collectors auf `:8888` bleibt unverschlüsselt.** Anders als der
   `prometheus`-*Exporter* auf 8889 ist das kein `confighttp`-Server, sondern ein Reader aus dem
   opentelemetry-configuration-Schema, und das kennt für `pull/prometheus` nur `host` und `port` —

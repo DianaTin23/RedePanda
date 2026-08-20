@@ -118,4 +118,45 @@ public class ChatMessageValidationTests
 
         Assert.Equal(ServerClock, message.Timestamp);
     }
+
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("Claude")]
+    [InlineData("CLAUDE")]
+    [InlineData("  claude  ")]
+    public void AReservedNicknameIsRejected(string nickname)
+    {
+        var ok = TryCreate("general", nickname, "hallo", out var message, out var error);
+
+        Assert.False(ok);
+        Assert.Null(message);
+        Assert.NotNull(error);
+        Assert.Contains("nickname", error);
+        Assert.Contains("reserved", error);
+    }
+
+    [Fact]
+    public void TryNormalizeRoomAndNicknameTrimsAndValidatesWithoutRequiringText()
+    {
+        var ok = ChatMessage.TryNormalizeRoomAndNickname(
+            "  general  ", "  alice  ", out var room, out var nickname, out var error);
+
+        Assert.True(ok);
+        Assert.Null(error);
+        Assert.Equal("general", room);
+        Assert.Equal("alice", nickname);
+    }
+
+    [Fact]
+    public void TryNormalizeRoomAndNicknameRejectsAReservedNicknameBeforeAMessageIsEverTyped()
+    {
+        var ok = ChatMessage.TryNormalizeRoomAndNickname(
+            "general", "claude", out var room, out var nickname, out var error);
+
+        Assert.False(ok);
+        Assert.Null(room);
+        Assert.Null(nickname);
+        Assert.NotNull(error);
+        Assert.Contains("reserved", error);
+    }
 }

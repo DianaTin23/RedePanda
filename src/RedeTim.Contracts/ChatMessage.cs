@@ -21,12 +21,7 @@ public sealed record ChatMessage(string Room, string Nickname, string Text, Date
     {
         message = null;
 
-        if (!TryNormalize(room, "room", MaxRoomLength, out var normalizedRoom, out error))
-        {
-            return false;
-        }
-
-        if (!TryNormalize(nickname, "nickname", MaxNicknameLength, out var normalizedNickname, out error))
+        if (!TryNormalizeRoomAndNickname(room, nickname, out var normalizedRoom, out var normalizedNickname, out error))
         {
             return false;
         }
@@ -37,6 +32,42 @@ public sealed record ChatMessage(string Room, string Nickname, string Text, Date
         }
 
         message = new ChatMessage(normalizedRoom, normalizedNickname, normalizedText, timestamp);
+        error = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Validates and trims a room and nickname, rejecting a nickname reserved for a non-human
+    /// participant (see <see cref="ReservedNicknames"/>). Shared by <see cref="TryCreate"/> and
+    /// <c>POST /api/join</c>, which needs the same rules before a message has even been typed.
+    /// </summary>
+    public static bool TryNormalizeRoomAndNickname(
+        string? room,
+        string? nickname,
+        [NotNullWhen(true)] out string? normalizedRoom,
+        [NotNullWhen(true)] out string? normalizedNickname,
+        [NotNullWhen(false)] out string? error)
+    {
+        normalizedNickname = null;
+
+        if (!TryNormalize(room, "room", MaxRoomLength, out normalizedRoom, out error))
+        {
+            return false;
+        }
+
+        if (!TryNormalize(nickname, "nickname", MaxNicknameLength, out var trimmedNickname, out error))
+        {
+            return false;
+        }
+
+        if (ReservedNicknames.IsReserved(trimmedNickname))
+        {
+            normalizedRoom = null;
+            error = "'nickname' is reserved.";
+            return false;
+        }
+
+        normalizedNickname = trimmedNickname;
         error = null;
         return true;
     }

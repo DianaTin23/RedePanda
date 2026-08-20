@@ -8,6 +8,7 @@ internal static class Program
 {
     private const string DefaultBootstrapServers = "redpanda:9092";
     private const string DefaultTopic = "redetim-chat";
+    private const string DefaultPresenceTopic = "redetim-presence";
     private const string DefaultRoom = "general";
 
     public static async Task<int> Main(string[] args)
@@ -108,9 +109,16 @@ internal static class Program
         var replicationFactor = EnvInt("CHAT_REPLICATION_FACTOR", 1);
         var waitSeconds = EnvInt("TOPIC_WAIT_SECONDS", 180);
 
+        var presenceTopic = Env("REDPANDA_PRESENCE_TOPIC", DefaultPresenceTopic);
+        var presencePartitions = EnvInt("PRESENCE_PARTITIONS", 1);
+        var presenceReplicationFactor = EnvInt("PRESENCE_REPLICATION_FACTOR", 1);
+
         Console.WriteLine(
             $"Ensuring topic '{topic}' on {bootstrap}: {partitions} partition(s), " +
             $"replication factor {replicationFactor}.");
+        Console.WriteLine(
+            $"Ensuring presence topic '{presenceTopic}': {presencePartitions} partition(s), " +
+            $"replication factor {presenceReplicationFactor}, log-compacted.");
 
         var adminConfig = new AdminClientConfig { BootstrapServers = bootstrap };
         KafkaSecurity.ApplyTo(adminConfig);
@@ -124,7 +132,12 @@ internal static class Program
             return 1;
         }
 
-        return await TryCreateTopicAsync(adminClient, topic, partitions, replicationFactor) ? 0 : 1;
+        var chatOk = await TryCreateTopicAsync(adminClient, topic, partitions, replicationFactor);
+        var presenceOk = await TryCreateTopicAsync(
+            adminClient, presenceTopic, presencePartitions, presenceReplicationFactor,
+            configs: new Dictionary<string, string> { ["cleanup.policy"] = "compact" });
+
+        return chatOk && presenceOk ? 0 : 1;
     }
 
     private static async Task<bool> WaitForBrokerAsync(IAdminClient adminClient, TimeSpan budget)
@@ -154,7 +167,11 @@ internal static class Program
     }
 
     private static async Task<bool> TryCreateTopicAsync(
-        IAdminClient adminClient, string topic, int partitions, int replicationFactor)
+        IAdminClient adminClient,
+        string topic,
+        int partitions,
+        int replicationFactor,
+        Dictionary<string, string>? configs = null)
     {
         try
         {
@@ -164,6 +181,7 @@ internal static class Program
                     Name = topic,
                     NumPartitions = partitions,
                     ReplicationFactor = (short)replicationFactor,
+                    Configs = configs,
                 }
             ]);
             Console.WriteLine($"Topic '{topic}' created.");
@@ -292,6 +310,9 @@ internal static class Program
         Console.WriteLine($"  CHAT_PARTITIONS              {EnvInt("CHAT_PARTITIONS", 1)}");
         Console.WriteLine($"  CHAT_REPLICATION_FACTOR      {EnvInt("CHAT_REPLICATION_FACTOR", 1)}");
         Console.WriteLine($"  TOPIC_WAIT_SECONDS           {EnvInt("TOPIC_WAIT_SECONDS", 180)}");
+        Console.WriteLine($"  REDPANDA_PRESENCE_TOPIC      {Env("REDPANDA_PRESENCE_TOPIC", DefaultPresenceTopic)}");
+        Console.WriteLine($"  PRESENCE_PARTITIONS          {EnvInt("PRESENCE_PARTITIONS", 1)}");
+        Console.WriteLine($"  PRESENCE_REPLICATION_FACTOR  {EnvInt("PRESENCE_REPLICATION_FACTOR", 1)}");
         Console.WriteLine();
         Console.WriteLine($"  REDPANDA_SECURITY_PROTOCOL   {Env(KafkaSecurity.ProtocolVariable, "Plaintext (default)")}");
         Console.WriteLine($"  REDPANDA_SASL_MECHANISM      {Env(KafkaSecurity.MechanismVariable, "(unset)")}");
@@ -457,13 +478,14 @@ internal static class Program
             The admin processes (12-Factor XII). Each runs from the application's own image, under
             the application's own configuration, and exits:
 
-              --ensure-topic    waits for the broker, creates the topic if it is missing, and
+              --ensure-topic    waits for the broker, creates the chat topic if it is missing, and
                                 raises its partition count to CHAT_PARTITIONS if it is lower.
                                 Refuses to continue if it is higher, because Kafka cannot reduce
                                 one. The chart runs this as an ordinary Job on every install and
                                 upgrade -- not as a Helm hook, which could never run: a
                                 post-install hook waits for a backend that is not ready until the
-                                topic it would create exists.
+                                topic it would create exists. Also creates the log-compacted
+                                presence topic the backend uses to enforce one nickname per room.
               --describe-topic  partitions, leaders, replicas and watermarks, plus any non-default
                                 topic configuration. The watermarks are the only honest answer to
                                 "how far back can a browser see".
@@ -494,6 +516,9 @@ internal static class Program
               CHAT_PARTITIONS              partitions to create        (default: 1)
               CHAT_REPLICATION_FACTOR      replication factor          (default: 1)
               TOPIC_WAIT_SECONDS           how long to wait for a broker (default: 180)
+              REDPANDA_PRESENCE_TOPIC      presence topic to ensure    (default: redetim-presence)
+              PRESENCE_PARTITIONS          partitions to create        (default: 1)
+              PRESENCE_REPLICATION_FACTOR  replication factor          (default: 1)
             """);
     }
 }

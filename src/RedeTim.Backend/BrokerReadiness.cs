@@ -21,6 +21,7 @@ public sealed class BrokerReadiness : IDisposable
     private DateTimeOffset _lastCheck = DateTimeOffset.MinValue;
 
     private volatile bool _historyLoaded;
+    private volatile bool _presenceLoaded;
 
     public BrokerReadiness(BackendOptions options, ILogger<BrokerReadiness> logger)
     {
@@ -56,9 +57,17 @@ public sealed class BrokerReadiness : IDisposable
     /// <summary>Called by <see cref="ChatConsumerService"/> once it has caught up with the topic.</summary>
     public void MarkHistoryLoaded() => _historyLoaded = true;
 
+    /// <summary>
+    /// Called by <see cref="PresenceConsumerService"/> once it has caught up with the presence
+    /// topic — or, deliberately, if it gives up on a broken presence topic instead. Presence is
+    /// a nicety on top of chat, not chat itself: a pod that cannot serve presence should still
+    /// serve chat, so this must never gate readiness the way <see cref="MarkHistoryLoaded"/> does.
+    /// </summary>
+    public void MarkPresenceLoaded() => _presenceLoaded = true;
+
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken)
     {
-        if (!_historyLoaded)
+        if (!_historyLoaded || !_presenceLoaded)
         {
             return false;
         }

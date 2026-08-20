@@ -42,6 +42,11 @@ data:
   CHAT_PARTITIONS: {{ .Values.chat.partitions | quote }}
   CHAT_REPLICATION_FACTOR: {{ .Values.chat.replicationFactor | quote }}
 
+  REDPANDA_PRESENCE_TOPIC: {{ .Values.presence.topic | quote }}
+  PRESENCE_PARTITIONS: {{ .Values.presence.partitions | quote }}
+  PRESENCE_REPLICATION_FACTOR: {{ .Values.presence.replicationFactor | quote }}
+  PRESENCE_TTL_SECONDS: {{ .Values.presence.ttlSeconds | quote }}
+
   LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
 
   ASPNETCORE_URLS: "https://+:8443"

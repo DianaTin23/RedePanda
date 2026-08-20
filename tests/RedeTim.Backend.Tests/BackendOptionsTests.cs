@@ -99,6 +99,25 @@ public class BackendOptionsTests
     }
 
     [Fact]
+    public void PresenceConsumerGroupIdIsUniquePerPod()
+    {
+        var first = TestOptions.Create() with { PodName = "redetim-backend-abc" };
+        var second = TestOptions.Create() with { PodName = "redetim-backend-xyz" };
+
+        Assert.NotEqual(first.PresenceConsumerGroupId, second.PresenceConsumerGroupId);
+    }
+
+    [Fact]
+    public void PresenceConsumerGroupIdIsDerivedFromThePodNameAndSeparateFromTheChatGroup()
+    {
+        var options = TestOptions.Create() with { PodName = "redetim-backend-abc" };
+
+        Assert.Contains(
+            "redetim-backend-abc", options.PresenceConsumerGroupId, StringComparison.Ordinal);
+        Assert.NotEqual(options.ConsumerGroupId, options.PresenceConsumerGroupId);
+    }
+
+    [Fact]
     public void TwoLocalProcessesDoNotShareAConsumerGroup()
     {
         var first = TestOptions.Create() with

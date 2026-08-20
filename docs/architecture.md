@@ -65,6 +65,12 @@ Der Raum steht als Feld *und* als Kafka-Key in der Nachricht.
 Ein Topic bedeutet einen einzigen Init-Job. Der Key sichert die Reihenfolge je Raum, falls das
 Topic je mehr Partitionen bekommt. Gefiltert wird serverseitig im Backend.
 
+Die Aussage betrifft *Räume*, nicht "die App hat insgesamt nur ein Topic": es gibt keinen
+Topic pro Raum, weil ein Raum kein fester Wert ist, sondern aus einem Query-String kommt. Ein
+zweites, strukturell anderes Topic hält davon unabhängig den Präsenz-Stand (wer welchen
+Nickname in welchem Raum gerade hält) — log-komprimiert statt angehängt, weil dort der
+*aktuelle* Zustand zählt und nicht die Historie. Details in [kafka.md](kafka.md#presence-topic).
+
 ## Kein `GET /api/history`
 
 Es gibt bewusst keinen zweiten Endpunkt für den Verlauf. `GET /api/stream` schickt ihn als

@@ -21,6 +21,7 @@ internal static class ChatStream
         string room,
         TimeSpan heartbeatInterval,
         long lastEventId = -1,
+        PresenceSession? presence = null,
         CancellationToken shutdown = default,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -29,46 +30,72 @@ internal static class ChatStream
 
         using var subscription = broadcaster.Subscribe(room, lastEventId);
 
-        yield return Heartbeat();
-
-        foreach (var record in subscription.Backlog)
+        if (presence is not null)
         {
-            yield return Data(record);
+            await presence.RenewAsync(token);
         }
 
-        while (!token.IsCancellationRequested)
+        try
         {
-            ChatRecord? record = null;
-            var finished = false;
+            yield return Heartbeat();
 
-            using (var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(token))
+            foreach (var record in subscription.Backlog)
             {
-                heartbeat.CancelAfter(heartbeatInterval);
-
-                try
-                {
-                    record = await subscription.Reader.ReadAsync(heartbeat.Token);
-                }
-                catch (OperationCanceledException) when (!token.IsCancellationRequested)
-                {
-                    // Heartbeat interval elapsed; fall through and emit a ping.
-                }
-                catch (OperationCanceledException)
-                {
-                    finished = true;
-                }
-                catch (ChannelClosedException)
-                {
-                    finished = true;
-                }
+                yield return Data(record);
             }
 
-            if (finished)
-            {
-                yield break;
-            }
+            var lastRenewal = DateTimeOffset.UtcNow;
 
-            yield return record is null ? Heartbeat() : Data(record.Value);
+            while (!token.IsCancellationRequested)
+            {
+                ChatRecord? record = null;
+                var finished = false;
+
+                using (var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(token))
+                {
+                    heartbeat.CancelAfter(heartbeatInterval);
+
+                    try
+                    {
+                        record = await subscription.Reader.ReadAsync(heartbeat.Token);
+                    }
+                    catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                    {
+                        // Heartbeat interval elapsed; fall through and emit a ping.
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        finished = true;
+                    }
+                    catch (ChannelClosedException)
+                    {
+                        finished = true;
+                    }
+                }
+
+                // Checked on every iteration, not just the heartbeat branch: a busy room's reads
+                // keep satisfying subscription.Reader.ReadAsync before the heartbeat ever times
+                // out, and would otherwise never renew presence at all.
+                if (presence is not null && DateTimeOffset.UtcNow - lastRenewal >= heartbeatInterval)
+                {
+                    lastRenewal = DateTimeOffset.UtcNow;
+                    await presence.RenewAsync(token);
+                }
+
+                if (finished)
+                {
+                    yield break;
+                }
+
+                yield return record is null ? Heartbeat() : Data(record.Value);
+            }
+        }
+        finally
+        {
+            if (presence is not null)
+            {
+                await presence.ReleaseAsync();
+            }
         }
     }
 

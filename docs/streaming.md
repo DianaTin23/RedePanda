@@ -143,6 +143,35 @@ parsen, bleibt es folgenlos.
 `id`-Feld den Last-Event-ID-Puffer des Clients unangetastet. Würde man Heartbeats stempeln,
 schöbe das den Wiederaufnahmepunkt über Nachrichten hinweg, die der Browser nie bekommen hat.
 
+### Presence-Erneuerung huckepack auf dem Heartbeat
+
+`GET /api/stream` nimmt zusätzlich einen `nickname`-Query-Parameter. Fehlt er, oder ist er leer
+oder zu lang, wird Presence für diese Verbindung einfach übersprungen — kein Fehler für den
+ganzen Stream, weil Presence nur eine weiche UX-Schranke hinter `POST /api/join` ist, keine
+Sicherheitsgrenze.
+
+Statt eines eigenen Timers nutzt die Erneuerung der Präsenz-Reservierung denselben Rhythmus wie
+der bestehende 15s-Heartbeat: `ChatStream.Create` prüft bei **jeder** Schleifeniteration, ob
+seit der letzten Erneuerung mindestens `heartbeatInterval` vergangen ist — nicht nur im
+Ping-Zweig. Ein voller Raum durchläuft die Schleife über echte Nachrichten, ohne je in den
+15s-Timeout zu laufen; würde die Erneuerung an den Ping-Zweig gebunden, erneuerte ein solcher
+Raum Presence nie. Die zeitbasierte Prüfung liefert in beiden Fällen dasselbe Verhalten: nie
+öfter als einmal je Intervall in einem vollen Raum, nie seltener als einmal je Intervall in
+einem stillen.
+
+Details zum Presence-Topic selbst (Key, Tombstones, TTL, bewusst weicher Ausfall) stehen in
+[kafka.md](kafka.md#presence-topic).
+
+### Eine bekannte Grenze: `/api/join` und die Erneuerung sind nicht atomar
+
+`POST /api/join` prüft die Reservierung und produziert sie in zwei getrennten Schritten, ohne
+Sperre dazwischen; die Erneuerung in `ChatStream` prüft beim Auffrischen nicht erneut, ob die
+Reservierung noch demselben Anrufer gehört. In einem seltenen Rennen kann ein Reconnect einen
+Namen zurückerobern, den in der Zwischenzeit jemand anderes belegt hat. Bewusst nicht weiter
+abgesichert — das TTL-Sicherheitsnetz heilt eine solche Kollision ohnehin innerhalb von
+`PRESENCE_TTL_SECONDS` selbst, und diese App hat keine Anmeldung, gegen die eine stärkere
+Garantie überhaupt etwas schützen würde.
+
 ### Wiederaufnahme
 
 `Last-Event-ID` wird in `Program.cs` gelesen und als `afterOffset` durchgereicht.

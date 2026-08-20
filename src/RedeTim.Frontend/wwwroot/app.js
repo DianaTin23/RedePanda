@@ -21,6 +21,7 @@ const SEND_TIMEOUT_MS = 15000;
 
 const els = {
     join: document.getElementById("join"),
+    joinError: document.getElementById("join-error"),
     nickname: document.getElementById("nickname"),
     room: document.getElementById("room"),
     roomChip: document.getElementById("room-chip"),
@@ -284,9 +285,9 @@ function setStatus(state, label) {
         : "Verbindung unterbrochen — es wird automatisch neu verbunden.";
 }
 
-function showError(message) {
-    els.error.textContent = message;
-    els.error.hidden = !message;
+function showError(el, message) {
+    el.textContent = message;
+    el.hidden = !message;
 }
 
 function updateCounter() {
@@ -297,7 +298,8 @@ function updateCounter() {
 }
 
 function connect() {
-    const stream = new EventSource(`${API}/stream?room=${encodeURIComponent(room)}`);
+    const stream = new EventSource(
+        `${API}/stream?room=${encodeURIComponent(room)}&nickname=${encodeURIComponent(nickname)}`);
     source = stream;
 
     stream.onopen = () => {
@@ -380,13 +382,36 @@ function retryNow({ fresh = false } = {}) {
     connect();
 }
 
-els.join.addEventListener("submit", (event) => {
+els.join.addEventListener("submit", async (event) => {
     event.preventDefault();
-    nickname = els.nickname.value.trim();
-    room = els.room.value.trim();
-    if (!nickname || !room) {
+    const candidateNickname = els.nickname.value.trim();
+    const candidateRoom = els.room.value.trim();
+    if (!candidateNickname || !candidateRoom) {
         return;
     }
+
+    showError(els.joinError, "");
+
+    try {
+        const response = await fetch(`${API}/join`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ room: candidateRoom, nickname: candidateNickname }),
+            signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+        });
+
+        if (!response.ok) {
+            const problem = await response.json().catch(() => ({}));
+            showError(els.joinError, problem.error ?? `Beitreten fehlgeschlagen (HTTP ${response.status}).`);
+            return;
+        }
+    } catch {
+        showError(els.joinError, "Backend nicht erreichbar.");
+        return;
+    }
+
+    nickname = candidateNickname;
+    room = candidateRoom;
 
     retryAttempt = 0;
     gaveUp = false;
@@ -407,7 +432,7 @@ els.send.addEventListener("submit", async (event) => {
         return;
     }
 
-    showError("");
+    showError(els.error, "");
     els.text.value = "";
     updateCounter();
 
@@ -421,12 +446,12 @@ els.send.addEventListener("submit", async (event) => {
 
         if (!response.ok) {
             const problem = await response.json().catch(() => ({}));
-            showError(problem.error ?? `Senden fehlgeschlagen (HTTP ${response.status}).`);
+            showError(els.error, problem.error ?? `Senden fehlgeschlagen (HTTP ${response.status}).`);
             els.text.value = text;
             updateCounter();
         }
     } catch {
-        showError("Backend nicht erreichbar.");
+        showError(els.error, "Backend nicht erreichbar.");
         els.text.value = text;
         updateCounter();
     }
@@ -466,7 +491,8 @@ els.leave.addEventListener("click", () => {
     resetMessages();
     els.text.value = "";
     updateCounter();
-    showError("");
+    showError(els.error, "");
+    showError(els.joinError, "");
 
     els.composer.hidden = true;
     els.chat.hidden = true;

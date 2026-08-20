@@ -28,14 +28,42 @@ public class ChatStreamTests
         string room,
         TimeSpan heartbeatInterval,
         CancellationToken ct,
-        long lastEventId = -1) =>
+        long lastEventId = -1,
+        PresenceSession? presence = null) =>
         ChatStream.Create(
             broadcaster,
             room,
             heartbeatInterval,
             lastEventId,
+            presence,
             shutdown: CancellationToken.None,
             ct: ct);
+
+    private sealed class FakePresenceProducer : IPresenceProducer
+    {
+        public List<(string Room, string Nickname)> Renewals { get; } = [];
+        public List<(string Room, string Nickname)> Releases { get; } = [];
+
+        public Task RenewAsync(string room, string nickname, CancellationToken cancellationToken)
+        {
+            lock (Renewals)
+            {
+                Renewals.Add((room, nickname));
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken)
+        {
+            lock (Releases)
+            {
+                Releases.Add((room, nickname));
+            }
+
+            return Task.CompletedTask;
+        }
+    }
 
     private static async Task<bool> MoveNextWithin(
         IAsyncEnumerator<SseItem<string>> stream, TimeSpan timeout, string because)
@@ -296,5 +324,103 @@ public class ChatStreamTests
 
         Assert.Equal(2, seen);
         Assert.Equal(0, broadcaster.Count);
+    }
+
+    [Fact]
+    public async Task PresenceIsRenewedAsSoonAsTheConnectionOpens()
+    {
+        var broadcaster = CreateBroadcaster();
+        var producer = new FakePresenceProducer();
+        var presence = new PresenceSession(producer, "general", "alice", NullLogger<PresenceSession>.Instance);
+        using var cts = new CancellationTokenSource();
+
+        await using var stream = Stream(
+                broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token, presence: presence)
+            .GetAsyncEnumerator(cts.Token);
+
+        Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
+
+        Assert.Single(producer.Renewals);
+        Assert.Equal(("general", "alice"), producer.Renewals[0]);
+
+        await cts.CancelAsync();
+    }
+
+    [Fact]
+    public async Task PresenceKeepsRenewingRoughlyEveryHeartbeatIntervalInASilentRoom()
+    {
+        var broadcaster = CreateBroadcaster();
+        var producer = new FakePresenceProducer();
+        var presence = new PresenceSession(producer, "general", "alice", NullLogger<PresenceSession>.Instance);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var seen = 0;
+        await foreach (var _ in Stream(
+                           broadcaster, "general", TimeSpan.FromMilliseconds(50), cts.Token, presence: presence))
+        {
+            if (++seen == 6)
+            {
+                break;
+            }
+        }
+
+        // One immediate renewal on connect, plus roughly one per heartbeat after that.
+        Assert.True(
+            producer.Renewals.Count >= 2,
+            $"Expected repeated renewals in a silent room, but only saw {producer.Renewals.Count}.");
+    }
+
+    [Fact]
+    public async Task PresenceIsThrottledToAboutOncePerHeartbeatIntervalInABusyRoom()
+    {
+        var broadcaster = CreateBroadcaster();
+        var producer = new FakePresenceProducer();
+        var presence = new PresenceSession(producer, "general", "alice", NullLogger<PresenceSession>.Instance);
+        var heartbeatInterval = TimeSpan.FromMilliseconds(200);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        await using var stream = Stream(broadcaster, "general", heartbeatInterval, cts.Token, presence: presence)
+            .GetAsyncEnumerator(cts.Token);
+
+        Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
+
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1);
+        var offset = 0L;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            broadcaster.Publish(Message("general", $"msg-{offset}"), offset);
+            offset++;
+            Assert.True(await MoveNextWithin(stream, Promptly, "A published message never arrived."));
+        }
+
+        // A busy room satisfies subscription.Reader.ReadAsync well before any heartbeat timeout,
+        // so renewal must be gated on elapsed time, not on the heartbeat branch specifically --
+        // otherwise it would never renew at all. About 1s of traffic at a 200ms interval should
+        // renew a handful of times, nowhere near the number of published messages.
+        Assert.InRange(producer.Renewals.Count, 2, 10);
+        Assert.True(
+            producer.Renewals.Count < offset,
+            $"Renewed {producer.Renewals.Count} times for {offset} messages -- throttling did not apply.");
+
+        await cts.CancelAsync();
+    }
+
+    [Fact]
+    public async Task ReleaseFiresExactlyOnceWhenTheStreamEnds()
+    {
+        var broadcaster = CreateBroadcaster();
+        var producer = new FakePresenceProducer();
+        var presence = new PresenceSession(producer, "general", "alice", NullLogger<PresenceSession>.Instance);
+        using var cts = new CancellationTokenSource();
+
+        var stream = Stream(broadcaster, "general", NoHeartbeatDuringThisTest, cts.Token, presence: presence)
+            .GetAsyncEnumerator(cts.Token);
+
+        Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
+
+        await stream.DisposeAsync();
+
+        Assert.Single(producer.Releases);
+        Assert.Equal(("general", "alice"), producer.Releases[0]);
     }
 }

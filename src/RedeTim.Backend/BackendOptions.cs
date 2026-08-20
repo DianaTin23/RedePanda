@@ -28,6 +28,18 @@ public sealed record BackendOptions
 
     public const int DefaultReplayRecords = 2_000;
 
+    /// <summary>The log-compacted topic holding the current (room, nickname) reservations.</summary>
+    public required string PresenceTopic { get; init; }
+
+    /// <summary>
+    /// Seconds without a renewal before a reservation is treated as free. The fallback for a
+    /// crash or dropped connection that never produced a clean release; three times the SSE
+    /// heartbeat interval, so one missed beat never evicts a still-connected user.
+    /// </summary>
+    public required int PresenceTtlSeconds { get; init; }
+
+    public const int DefaultPresenceTtlSeconds = 45;
+
     /// <summary>Minimum level for everything this process logs.</summary>
     public required LogLevel LogLevel { get; init; }
 
@@ -35,6 +47,9 @@ public sealed record BackendOptions
 
     /// <summary>Consumer group id, unique per pod so every pod receives every message.</summary>
     public string ConsumerGroupId => $"redetim-backend-{PodName}";
+
+    /// <summary>Consumer group id for the presence topic, unique per pod for the same reason.</summary>
+    public string PresenceConsumerGroupId => $"redetim-presence-{PodName}";
 
     public static BackendOptions FromEnvironment()
     {
@@ -46,6 +61,8 @@ public sealed record BackendOptions
             HistorySize = ReadInt("CHAT_HISTORY_SIZE", DefaultHistorySize, allowZero: true),
             MaxRooms = ReadInt("CHAT_MAX_ROOMS", DefaultMaxRooms, allowZero: true),
             ReplayRecords = ReadInt("CHAT_REPLAY_RECORDS", DefaultReplayRecords, allowZero: true),
+            PresenceTopic = Read("REDPANDA_PRESENCE_TOPIC", "redetim-presence"),
+            PresenceTtlSeconds = ReadInt("PRESENCE_TTL_SECONDS", DefaultPresenceTtlSeconds),
             ProduceTimeoutMs = ReadInt("PRODUCE_TIMEOUT_MS", DefaultProduceTimeoutMs),
             LogLevel = ReadLogLevel("LOG_LEVEL", DefaultLogLevel),
 

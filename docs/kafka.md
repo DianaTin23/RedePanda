@@ -37,6 +37,11 @@ Weil jede Pod-Inkarnation eine neue GroupId erfindet, ist `EnableAutoCommit` aus
 Offsets hinterließen für die volle Retention Offset-Records im Broker, die nie wieder jemand
 liest.
 
+Aus demselben Grund hat auch das Presence-Topic eine eigene Group je Pod:
+`redetim-presence-<POD_NAME>`. Jeder Pod muss den vollständigen Präsenz-Stand kennen, nicht nur
+einen Ausschnitt — sonst hielte ein Pod einen Nickname für frei, den ein anderer Pod gerade
+vergeben hat. Details zum Presence-Topic weiter unten.
+
 ## Wie weit ein startender Pod zurückliest
 
 Ein Pod muss den Verlauf kennen, bevor er Browser bedienen darf. Früher las dafür jede Replica
@@ -121,9 +126,10 @@ nicht beantwortet wurde — das ist **504**. Alles, was der Broker aktiv abgeleh
 
 ## Fehler und Protokollierung
 
-Drei Kafka-Clients laufen im Backend: Producer, Consumer und der Admin-Client der
-Bereitschaftsprüfung. Alle drei setzen einen `LogHandler`. Ohne den schreibt librdkafka seine
-Diagnose direkt nach stderr — außerhalb von `LOG_LEVEL` und außerhalb des JSON, das die
+Fünf Kafka-Clients laufen im Backend: Chat-Producer, Chat-Consumer, der Admin-Client der
+Bereitschaftsprüfung, und ihre Presence-Gegenstücke `PresenceProducer` und
+`PresenceConsumerService`. Alle fünf setzen einen `LogHandler`. Ohne den schreibt librdkafka
+seine Diagnose direkt nach stderr — außerhalb von `LOG_LEVEL` und außerhalb des JSON, das die
 Plattform einsammelt.
 
 Beim Admin-Client fiel das besonders unangenehm auf: librdkafka nennt ihn intern
@@ -167,6 +173,44 @@ und übersprungen.
 Die Consume-Schleife läuft über `Task.Factory.StartNew` mit `TaskCreationOptions.LongRunning`
 auf einem eigenen Thread. `Consume(CancellationToken)` blockiert; auf einem Thread-Pool-Thread
 startete der Host keinen weiteren Dienst, bis diese Methode zurückkehrt.
+
+## Presence-Topic
+
+Ein zweites, log-komprimiertes Topic (`REDPANDA_PRESENCE_TOPIC`, Vorgabe `redetim-presence`)
+hält den aktuellen Präsenz-Stand: wer gerade welchen Nickname in welchem Raum hält. Anders als
+das Chat-Topic ist die volle Historie hier nicht der Punkt — nur der *aktuelle* Zustand zählt,
+deshalb `cleanup.policy=compact` statt der Standard-Löschrichtlinie. Das ist eine bewusste
+Ausnahme von "ein Topic für alle Räume" (siehe [architecture.md](architecture.md)): diese Regel
+begründet, warum es *keinen Topic pro Raum* gibt, nicht, dass die App nur je ein Topic hätte.
+
+**Schlüssel und Tombstones.** Der Key ist `(Raum, Nickname)`, JSON-kodiert statt mit einem rohen
+Trenner (`PresenceKey`) — beide Felder haben keine Zeichenbeschränkung, ein `"|"` könnte also
+kollidieren. Der Wert ist ein `PresenceRecord` mit Zeitstempel bei einer Erneuerung, oder
+`null` — ein echtes Kafka-Tombstone — bei einem sauberen Verlassen. Der Key ist bei einem
+Tombstone die einzige Quelle für Raum und Nickname, weil der Wert dann nichts mehr trägt.
+
+**Erneuerung statt exaktem Join/Leave.** Statt eine strikte Reihenfolge aus Join- und
+Leave-Events durchzusetzen — schwierig, weil SSE-Reconnects nicht fälschlich als Leave+Join
+gelten dürfen (siehe [streaming.md](streaming.md#heartbeats)) — erneuert jede SSE-Verbindung
+ihre Reservierung im selben Rhythmus wie ihr Heartbeat (15 s). `PRESENCE_TTL_SECONDS` (Vorgabe
+45, das Dreifache des Heartbeats) ist die Zeit ohne Erneuerung, nach der eine Reservierung als
+frei gilt — das Sicherheitsnetz für einen Absturz oder Verbindungsabbruch, der nie ein sauberes
+Tombstone geschrieben hat. Ein sauberes Verlassen (Tab schließen, "Raum verlassen") schreibt das
+Tombstone sofort und gibt den Namen ohne Wartezeit frei.
+
+**Bewusst weicher Ausfall.** Der Chat-Consumer gilt als kaputt, nicht als eingeschränkt, wenn er
+nicht mehr konsumieren kann (siehe oben) — dafür stirbt der Pod, und Kubernetes startet neu. Für
+`PresenceConsumerService` gilt das explizit **nicht**: Presence ist eine Zusatzfunktion auf dem
+Chat, keine Voraussetzung dafür. Scheitert der Presence-Consumer fatal, protokolliert er das als
+`LogCritical`, ruft aber trotzdem `BrokerReadiness.MarkPresenceLoaded()` auf, statt den Pod zu
+beenden. Der Pod bleibt bereit und bedient Chat normal weiter; die Namenssperre ist bis zur
+Erholung des Presence-Topics einfach wirkungslos — jeder Name gilt dann als frei. Ein
+Presence-Ausfall darf den funktionierenden Chat nicht mitreißen.
+
+`PresenceConsumerService` liest außerdem immer vollständig von `Offset.Beginning`, ohne das
+`CHAT_REPLAY_RECORDS`-Fenster des Chat-Consumers: Weil das Topic komprimiert ist, ist seine
+Größe durch die Zahl aktuell unterschiedlicher `(Raum, Nickname)`-Paare begrenzt, nicht durch
+Historie, und ein voller Replay bleibt billig.
 
 ## Herunterfahren
 
@@ -236,14 +280,16 @@ braucht TLS, Zugangsdaten oder beides. Ohne diese Klasse wäre ein Umbiegen von
 
 Die Klasse liegt in `Contracts`, das sonst keine Kafka-Abhängigkeit hätte. Grund:
 `ClientConfig` ist die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration. Eine
-Abbildung bedient alle sieben Client-Stellen im Repository; sieben Kopien davon liefen
+Abbildung bedient alle neun Client-Stellen im Repository; neun Kopien davon liefen
 auseinander. `Contracts` besitzt ohnehin schon das andere, worüber sich alle Clients einig sein
 müssen: das Wire-Format.
 
 Diese Zahl ist es wert, ehrlich gehalten zu werden. Sie stand auf „fünf", während es sieben
 waren. Die zwei nicht mitgezählten waren die beiden Admin-Clients — und einer davon war ohne
 `ApplyTo` ausgeliefert worden und ließ gegen einen abgesicherten Broker jede
-Bereitschaftsprüfung scheitern.
+Bereitschaftsprüfung scheitern. Mit dem Presence-Topic kamen zwei weitere hinzu
+(`PresenceProducer`, `PresenceConsumerService`), diesmal von Anfang an mit `ApplyTo` — macht
+neun.
 
 ### Wo die Klasse absichtlich wirft
 

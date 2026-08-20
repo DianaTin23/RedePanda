@@ -198,6 +198,16 @@ frei gilt — das Sicherheitsnetz für einen Absturz oder Verbindungsabbruch, de
 Tombstone geschrieben hat. Ein sauberes Verlassen (Tab schließen, "Raum verlassen") schreibt das
 Tombstone sofort und gibt den Namen ohne Wartezeit frei.
 
+**Physisches Aufräumen abgelaufener Einträge.** `PresenceStore.IsTaken` und `.ActiveNicknames`
+behandeln eine abgelaufene Reservierung als frei, aber das allein entfernt sie nicht aus dem
+`ConcurrentDictionary` dahinter — ohne weiteres Zutun täte das nur `Remove` bei einem sauberen
+Tombstone. Ein Absturz oder ein Verbindungsabbruch schreibt nie eins, und ein stetiger Strom
+kurzlebiger Joins unter wechselnden Nicknames ließe den Speicher des Pods sonst unbegrenzt
+wachsen. Deshalb lösen beide Methoden zusätzlich höchstens einmal je `PRESENCE_TTL_SECONDS`-Fenster
+einen Sweep aus, der tatsächlich abgelaufene Einträge physisch entfernt — kein eigener Timer oder
+Thread nötig, weil beide Lesepfade (jeder `POST /api/join`, der Presence-Poll des Frontends) unter
+echtem Betrieb ohnehin laufend getroffen werden.
+
 **Bewusst weicher Ausfall.** Der Chat-Consumer gilt als kaputt, nicht als eingeschränkt, wenn er
 nicht mehr konsumieren kann (siehe oben) — dafür stirbt der Pod, und Kubernetes startet neu. Für
 `PresenceConsumerService` gilt das explizit **nicht**: Presence ist eine Zusatzfunktion auf dem

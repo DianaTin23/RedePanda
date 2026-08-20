@@ -145,10 +145,13 @@ schöbe das den Wiederaufnahmepunkt über Nachrichten hinweg, die der Browser ni
 
 ### Presence-Erneuerung huckepack auf dem Heartbeat
 
-`GET /api/stream` nimmt zusätzlich einen `nickname`-Query-Parameter. Fehlt er, oder ist er leer
-oder zu lang, wird Presence für diese Verbindung einfach übersprungen — kein Fehler für den
-ganzen Stream, weil Presence nur eine weiche UX-Schranke hinter `POST /api/join` ist, keine
-Sicherheitsgrenze.
+`GET /api/stream` nimmt zusätzlich einen `nickname`-Query-Parameter. Fehlt er oder besteht er
+`ChatMessage.TryNormalizeNickname` nicht (leer, zu lang, reserviert, oder nur unter einer
+unsichtbaren-Zeichen-Variante eines reservierten Namens), wird Presence für diese Verbindung
+einfach übersprungen — kein Fehler für den ganzen Stream, weil Presence nur eine weiche
+UX-Schranke hinter `POST /api/join` ist, keine Sicherheitsgrenze. Die Normalisierung selbst ist
+aber keine weiche Schranke: ohne sie könnte dieser Pfad an `POST /api/join` vorbei unter einer
+Zero-Width-Variante von `claude` Presence eintragen, siehe `ChatMessage.StripInvisibleCharacters`.
 
 Statt eines eigenen Timers nutzt die Erneuerung der Präsenz-Reservierung denselben Rhythmus wie
 der bestehende 15s-Heartbeat: `ChatStream.Create` prüft bei **jeder** Schleifeniteration, ob

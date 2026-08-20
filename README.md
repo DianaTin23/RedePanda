@@ -918,6 +918,9 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 - [ ] Leere Nachricht und Nachricht > `MAX_MESSAGE_LENGTH` → HTTP 400
 - [ ] Als Nickname `claude` (auch `Claude`, `CLAUDE`) betreten → HTTP 400, Raum wird nicht
       betreten
+- [ ] `GET /api/stream?room=X&nickname=claude` direkt aufrufen (ohne vorheriges `POST /api/join`)
+      → Stream öffnet trotzdem (Presence ist keine Sicherheitsgrenze), aber `claude` taucht
+      **nicht** in `GET /api/presence?room=X` auf
 - [ ] Zwei Browserfenster, gleicher Raum, gleicher Nickname → das zweite `POST /api/join` liefert
       HTTP 409, unabhängig davon, welcher Backend-Pod die Anfrage bedient
 - [ ] Tab mit aktivem Nickname schließen (bzw. „Raum verlassen") → Nickname ist sofort wieder frei

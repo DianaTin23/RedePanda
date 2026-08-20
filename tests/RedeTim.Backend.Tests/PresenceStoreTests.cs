@@ -97,4 +97,27 @@ public class PresenceStoreTests
 
         Assert.Empty(store.ActiveNicknames("nirgendwo", Now));
     }
+
+    [Fact]
+    public void AnAccessAfterTheTtlPhysicallyRemovesTheExpiredEntry()
+    {
+        var store = CreateStore(ttlSeconds: 45);
+
+        store.Apply("general", "alice", Now);
+        store.IsTaken("general", "alice", Now + TimeSpan.FromSeconds(46));
+
+        Assert.Equal(0, store.Count);
+    }
+
+    [Fact]
+    public void SweepingAnExpiredEntryLeavesAFreshOneUntouched()
+    {
+        var store = CreateStore(ttlSeconds: 45);
+
+        store.Apply("general", "expired", Now);
+        store.Apply("general", "alice", Now + TimeSpan.FromSeconds(46));
+
+        Assert.True(store.IsTaken("general", "alice", Now + TimeSpan.FromSeconds(46)));
+        Assert.Equal(1, store.Count);
+    }
 }

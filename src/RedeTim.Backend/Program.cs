@@ -122,12 +122,12 @@ app.MapPost("/api/join", async (
 
 app.MapGet("/api/presence", (string? room, PresenceStore store) =>
 {
-    if (string.IsNullOrWhiteSpace(room))
+    if (!ChatMessage.TryNormalizeRoom(room, out var normalizedRoom, out var error))
     {
-        return Results.BadRequest(new { error = "Query parameter 'room' is required." });
+        return Results.BadRequest(new { error });
     }
 
-    return Results.Ok(new { nicknames = store.ActiveNicknames(room.Trim(), DateTimeOffset.UtcNow) });
+    return Results.Ok(new { nicknames = store.ActiveNicknames(normalizedRoom, DateTimeOffset.UtcNow) });
 });
 
 app.MapGet("/api/stream", IResult (
@@ -139,9 +139,9 @@ app.MapGet("/api/stream", IResult (
     ILogger<Program> logger,
     IHostApplicationLifetime lifetime) =>
 {
-    if (string.IsNullOrWhiteSpace(room))
+    if (!ChatMessage.TryNormalizeRoom(room, out var trimmedRoom, out var roomError))
     {
-        return Results.BadRequest(new { error = "Query parameter 'room' is required." });
+        return Results.BadRequest(new { error = roomError });
     }
 
     context.Response.Headers["X-Accel-Buffering"] = "no";
@@ -155,14 +155,14 @@ app.MapGet("/api/stream", IResult (
             ? seen
             : -1;
 
-    var trimmedRoom = room.Trim();
-
-    // A missing or oversized nickname just means "don't track presence for this connection" —
+    // A missing or invalid nickname just means "don't track presence for this connection" —
     // presence is a soft UX gate behind POST /api/join, not a security boundary the stream
-    // itself must enforce, so there is no reason to fail the whole connection over it.
-    var trimmedNickname = nickname?.Trim();
+    // itself must enforce, so there is no reason to fail the whole connection over it. A
+    // nickname that *is* tracked, though, goes through the same normalization and
+    // reserved-name check as /api/join, so this path can't be used to spoof presence under a
+    // stripped or invisible-character variant of a reserved or already-taken name.
     var presence =
-        !string.IsNullOrEmpty(trimmedNickname) && trimmedNickname.Length <= ChatMessage.MaxNicknameLength
+        ChatMessage.TryNormalizeNickname(nickname, out var trimmedNickname, out _)
             ? new PresenceSession(presenceProducer, trimmedRoom, trimmedNickname, logger)
             : null;
 

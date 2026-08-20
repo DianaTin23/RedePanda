@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using RedeTim.Contracts;
 
 namespace RedeTim.Backend.Tests;
@@ -16,6 +17,8 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
 
     public sealed class BrokerlessBackend : WebApplicationFactory<Program>
     {
+        public FakePresenceProducer Producer { get; } = new();
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.ConfigureServices(services =>
@@ -28,8 +31,29 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
                         services.Remove(descriptor);
                     }
                 }
+
+                services.RemoveAll<IPresenceProducer>();
+                services.AddSingleton<IPresenceProducer>(Producer);
             });
         }
+    }
+
+    public sealed class FakePresenceProducer : IPresenceProducer
+    {
+        public List<(string Room, string Nickname)> Renewals { get; } = [];
+
+        public Task RenewAsync(string room, string nickname, CancellationToken cancellationToken)
+        {
+            lock (Renewals)
+            {
+                Renewals.Add((room, nickname));
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 
     [Fact]
@@ -41,7 +65,67 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains("'room' is required", body);
+        Assert.Contains("'room' must not be empty", body);
+    }
+
+    [Fact]
+    public async Task AnOversizedRoomIsRejected()
+    {
+        using var client = _factory.CreateClient();
+
+        var oversizedRoom = new string('a', ChatMessage.MaxRoomLength + 1);
+        using var response = await client.GetAsync(
+            $"/api/stream?room={oversizedRoom}", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("must not exceed", body);
+    }
+
+    [Fact]
+    public async Task AReservedNicknameIsNotTrackedAsPresence()
+    {
+        using var client = _factory.CreateClient();
+        using var abort = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        using var response = await client.GetAsync(
+            "/api/stream?room=spoofing-plain&nickname=claude",
+            HttpCompletionOption.ResponseHeadersRead,
+            abort.Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(abort.Token));
+        Assert.Equal(
+            $"event: {ChatStream.HeartbeatEventType}",
+            await ReadLineWithin(reader, abort.Token, "the priming frame never arrived"));
+
+        Assert.DoesNotContain(("spoofing-plain", "claude"), _factory.Producer.Renewals);
+    }
+
+    [Fact]
+    public async Task AnInvisibleCharacterVariantOfAReservedNicknameIsNotTrackedAsPresence()
+    {
+        using var client = _factory.CreateClient();
+        using var abort = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // A zero-width space makes "claude" read as "claude" to a human but not string-match it
+        // -- exactly what StripInvisibleCharacters exists to defeat (see ChatMessage.cs).
+        var spoofedNickname = Uri.EscapeDataString("cl​aude");
+        using var response = await client.GetAsync(
+            $"/api/stream?room=spoofing-invisible-char&nickname={spoofedNickname}",
+            HttpCompletionOption.ResponseHeadersRead,
+            abort.Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(abort.Token));
+        Assert.Equal(
+            $"event: {ChatStream.HeartbeatEventType}",
+            await ReadLineWithin(reader, abort.Token, "the priming frame never arrived"));
+
+        Assert.DoesNotContain(("spoofing-invisible-char", "claude"), _factory.Producer.Renewals);
+        Assert.DoesNotContain(("spoofing-invisible-char", "cl​aude"), _factory.Producer.Renewals);
     }
 
     [Fact]

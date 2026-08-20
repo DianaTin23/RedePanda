@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
+using RedeTim.Contracts;
 
 namespace RedeTim.Backend.Tests;
 
@@ -20,6 +21,20 @@ public class PresenceEndpointTests : IClassFixture<ChatStreamEndpointTests.Broke
         using var response = await client.GetAsync("/api/presence", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnOversizedRoomIsRejected()
+    {
+        using var client = _factory.CreateClient();
+
+        var oversizedRoom = new string('a', ChatMessage.MaxRoomLength + 1);
+        using var response = await client.GetAsync(
+            $"/api/presence?room={oversizedRoom}", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("must not exceed", body);
     }
 
     [Fact]

@@ -30,8 +30,13 @@ builder.Services.AddSingleton<BrokerReadiness>();
 builder.Services.AddHostedService<ChatConsumerService>();
 
 builder.Services.AddSingleton<PresenceStore>();
-builder.Services.AddSingleton<PresenceProducer>();
-builder.Services.AddSingleton<IPresenceProducer>(sp => sp.GetRequiredService<PresenceProducer>());
+
+// A single registration, not AddSingleton<PresenceProducer>() plus a delegate wrapping it in
+// IPresenceProducer: two registrations for the same disposable instance make the container
+// track and dispose it twice, and the second Dispose() throws because librdkafka's handle is
+// already gone by then.
+builder.Services.AddSingleton<IPresenceProducer>(sp => ActivatorUtilities.CreateInstance<PresenceProducer>(sp));
+
 builder.Services.AddHostedService<PresenceConsumerService>();
 
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
@@ -113,6 +118,16 @@ app.MapPost("/api/join", async (
     }
 
     return Results.Ok();
+});
+
+app.MapGet("/api/presence", (string? room, PresenceStore store) =>
+{
+    if (string.IsNullOrWhiteSpace(room))
+    {
+        return Results.BadRequest(new { error = "Query parameter 'room' is required." });
+    }
+
+    return Results.Ok(new { nicknames = store.ActiveNicknames(room.Trim(), DateTimeOffset.UtcNow) });
 });
 
 app.MapGet("/api/stream", IResult (

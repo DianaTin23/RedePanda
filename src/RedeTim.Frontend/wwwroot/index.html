@@ -20,6 +20,7 @@
     <span class="wordmark">RedeTim</span>
 
     <span id="room-chip" class="chip" hidden>#<span id="current-room"></span></span>
+    <span id="presence-chip" class="chip" hidden title=""></span>
 
     <span id="status" class="status status--offline" role="status" aria-live="polite">getrennt</span>
 
@@ -92,8 +93,8 @@
 
     <form id="send" class="send">
         <div class="send__field">
-            <input id="text" name="text" maxlength="500" required autocomplete="off"
-                   placeholder="Nachricht schreiben…">
+            <textarea id="text" name="text" rows="1" maxlength="500" required autocomplete="off"
+                      placeholder="Nachricht schreiben… (Shift+Enter für Zeilenumbruch)"></textarea>
             <span id="counter" class="counter" aria-hidden="true" hidden></span>
         </div>
         <button type="submit" class="primary send__button">

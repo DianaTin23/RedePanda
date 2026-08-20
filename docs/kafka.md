@@ -212,6 +212,13 @@ Presence-Ausfall darf den funktionierenden Chat nicht mitreißen.
 Größe durch die Zahl aktuell unterschiedlicher `(Raum, Nickname)`-Paare begrenzt, nicht durch
 Historie, und ein voller Replay bleibt billig.
 
+**Lesezugriff für die Anzeige.** `GET /api/presence?room=X` liest `PresenceStore.ActiveNicknames`
+und liefert die aktuell aktiven Nicknamen eines Raums — reines Best-Effort-Snapshot, kein
+SSE-Push. Das Frontend pollt ihn alle paar Sekunden, solange ein Raum offen ist; anders als beim
+Chat wäre eine kurze Verzögerung bei „wer ist gerade da" kein Datenverlust, deshalb genügt
+Polling hier, wo für Nachrichten `GET /api/history` bewusst nicht existiert (siehe
+[architecture.md](architecture.md)).
+
 ## Herunterfahren
 
 `Close()` sagt dem Group-Coordinator Bescheid, statt ihn auf den Session-Timeout warten zu

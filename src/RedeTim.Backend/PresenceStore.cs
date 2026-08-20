@@ -20,6 +20,14 @@ public sealed class PresenceStore
     public bool IsTaken(string room, string nickname, DateTimeOffset now) =>
         _renewedAt.TryGetValue((room, nickname), out var renewedAt) && now - renewedAt < _ttl;
 
+    /// <summary>The nicknames currently (not TTL-expired) active in a room, for display only.</summary>
+    public IReadOnlyList<string> ActiveNicknames(string room, DateTimeOffset now) =>
+        _renewedAt
+            .Where(entry => entry.Key.Room == room && now - entry.Value < _ttl)
+            .Select(entry => entry.Key.Nickname)
+            .OrderBy(nickname => nickname, StringComparer.Ordinal)
+            .ToList();
+
     /// <summary>
     /// Records a heartbeat. Keeps the later of the existing and the new timestamp, so an
     /// out-of-order replay can never move a reservation's clock backwards.

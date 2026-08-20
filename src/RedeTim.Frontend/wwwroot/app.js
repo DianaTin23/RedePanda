@@ -18,6 +18,7 @@ const RETRY_BASE_MS = 1000;
 const RETRY_CAP_MS = 15000;
 
 const SEND_TIMEOUT_MS = 15000;
+const PRESENCE_POLL_MS = 10000;
 
 const els = {
     join: document.getElementById("join"),
@@ -26,6 +27,7 @@ const els = {
     room: document.getElementById("room"),
     roomChip: document.getElementById("room-chip"),
     currentRoom: document.getElementById("current-room"),
+    presenceChip: document.getElementById("presence-chip"),
     chat: document.getElementById("chat"),
     empty: document.getElementById("empty"),
     messages: document.getElementById("messages"),
@@ -58,6 +60,8 @@ let lastOffset = -1;
 let retryTimer = null;
 let retryAttempt = 0;
 let gaveUp = false;
+
+let presenceTimer = null;
 
 const timeFormat = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
 const dateFormat = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" });
@@ -290,11 +294,60 @@ function showError(el, message) {
     el.hidden = !message;
 }
 
-function updateCounter() {
+function syncTextField() {
     const used = els.text.value.length;
     els.counter.hidden = used < COUNTER_FROM;
     els.counter.textContent = `${used}/${MAX_TEXT_LENGTH}`;
     els.counter.classList.toggle("counter--warn", used >= COUNTER_WARN);
+
+    // Auto-grows the textarea with its content; CSS max-height caps it beyond that.
+    els.text.style.height = "auto";
+    els.text.style.height = `${els.text.scrollHeight}px`;
+}
+
+async function pollPresence() {
+    if (!room) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API}/presence?room=${encodeURIComponent(room)}`, {
+            signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        const body = await response.json();
+        showPresence(Array.isArray(body.nicknames) ? body.nicknames : []);
+    } catch {
+        // Best-effort UI only -- a failed poll just leaves the last known list showing.
+    }
+}
+
+function showPresence(names) {
+    if (names.length === 0) {
+        els.presenceChip.hidden = true;
+        return;
+    }
+
+    const labels = names.map((name) => (name === nickname ? `${name} (du)` : name));
+    els.presenceChip.textContent = `👥 ${labels.join(", ")}`;
+    els.presenceChip.title = labels.join(", ");
+    els.presenceChip.hidden = false;
+}
+
+function startPresencePolling() {
+    stopPresencePolling();
+    pollPresence();
+    presenceTimer = setInterval(pollPresence, PRESENCE_POLL_MS);
+}
+
+function stopPresencePolling() {
+    clearInterval(presenceTimer);
+    presenceTimer = null;
+    els.presenceChip.hidden = true;
 }
 
 function connect() {
@@ -423,6 +476,7 @@ els.join.addEventListener("submit", async (event) => {
     els.composer.hidden = false;
     setStatus("connecting", "verbinde…");
     connect();
+    startPresencePolling();
 });
 
 els.send.addEventListener("submit", async (event) => {
@@ -434,7 +488,7 @@ els.send.addEventListener("submit", async (event) => {
 
     showError(els.error, "");
     els.text.value = "";
-    updateCounter();
+    syncTextField();
 
     try {
         const response = await fetch(`${API}/messages`, {
@@ -448,16 +502,23 @@ els.send.addEventListener("submit", async (event) => {
             const problem = await response.json().catch(() => ({}));
             showError(els.error, problem.error ?? `Senden fehlgeschlagen (HTTP ${response.status}).`);
             els.text.value = text;
-            updateCounter();
+            syncTextField();
         }
     } catch {
         showError(els.error, "Backend nicht erreichbar.");
         els.text.value = text;
-        updateCounter();
+        syncTextField();
     }
 });
 
-els.text.addEventListener("input", updateCounter);
+els.text.addEventListener("input", syncTextField);
+
+els.text.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        els.send.requestSubmit();
+    }
+});
 
 els.jump.addEventListener("click", () => scrollToEnd(true));
 
@@ -488,9 +549,10 @@ els.leave.addEventListener("click", () => {
     gaveUp = false;
     room = "";
 
+    stopPresencePolling();
     resetMessages();
     els.text.value = "";
-    updateCounter();
+    syncTextField();
     showError(els.error, "");
     showError(els.joinError, "");
 

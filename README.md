@@ -832,7 +832,7 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 # Glob stillschweigend -- REL wäre leer und die Fehlermeldung zeigte woanders hin.
 REL=$(command ls -t deploy/releases/*.yaml | head -1)
 
-dotnet test                                    # 192 Tests
+dotnet test                                    # 198 Tests
 helm lint deploy/helm/redetim -f "$REL"
 helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
   | kubeconform -strict -summary -kubernetes-version 1.32.0
@@ -922,6 +922,12 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
       HTTP 409, unabhängig davon, welcher Backend-Pod die Anfrage bedient
 - [ ] Tab mit aktivem Nickname schließen (bzw. „Raum verlassen") → Nickname ist sofort wieder frei
       nutzbar, ohne auf `PRESENCE_TTL_SECONDS` zu warten
+- [ ] Zwei Browserfenster, gleicher Raum, verschiedene Nicknames → beide sehen binnen
+      `PRESENCE_POLL_MS` (10 s) den jeweils anderen in der „wer ist da"-Anzeige der Kopfzeile
+- [ ] Nachricht mit Shift+Enter über mehrere Zeilen verfassen → Enter allein sendet, Shift+Enter
+      fügt einen Zeilenumbruch ein, der Umbruch bleibt in der gesendeten Nachricht erhalten
+- [ ] Emoji in die Nachricht eingeben (System-Emoji-Picker oder eingefügt) und senden →
+      erscheint unverändert bei allen Verbindungen
 - [ ] `rpk topic delete redetim-presence` bei laufendem Backend → Chat funktioniert weiter,
       `/health/ready` bleibt `ready`, neue `POST /api/join`-Aufrufe schlagen fehl oder lassen
       jeden Namen zu, bis der Topic-Job das Topic beim nächsten `helm upgrade` neu anlegt

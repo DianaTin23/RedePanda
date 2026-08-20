@@ -76,4 +76,25 @@ public class PresenceStoreTests
 
         Assert.False(store.IsTaken("andererraum", "alice", Now));
     }
+
+    [Fact]
+    public void ActiveNicknamesListsOnlyFreshEntriesForTheRequestedRoom()
+    {
+        var store = CreateStore(ttlSeconds: 45);
+
+        store.Apply("general", "bob", Now);
+        store.Apply("general", "alice", Now);
+        store.Apply("general", "expired", Now - TimeSpan.FromSeconds(46));
+        store.Apply("andererraum", "carol", Now);
+
+        Assert.Equal(["alice", "bob"], store.ActiveNicknames("general", Now));
+    }
+
+    [Fact]
+    public void ActiveNicknamesForAnUnknownRoomIsEmpty()
+    {
+        var store = CreateStore();
+
+        Assert.Empty(store.ActiveNicknames("nirgendwo", Now));
+    }
 }

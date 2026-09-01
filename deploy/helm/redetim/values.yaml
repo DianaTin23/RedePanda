@@ -1,0 +1,193 @@
+# Vorgabewerte des redetim-Charts.
+# Begruendungen zu allen Schaltern hier: docs/deployment.md
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Wird von deploy/releases/<version>.yaml gefuellt. Ohne Release-Datei bricht das Chart ab.
+release:
+  version: ""
+  gitSha: ""
+  builtAt: ""
+  # true, wenn aus einem unsauberen Arbeitsbaum gebaut.
+  dirty: false
+
+# IfNotPresent, nicht Never: Never scheitert auf Docker Desktop mit ErrImageNeverPull.
+imagePullPolicy: IfNotPresent
+
+# Das Chart stellt bei der ersten Installation eine eigene CA aus. Kein Ausschalter.
+tls:
+  caValidityDays: 3650
+  # 825 Tage: Hoechstlaufzeit, die Safari und Chrome fuer ein Leaf-Zertifikat akzeptieren.
+  certValidityDays: 825
+  # Der Port, den der *Browser* erreicht; nur fuer die Weiterleitung von :8080.
+  publicHttpsPort: 8443
+
+chat:
+  topic: redetim-chat
+  partitions: 1
+  replicationFactor: 1
+  # Zeichen je Nachricht. Haengt an ChatMessage.DefaultMaxTextLength.
+  maxMessageLength: 500
+  # librdkafkas message.timeout.ms. Dessen Vorgabe von 300000 haelt einen POST fuenf Minuten offen.
+  produceTimeoutMs: 10000
+  # Nachrichten je Raum im Verlaufspuffer. 0 = alles, was im Topic liegt.
+  historySize: 200
+  # Gleichzeitig gehaltene Raeume je Replica. 0 = so viele, wie kommen.
+  maxRooms: 200
+  # Wie weit ein startender Pod zurueckliest, **je Partition**. 0 = das ganze Topic.
+  replayRecords: 2000
+
+# Log-komprimiertes zweites Topic: haelt nur den aktuellen Praesenz-Stand (Key = Raum+Nickname),
+# nicht die Chat-Historie. Begruendung: docs/kafka.md.
+presence:
+  topic: redetim-presence
+  partitions: 1
+  replicationFactor: 1
+  # Sekunden ohne Erneuerung, bevor eine Namensreservierung ausserhalb einer sauberen
+  # Trennung als frei gilt (Sicherheitsnetz fuer Absturz/Verbindungsabbruch). Deutlich groesser
+  # als das SSE-Heartbeat-Intervall (15s), damit ein einzelner verpasster Refresh den Namen
+  # nicht sofort freigibt.
+  ttlSeconds: 45
+
+backend:
+  # Lokal gebaut, nie aus einer Registry gezogen. Tag kommt aus der Release-Datei.
+  image:
+    repository: redetim-backend
+    tag: ""
+
+  # Zusaetzliche Umgebungsvariablen im env:-Format. Stehen hinter der ConfigMap und ueberschreiben sie.
+  extraEnv: []
+
+  replicas: 2
+  # .NET-Schreibweise (Trace|Debug|Information|Warning|Error|Critical|None).
+  logLevel: Information
+
+  # 5s preStop + 25s Shutdown-Timeout der Anwendung, mit Puffer vor SIGKILL.
+  terminationGracePeriodSeconds: 45
+
+  # Der CPU-Request ist zugleich der Nenner der HPA-Zielauslastung. Bewusst kein CPU-Limit.
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+  # Aus per Vorgabe: ein HPA braucht metrics-server, den kind und Docker Desktop nicht mitbringen.
+  autoscaling:
+    enabled: false
+    # Nie unter die Basislinie, fuer die PDB und Rollout-Strategie geschrieben sind.
+    minReplicas: 2
+    # Obergrenze aus Arithmetik: passt zusammen mit allem uebrigen auf einen Ein-CPU-Node.
+    maxReplicas: 4
+    # Prozent des CPU-*Requests*, nicht des Limits und nicht des Nodes.
+    targetCPUUtilizationPercentage: 70
+    # Kubernetes-Vorgabe waeren 300s -- laenger als die ganze Demo.
+    scaleDownStabilizationSeconds: 60
+
+frontend:
+  # Lokal gebaut, Tag aus der Release-Datei -- siehe backend.image.
+  image:
+    repository: redetim-frontend
+    tag: ""
+  # Zwei, weil *jeder* SSE-Stream durch dieses Deployment laeuft.
+  replicas: 2
+  # Kuerzer als beim Backend: keine Consumer-Group zu verlassen, kein Producer zu flushen.
+  terminationGracePeriodSeconds: 30
+  # Caddys Schreibweise (DEBUG|INFO|WARN|ERROR), nicht die von .NET.
+  logLevel: INFO
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+# Eigenes Image, aber aus demselben Build und unter demselben Tag wie Backend und Frontend.
+chatClient:
+  image:
+    repository: redetim-chatclient
+    tag: ""
+
+topicJob:
+  # Wie lange --ensure-topic auf Broker-Metadaten wartet. Mit backoffLimit 10 im Template die Obergrenze.
+  brokerWaitSeconds: 180
+
+# Einmaliger Admin-Job im Image und in der Konfiguration dieses Releases (12-Factor XII).
+adminJob:
+  enabled: false
+  # Argumente an den Chat-Client; --help listet sie auf.
+  args: ["--print-config"]
+  # stdin/tty fuer `kubectl attach -ti`. Nur fuer den interaktiven Chat-Client noetig.
+  interactive: false
+  # Kuerzer als beim Topic-Job: der laeuft gegen einen Broker, der laufen sollte.
+  brokerWaitSeconds: 60
+  # Aufbewahrung des Pods *nach* dem Ende.
+  ttlSecondsAfterFinished: 3600
+  # Laufzeit *bis* zum Ende. Noetig wegen interactive: true.
+  activeDeadlineSeconds: 7200
+  extraEnv: []
+
+redpanda:
+  # Auf false wird kein Broker deployt; die Anwendung zeigt dann auf external.bootstrapServers.
+  enabled: true
+
+  external:
+    # Pflicht, sobald enabled: false -- sonst bricht das Chart beim Rendern ab.
+    bootstrapServers: ""
+
+  auth:
+    # Plaintext, Ssl, SaslPlaintext oder SaslSsl. Die Schreibweise SASL_SSL wird ebenfalls akzeptiert.
+    securityProtocol: Plaintext
+    # Pflicht bei einem SASL-Protokoll: Plain, ScramSha256, ScramSha512 (auch SCRAM-SHA-512).
+    saslMechanism: ""
+    # Name eines *bestehenden* Secrets mit den Schluesseln username und password. Nie ein Wert hier.
+    existingSecret: ""
+    # Optional, nur bei TLS: Secret mit dem Schluessel ca.crt fuer eine private CA.
+    caSecret: ""
+
+  # docker.io statt docker.redpanda.com: Letzteres drosselt anonyme Manifest-Zugriffe zu hart.
+  # Muss mit RedeTim-kafka-docker/docker-compose.yml uebereinstimmen (scripts/check-digests.sh).
+  image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
+
+  # Kurz gehalten: steht im advertise-kafka-addr und in jedem Bootstrap-Vorgabewert.
+  serviceName: redpanda
+  storage: 1Gi
+  storageClassName: ""
+
+  # Seastar bemisst sich in einem Container sonst am ganzen Node.
+  smp: 1
+  memory: 1G
+  resources:
+    requests: { cpu: 200m, memory: 1Gi }
+    limits: { memory: 2Gi }
+
+otelCollector:
+  enabled: true
+
+  # Auf enabled: false wird kein Collector deployt. Steht hier ein Endpunkt, exportiert das
+  # Backend dorthin; steht keiner da, wird das SDK abgeschaltet. Prometheus muss dann ebenfalls aus.
+  external:
+    # z. B. "https://otel-collector.observability:4317"
+    endpoint: ""
+    # grpc oder http/protobuf, je nachdem, worauf der fremde Collector hoert.
+    protocol: "grpc"
+    # Secret mit dem Schluessel ca.crt: die CA eines *fremden* Collectors hinter privater CA.
+    caSecret: ""
+
+  # Core-Distribution, nicht contrib: core hat den Prometheus-Exporter und health_check bereits.
+  image: docker.io/otel/opentelemetry-collector:0.158.0@sha256:5b97e6e3550ec6e48a71dba6f6304d349a293af8df4ee1f51da67be94fce2ecd
+  logLevel: info
+  # "detailed" protokolliert jede empfangene Metrik.
+  debugVerbosity: basic
+  # Die .NET-Vorgabe waeren 60s, was in einer Demo eingefroren aussieht.
+  metricExportIntervalMs: 5000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+# Braucht otelCollector.enabled: der Collector ist das einzige Scrape-Ziel.
+prometheus:
+  enabled: true
+  image: quay.io/prometheus/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
+  # 5s statt der ueblichen 15s, damit sich Zaehler in der Demo sichtbar bewegen.
+  scrapeInterval: 5s
+  retention: 6h
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }

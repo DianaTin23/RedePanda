@@ -1,0 +1,101 @@
+{{- if .Values.redpanda.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "redetim.brokerService" . }}
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  serviceName: {{ include "redetim.brokerService" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "redetim.selectorLabels" (dict "ctx" . "component" "broker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "redetim.labels" . | nindent 8 }}
+        app.kubernetes.io/component: broker
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redpanda
+          image: {{ .Values.redpanda.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+
+          command: [rpk, redpanda, start]
+          args:
+            - --mode=dev-container
+            - --smp={{ .Values.redpanda.smp }}
+            - --memory={{ .Values.redpanda.memory }}
+            - --kafka-addr=internal://0.0.0.0:9092
+            - --advertise-kafka-addr=internal://{{ include "redetim.brokerService" . }}:9092
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: admin
+              containerPort: 9644
+          livenessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+          resources:
+            {{- toYaml .Values.redpanda.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.redpanda.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.redpanda.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "redetim.brokerService" . }}
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "redetim.selectorLabels" (dict "ctx" . "component" "broker") | nindent 4 }}
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+    - name: admin
+      port: 9644
+      targetPort: admin
+{{- end -}}

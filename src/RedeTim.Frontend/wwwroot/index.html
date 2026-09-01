@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RedeTim</title>
+    <meta name="description" content="Chat über Redpanda: Frontend und Backend als getrennte Deployments.">
+
+    <!-- Form controls and scrollbars follow the theme, and the browser chrome matches the page. -->
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#fbf8f6" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)">
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="style.css?v=pretty-trail-2">
+</head>
+<body>
+<header class="topbar">
+    <img class="mark" src="favicon.svg" alt="" width="30" height="30">
+    <span class="wordmark">RedeTim</span>
+
+    <span id="room-chip" class="chip" hidden>#<span id="current-room"></span></span>
+    <span id="presence-chip" class="chip" hidden title=""></span>
+
+    <span id="status" class="status status--offline" role="status" aria-live="polite">getrennt</span>
+
+    <div class="theme-picker" role="group" aria-label="Farbschema auswählen">
+        <button type="button" class="icon-button theme-button" data-theme-option="light"
+                aria-label="Light Mode aktivieren" title="Light Mode" aria-pressed="false">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="4.2"/>
+                <path d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.4 5.4l1.8 1.8M16.8 16.8l1.8 1.8M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8"/>
+            </svg>
+        </button>
+        <button type="button" class="icon-button theme-button" data-theme-option="dark"
+                aria-label="Dark Mode aktivieren" title="Dark Mode" aria-pressed="false">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20.8 13.3A8.6 8.6 0 1 1 10.7 3.2a6.8 6.8 0 0 0 10.1 10.1z"/>
+            </svg>
+        </button>
+        <button type="button" class="icon-button theme-button" data-theme-option="pretty"
+                aria-label="Pretty-Modus aktivieren" title="Pretty-Modus" aria-pressed="false">
+            <span class="icon theme-icon--bow" aria-hidden="true"></span>
+        </button>
+    </div>
+</header>
+
+<main id="stage">
+    <form id="join" class="card">
+        <h1 class="card__title">Raum betreten</h1>
+        <p class="card__hint">
+            Wer denselben Raum betritt, sieht dieselben Nachrichten. Der Raum wird zum
+            Kafka-Schlüssel — andere Räume bleiben getrennt.
+        </p>
+
+        <div class="field">
+            <label for="nickname">Name</label>
+            <input id="nickname" name="nickname" maxlength="32" required autocomplete="nickname"
+                   placeholder="alice" autofocus>
+        </div>
+
+        <div class="field">
+            <label for="room">Raum</label>
+            <input id="room" name="room" maxlength="64" required value="general">
+        </div>
+
+        <p id="join-error" class="error" role="alert" hidden></p>
+
+        <button type="submit" class="primary card__submit">Betreten</button>
+    </form>
+
+    <div id="chat" class="chat" hidden>
+        <div class="chat__inner">
+            <p id="empty" class="empty">
+                <strong>Noch nichts gesagt.</strong>
+                In diesem Raum liegt nichts im Topic, was sich nachladen ließe. Sobald jemand
+                schreibt, erscheint es hier — und wer den Raum später betritt, bekommt den
+                Verlauf mitgeliefert, solange der Broker ihn vorhält.
+            </p>
+            <ol id="messages" class="messages" aria-live="polite" aria-relevant="additions"></ol>
+        </div>
+    </div>
+
+    <button type="button" id="jump" class="jump" hidden>Neue Nachrichten ↓</button>
+</main>
+
+<footer id="composer" class="composer" hidden>
+    <p id="banner" class="banner" hidden>
+        <span id="banner-text"></span>
+        <button type="button" id="reconnect" class="banner__action" hidden>Erneut verbinden</button>
+    </p>
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <form id="send" class="send">
+        <div class="send__field">
+            <textarea id="text" name="text" rows="1" maxlength="500" required autocomplete="off"
+                      placeholder="Nachricht schreiben… (Shift+Enter für Zeilenumbruch)"></textarea>
+            <span id="counter" class="counter" aria-hidden="true" hidden></span>
+        </div>
+        <button type="submit" class="primary send__button">
+            <span class="send__label">Senden</span>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4.5 12h14M12.5 5.5 19 12l-6.5 6.5"/>
+            </svg>
+        </button>
+    </form>
+
+    <button type="button" id="leave" class="link">Raum verlassen</button>
+</footer>
+
+<script src="app.js?v=pretty-trail-2"></script>
+</body>
+</html>

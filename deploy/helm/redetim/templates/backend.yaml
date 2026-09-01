@@ -1,0 +1,209 @@
+{{- $otelEnabled := or .Values.otelCollector.enabled (ne (toString .Values.otelCollector.external.endpoint) "") }}
+{{- $otelCaPath := "" }}
+{{- $otelCaVolume := "" }}
+{{- if .Values.otelCollector.enabled }}
+{{- $otelCaPath = printf "%s/ca.crt" (include "redetim.tlsMountPath" .) }}
+{{- $otelCaVolume = "tls" }}
+{{- else if and .Values.otelCollector.external.endpoint .Values.otelCollector.external.caSecret }}
+{{- $otelCaPath = "/etc/redetim/otel-ca/ca.crt" }}
+{{- $otelCaVolume = "otel-ca" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "redetim.fullname" . }}-backend
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  replicas: {{ .Values.backend.replicas }}
+  {{- end }}
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  minReadySeconds: 5
+
+  selector:
+    matchLabels:
+      {{- include "redetim.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "redetim.labels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
+        {{- include "redetim.releaseAnnotations" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "redetim.selectorLabels" (dict "ctx" . "component" "backend") | nindent 14 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        fsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+{{- if $otelCaPath }}
+      initContainers:
+        - name: ca-bundle
+          image: {{ include "redetim.image" (dict "ctx" . "component" "backend") | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - cat /etc/ssl/certs/ca-certificates.crt {{ $otelCaPath }}
+              > /etc/redetim/ca-bundle/ca-bundle.crt
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            {{- if eq $otelCaVolume "tls" }}
+            - name: tls
+              mountPath: {{ include "redetim.tlsMountPath" . }}
+              readOnly: true
+            {{- else }}
+            - name: otel-ca
+              mountPath: /etc/redetim/otel-ca
+              readOnly: true
+            {{- end }}
+            - name: ca-bundle
+              mountPath: /etc/redetim/ca-bundle
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+{{- end }}
+      containers:
+        - name: backend
+          image: {{ include "redetim.image" (dict "ctx" . "component" "backend") | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: https
+              containerPort: 8443
+          envFrom:
+            - configMapRef:
+                name: {{ include "redetim.fullname" . }}-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- include "redetim.saslEnv" (dict "ctx" .) | nindent 12 }}
+{{- if $otelEnabled }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.instance.id=$(POD_NAME)"
+{{- end }}
+{{- if $otelCaPath }}
+            - name: SSL_CERT_FILE
+              value: /etc/redetim/ca-bundle/ca-bundle.crt
+{{- end }}
+            {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tls
+              mountPath: {{ include "redetim.tlsMountPath" . }}
+              readOnly: true
+            {{- if $otelCaPath }}
+            - name: ca-bundle
+              mountPath: /etc/redetim/ca-bundle
+              readOnly: true
+            {{- end }}
+            {{- if .Values.redpanda.auth.caSecret }}
+            - name: broker-ca
+              mountPath: /etc/redetim/ca
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ include "redetim.fullname" . }}-backend-tls
+        - name: tmp
+          emptyDir: {}
+        {{- if $otelCaPath }}
+        - name: ca-bundle
+          emptyDir: {}
+        {{- end }}
+        {{- if eq $otelCaVolume "otel-ca" }}
+        - name: otel-ca
+          secret:
+            secretName: {{ .Values.otelCollector.external.caSecret | quote }}
+        {{- end }}
+        {{- if .Values.redpanda.auth.caSecret }}
+        - name: broker-ca
+          secret:
+            secretName: {{ .Values.redpanda.auth.caSecret | quote }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "redetim.fullname" . }}-backend
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "redetim.selectorLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "redetim.fullname" . }}-backend
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  maxUnavailable: 1
+
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+  selector:
+    matchLabels:
+      {{- include "redetim.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}

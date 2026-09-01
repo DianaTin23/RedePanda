@@ -1,0 +1,80 @@
+{{- if and .Values.prometheus.enabled (not .Values.otelCollector.enabled) -}}
+{{- fail "prometheus.enabled requires otelCollector.enabled: the bundled collector is Prometheus' only scrape target. An otelCollector.external.endpoint does not help -- this Prometheus cannot scrape a collector it does not deploy -- so turn Prometheus off as well when pointing the telemetry elsewhere." -}}
+{{- end -}}
+{{- if and (include "redetim.saslEnabled" .) (not .Values.redpanda.auth.existingSecret) -}}
+{{- fail "redpanda.auth.securityProtocol uses SASL, so redpanda.auth.existingSecret must name a Secret with the keys username and password." -}}
+{{- end -}}
+{{- if and (include "redetim.saslEnabled" .) (not .Values.redpanda.auth.saslMechanism) -}}
+{{- fail "redpanda.auth.securityProtocol uses SASL, so redpanda.auth.saslMechanism must be set (for example ScramSha512)." -}}
+{{- end -}}
+{{- if and .Values.redpanda.enabled (ne (include "redetim.securityProtocol" .) "Plaintext") -}}
+{{- fail (printf "redpanda.auth.securityProtocol is %q, but redpanda.enabled=true deploys the bundled broker, which listens in plaintext only. Either leave the protocol at Plaintext, or set redpanda.enabled=false and point redpanda.external.bootstrapServers at a secured broker." .Values.redpanda.auth.securityProtocol) -}}
+{{- end -}}
+{{- if and .Values.redpanda.enabled .Values.redpanda.external.bootstrapServers -}}
+{{- fail "redpanda.external.bootstrapServers is set, but redpanda.enabled is true, so it would be ignored and every client would talk to the bundled broker instead. Set redpanda.enabled=false to use the external broker." -}}
+{{- end -}}
+{{- if and .Values.otelCollector.external.caSecret .Values.otelCollector.enabled -}}
+{{- fail "otelCollector.external.caSecret is set, but otelCollector.enabled is true, so it would be ignored: the bundled collector is verified against this release's own CA. Set otelCollector.enabled=false and otelCollector.external.endpoint to point at an external collector." -}}
+{{- end -}}
+{{- if and .Values.otelCollector.external.caSecret (not (hasPrefix "https://" (toString .Values.otelCollector.external.endpoint))) -}}
+{{- fail (printf "otelCollector.external.caSecret is set, but otelCollector.external.endpoint is %q, which is not an https:// address. A CA bundle is only meaningful for a connection that verifies a certificate." .Values.otelCollector.external.endpoint) -}}
+{{- end -}}
+{{- if and .Values.redpanda.auth.caSecret (not (include "redetim.brokerTls" .)) -}}
+{{- fail (printf "redpanda.auth.caSecret is set, but redpanda.auth.securityProtocol is %q, which does not use TLS. Set it to Ssl or SaslSsl, or remove the CA Secret." .Values.redpanda.auth.securityProtocol) -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "redetim.fullname" . }}-config
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+data:
+  REDPANDA_BOOTSTRAP_SERVERS: {{ include "redetim.bootstrapServers" . | quote }}
+  REDPANDA_TOPIC: {{ .Values.chat.topic | quote }}
+  MAX_MESSAGE_LENGTH: {{ .Values.chat.maxMessageLength | quote }}
+  CHAT_HISTORY_SIZE: {{ .Values.chat.historySize | quote }}
+
+  CHAT_MAX_ROOMS: {{ .Values.chat.maxRooms | quote }}
+  PRODUCE_TIMEOUT_MS: {{ .Values.chat.produceTimeoutMs | quote }}
+
+  CHAT_REPLAY_RECORDS: {{ .Values.chat.replayRecords | quote }}
+
+  CHAT_PARTITIONS: {{ .Values.chat.partitions | quote }}
+  CHAT_REPLICATION_FACTOR: {{ .Values.chat.replicationFactor | quote }}
+
+  REDPANDA_PRESENCE_TOPIC: {{ .Values.presence.topic | quote }}
+  PRESENCE_PARTITIONS: {{ .Values.presence.partitions | quote }}
+  PRESENCE_REPLICATION_FACTOR: {{ .Values.presence.replicationFactor | quote }}
+  PRESENCE_TTL_SECONDS: {{ .Values.presence.ttlSeconds | quote }}
+
+  LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
+
+  ASPNETCORE_URLS: "https://+:8443"
+  ASPNETCORE_Kestrel__Certificates__Default__Path: "{{ include "redetim.tlsMountPath" . }}/tls.crt"
+  ASPNETCORE_Kestrel__Certificates__Default__KeyPath: "{{ include "redetim.tlsMountPath" . }}/tls.key"
+
+  REDPANDA_SECURITY_PROTOCOL: {{ .Values.redpanda.auth.securityProtocol | quote }}
+{{- with .Values.redpanda.auth.saslMechanism }}
+  REDPANDA_SASL_MECHANISM: {{ . | quote }}
+{{- end }}
+{{- if .Values.redpanda.auth.caSecret }}
+  REDPANDA_SSL_CA_LOCATION: "/etc/redetim/ca/ca.crt"
+{{- end }}
+{{- $otlpEndpoint := "" }}
+{{- if .Values.otelCollector.enabled }}
+{{- $otlpEndpoint = printf "https://%s:4317" (include "redetim.collectorService" .) }}
+{{- else if .Values.otelCollector.external.endpoint }}
+{{- $otlpEndpoint = .Values.otelCollector.external.endpoint }}
+{{- end }}
+{{- if $otlpEndpoint }}
+
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ $otlpEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.otelCollector.external.protocol | default "grpc" | quote }}
+
+  OTEL_SERVICE_NAME: "{{ include "redetim.fullname" . }}-backend"
+  OTEL_METRIC_EXPORT_INTERVAL: {{ .Values.otelCollector.metricExportIntervalMs | quote }}
+  OTEL_SDK_DISABLED: "false"
+{{- else }}
+
+  OTEL_SDK_DISABLED: "true"
+{{- end }}

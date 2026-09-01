@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <RootNamespace>RedeTim.ChatClient</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Version pinned in Directory.Packages.props. -->
+        <PackageReference Include="Confluent.Kafka" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../RedeTim.Contracts/RedeTim.Contracts.csproj" />
+    </ItemGroup>
+
+</Project>

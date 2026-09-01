@@ -22,6 +22,12 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+# ...except deploy/releases, which holds the release manifests -- the one thing here that must
+# be tracked. The directory itself has to be un-excluded: git cannot re-include a file whose
+# parent directory is excluded, so a `!deploy/releases/*.yaml` on its own would do nothing.
+!deploy/releases/
+# A build from an unclean tree is not a release and is not committed. The tag says so too.
+deploy/releases/*-dirty.*.yaml
 x64/
 x86/
 [Ww][Ii][Nn]32/
@@ -427,5 +433,13 @@ FodyWeavers.xsd
 .idea_modules/
 
 # env files
-RedePanda-kafka-docker/env.lan
-RedePanda-chat-client/lan.json
+RedeTim-kafka-docker/env.lan
+
+# Schlüsselmaterial für den SASL_SSL-Listener des lokalen Brokers (docker-compose.yml). Erzeugt von
+# make-tls.sh, jederzeit neu erzeugbar, und für nichts außerhalb einer Entwicklermaschine gültig --
+# es gehört also nicht ins Repository. Ein gerendertes Manifest lag hier einmal aus genau diesem
+# Grund fälschlich mit drin; siehe Abschnitt 7 der README.
+RedeTim-kafka-docker/tls/
+# Nix
+.direnv/
+/result

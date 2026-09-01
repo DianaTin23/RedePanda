@@ -3,6 +3,9 @@
 Ein Browser-Chat, bei dem **Frontend** und **Backend** als zwei getrennte, selbst geschriebene
 Deployments in Kubernetes laufen und über **Redpanda** (Kafka-Protokoll) miteinander sprechen —
 installiert per **Helm**, instrumentiert per **OpenTelemetry** und ausgewertet in **Prometheus**.
+Die Anwendung ist eine Weiterentwicklung des Projekts RedePanda, das im Rahmen einer verteilten 
+Systeme Vorlesung entwickelt wurde. Bei RedePanda handelte es sich um eine sehr einfache 
+Konsolenanwendung, die nicht aus dem Browser aufgerufen werden konnte.
 
 ![RedeTim](src/RedeTim.Frontend/wwwroot/login-background-dark.png)
 

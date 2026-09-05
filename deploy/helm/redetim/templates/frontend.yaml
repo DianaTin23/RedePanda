@@ -27,6 +27,10 @@ spec:
         checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
         {{- include "redetim.releaseAnnotations" . | nindent 8 }}
     spec:
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds }}
 
       topologySpreadConstraints:

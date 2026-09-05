@@ -17,6 +17,10 @@ spec:
         {{- include "redetim.labels" . | nindent 8 }}
         app.kubernetes.io/component: admin-job
     spec:
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true

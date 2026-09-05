@@ -15,6 +15,13 @@ release:
 # IfNotPresent, nicht Never: Never scheitert auf Docker Desktop mit ErrImageNeverPull.
 imagePullPolicy: IfNotPresent
 
+# Nur noetig, solange die drei GHCR-Pakete privat sind -- oeffentliche Pakete zieht der Cluster
+# ohne Anmeldung. Sonst:
+#   kubectl create secret docker-registry ghcr -n redetim --docker-server=ghcr.io \
+#     --docker-username=<user> --docker-password=<PAT mit read:packages>
+# und den Namen hier eintragen: [{ name: ghcr }]
+imagePullSecrets: []
+
 # Das Chart stellt bei der ersten Installation eine eigene CA aus. Kein Ausschalter.
 tls:
   caValidityDays: 3650
@@ -51,9 +58,10 @@ presence:
   ttlSeconds: 45
 
 backend:
-  # Lokal gebaut, nie aus einer Registry gezogen. Tag kommt aus der Release-Datei.
+  # Aus ghcr.io, gepusht vom release-Job in .github/workflows/ci.yml. Tag kommt aus der
+  # Release-Datei; scripts/build-images.sh liest den Namen hier, statt ihn zu wiederholen.
   image:
-    repository: redetim-backend
+    repository: ghcr.io/dianatin23/redetim-backend
     tag: ""
 
   # Zusaetzliche Umgebungsvariablen im env:-Format. Stehen hinter der ConfigMap und ueberschreiben sie.
@@ -84,9 +92,9 @@ backend:
     scaleDownStabilizationSeconds: 60
 
 frontend:
-  # Lokal gebaut, Tag aus der Release-Datei -- siehe backend.image.
+  # Aus ghcr.io, Tag aus der Release-Datei -- siehe backend.image.
   image:
-    repository: redetim-frontend
+    repository: ghcr.io/dianatin23/redetim-frontend
     tag: ""
   # Zwei, weil *jeder* SSE-Stream durch dieses Deployment laeuft.
   replicas: 2
@@ -101,7 +109,7 @@ frontend:
 # Eigenes Image, aber aus demselben Build und unter demselben Tag wie Backend und Frontend.
 chatClient:
   image:
-    repository: redetim-chatclient
+    repository: ghcr.io/dianatin23/redetim-chatclient
     tag: ""
 
 topicJob:

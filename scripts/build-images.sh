@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Builds both application images under an immutable version tag and writes the release file
-# that deploys them. Optionally loads the images into a local cluster.
+# Builds the three application images under an immutable version tag and writes the release
+# file that deploys them. Optionally loads them into a local cluster, or pushes them.
 #
 #   ./scripts/build-images.sh                  # build only
 #   ./scripts/build-images.sh --load kind      # build, then load into kind
 #   ./scripts/build-images.sh --load minikube  # build, then load into minikube
 #   ./scripts/build-images.sh --release        # refuse to build from an unclean working tree
+#   ./scripts/build-images.sh --push           # implies --release, then push to the registry
 #
 # Docker Desktop with Kubernetes enabled needs no load step: it shares one image store.
+#
+# The image names are read from the chart's values.yaml, so this cannot build under a name the
+# chart does not deploy. Set ENGINE=docker|podman to override the engine probe.
 #
 # The tag is derived, never chosen: <appVersion from Chart.yaml>-g<short sha>, e.g.
 # 0.1.0-g103b98b. It is never reused, so one tag names exactly one build -- which is what makes
@@ -20,6 +24,7 @@ RELEASE_DIR="${REPO_ROOT}/deploy/releases"
 
 LOAD_INTO=""
 REQUIRE_CLEAN=0
+PUSH=0
 CLUSTER_NAME="${CLUSTER_NAME:-kind}"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 
@@ -27,7 +32,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --load) LOAD_INTO="${2:-}"; shift 2 ;;
         --release) REQUIRE_CLEAN=1; shift ;;
-        -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+        --push) PUSH=1; REQUIRE_CLEAN=1; shift ;;
+        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -38,6 +44,19 @@ if [[ -z "${APP_VERSION}" ]]; then
     echo "Could not read appVersion from ${CHART_DIR}/Chart.yaml" >&2
     exit 2
 fi
+
+# The chart names the images; this script only builds what the chart will deploy. Reading the
+# names here rather than repeating them is what keeps the two from drifting apart.
+image_repo() {
+    local component="$1" repo
+    repo="$(sed -n "/^${component}:/,/^[a-zA-Z]/p" "${CHART_DIR}/values.yaml" \
+        | sed -n 's/^[[:space:]]*repository:[[:space:]]*\(.*\)$/\1/p' | head -1)"
+    if [[ -z "${repo}" ]]; then
+        echo "Could not read ${component}.image.repository from ${CHART_DIR}/values.yaml" >&2
+        exit 2
+    fi
+    printf '%s' "${repo}"
+}
 
 if ! git -C "${REPO_ROOT}" rev-parse --git-dir >/dev/null 2>&1; then
     echo "Not a git repository, so no commit can identify this build." >&2
@@ -65,6 +84,13 @@ if [[ -n "${IMAGE_TAG:-}" ]]; then
     VERSION="${IMAGE_TAG}"
 fi
 
+# An image in a registry that names no commit is exactly what the chart's tag guards exist to
+# keep out of a cluster. Refuse before anything is built.
+if [[ "${PUSH}" -eq 1 && -n "${IMAGE_TAG:-}" ]]; then
+    echo "Refusing to push '${IMAGE_TAG}': the tag identifies no commit." >&2
+    exit 2
+fi
+
 if [[ "${DIRTY}" == true ]]; then
     if [[ "${REQUIRE_CLEAN}" -eq 1 ]]; then
         echo "Refusing to cut a release from an unclean working tree." >&2
@@ -76,12 +102,19 @@ if [[ "${DIRTY}" == true ]]; then
     echo "!! The tag names the uncommitted content, but nothing in git does."
 fi
 
-BACKEND="redetim-backend:${VERSION}"
-FRONTEND="redetim-frontend:${VERSION}"
+BACKEND="$(image_repo backend):${VERSION}"
+FRONTEND="$(image_repo frontend):${VERSION}"
+CHATCLIENT="$(image_repo chatClient):${VERSION}"
 
-CHATCLIENT="redetim-chatclient:${VERSION}"
-
-if command -v podman >/dev/null 2>&1; then
+# podman first, because on these machines `docker` is often a podman shim. CI sets ENGINE
+# explicitly: a runner has both, and the two read their registry credentials from different
+# files, so letting the probe decide turns a push failure into an opaque 'unauthorized'.
+if [[ -n "${ENGINE:-}" ]]; then
+    if ! command -v "${ENGINE}" >/dev/null 2>&1; then
+        echo "ENGINE=${ENGINE} is not on PATH." >&2
+        exit 2
+    fi
+elif command -v podman >/dev/null 2>&1; then
     ENGINE=podman
 elif command -v docker >/dev/null 2>&1; then
     ENGINE=docker
@@ -96,6 +129,13 @@ echo "==> Building ${VERSION} with ${ENGINE}"
 "${ENGINE}" build -t "${FRONTEND}" "${REPO_ROOT}/src/RedeTim.Frontend"
 
 echo "==> Built ${BACKEND}, ${CHATCLIENT} and ${FRONTEND}"
+
+if [[ "${PUSH}" -eq 1 ]]; then
+    for image in "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}"; do
+        echo "==> Pushing ${image}"
+        "${ENGINE}" push "${image}"
+    done
+fi
 
 RELEASE_FILE=""
 if [[ -z "${IMAGE_TAG:-}" ]]; then
@@ -133,12 +173,9 @@ if [[ -n "${LOAD_INTO}" ]]; then
                 echo "==> Loading into kind cluster '${CLUSTER_NAME}' via image archive"
                 TMP="$(mktemp -d)"
                 trap 'rm -rf "${TMP}"' EXIT
-                for image in "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}"; do
-                    podman tag "${image}" "docker.io/library/${image}"
-                done
-                podman save -o "${TMP}/backend.tar" "docker.io/library/${BACKEND}"
-                podman save -o "${TMP}/chatclient.tar" "docker.io/library/${CHATCLIENT}"
-                podman save -o "${TMP}/frontend.tar" "docker.io/library/${FRONTEND}"
+                podman save -o "${TMP}/backend.tar" "${BACKEND}"
+                podman save -o "${TMP}/chatclient.tar" "${CHATCLIENT}"
+                podman save -o "${TMP}/frontend.tar" "${FRONTEND}"
                 kind load image-archive "${TMP}/backend.tar" --name "${CLUSTER_NAME}"
                 kind load image-archive "${TMP}/chatclient.tar" --name "${CLUSTER_NAME}"
                 kind load image-archive "${TMP}/frontend.tar" --name "${CLUSTER_NAME}"
@@ -148,15 +185,7 @@ if [[ -n "${LOAD_INTO}" ]]; then
             ;;
         minikube)
             echo "==> Loading into minikube profile '${MINIKUBE_PROFILE}'"
-            if [[ "${ENGINE}" == "podman" ]]; then
-                for image in "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}"; do
-                    podman tag "${image}" "docker.io/library/${image}"
-                done
-                minikube image load "docker.io/library/${BACKEND}" "docker.io/library/${CHATCLIENT}" \
-                    "docker.io/library/${FRONTEND}" -p "${MINIKUBE_PROFILE}"
-            else
-                minikube image load "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}" -p "${MINIKUBE_PROFILE}"
-            fi
+            minikube image load "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}" -p "${MINIKUBE_PROFILE}"
             ;;
         *)
             echo "Unknown --load target '${LOAD_INTO}'. Use 'kind' or 'minikube'." >&2

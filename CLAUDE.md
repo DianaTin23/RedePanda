@@ -56,10 +56,15 @@ nicht — Helm 4 stuft es auf INFO herab; nur `helm template` bricht wirklich ab
 
 Lokaler Lauf ohne Kubernetes (Broker im Container, alles andere per `dotnet run`) und die
 Variante gegen einen TLS/SASL-Broker: README Abschnitt 5. Images bauen und in kind/minikube
-laden: `./scripts/build-images.sh [--load kind] [--release]`, README Abschnitt 6. Demo mit
-Port-Forwards: `./scripts/demo.sh`.
+laden: `./scripts/build-images.sh [--load kind] [--release] [--push]`, README Abschnitt 6. Demo
+mit Port-Forwards: `./scripts/demo.sh`.
 
-Es gibt **kein CI**. Nichts von alledem läuft von selbst.
+**CI** (`.github/workflows/`): `ci.yml` prüft bei jedem Push und PR die Tests im locked mode,
+die Lock-Dateien und das Chart (beide HPA-Varianten plus der Fall ohne Release-Datei, der
+scheitern muss). Der `release`-Job läuft **nur** per `workflow_dispatch` mit `release: true` auf
+`main`: er baut, pusht nach `ghcr.io/dianatin23/redetim-*` und committet die Release-Datei
+zurück. `digests.yml` ruft `check-digests.sh` wöchentlich auf. Einen Cluster hat CI nicht — die
+manuelle Abnahmeliste in README Abschnitt 13 bleibt manuell.
 
 ## Architektur
 
@@ -135,7 +140,7 @@ per `secretKeyRef` aus `redpanda.auth.existingSecret`. Vollständige Tabelle: RE
 - **`Directory.Build.props`: XML verbietet `--` im Kommentar.** MSBuild meldet dann ein leeres
   `TargetFramework` aus einer völlig anderen Datei.
 - **Die `--help`-Köpfe der Skripte sind Code**, kein Kommentar: `build-images.sh`,
-  `check-digests.sh` und `check-repro.sh` geben feste Zeilenbereiche per `sed -n '2,14p' "$0"`
+  `check-digests.sh` und `check-repro.sh` geben feste Zeilenbereiche per `sed -n '2,18p' "$0"`
   aus. Wer Zeilen im Kopf einfügt oder löscht, muss den Bereich mitziehen.
 - **NuGet-Versionen gehören ausschließlich in `Directory.Packages.props`**; eine `Version` in
   einer `.csproj` bricht den Restore absichtlich. `TargetFramework` wird in

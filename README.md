@@ -237,10 +237,12 @@ Das Passwort steht im Klartext in der Compose-Datei, weil dieser Broker nichts s
 ./scripts/build-images.sh --load kind      # bauen + in kind laden
 ./scripts/build-images.sh --load minikube  # bauen + in minikube laden
 ./scripts/build-images.sh --release --load kind   # Release schneiden (nur aus sauberem Baum)
+./scripts/build-images.sh --push           # --release, dann nach ghcr.io schieben
 ```
 
 Der Tag wird **abgeleitet, nicht gewählt**: `appVersion` aus `Chart.yaml` plus der kurze
-Git-Commit, also `redetim-backend:0.1.0-g103b98b`. Er wird nie wiederverwendet. Am Ende
+Git-Commit, also `ghcr.io/dianatin23/redetim-backend:0.1.0-g103b98b`. Den Namensteil davor liest
+das Skript aus `values.yaml`, damit es nichts unter einem Namen baut, den das Chart nicht ausrollt. Er wird nie wiederverwendet. Am Ende
 schreibt das Skript die dazugehörige **Release-Datei** und gibt den Deploy-Befehl aus:
 
 ```text
@@ -259,20 +261,39 @@ Bei einem **unsauberen Arbeitsbaum** warnt das Skript und hängt einen Hash des 
 Standes an (`0.1.0-g103b98b-dirty.5f4f110`) — auch dieser Tag bleibt damit eindeutig, aber die
 Datei ist per `.gitignore` von einem Release ausgenommen. `--release` bricht in dem Fall ab.
 
-Lokal gebaute Images kennt der Cluster sonst nicht (`ImagePullBackOff`). Deshalb steht in den
-Manifesten `imagePullPolicy: IfNotPresent` **und** die Images müssen explizit geladen werden:
+Seit die Images nach `ghcr.io` gehen, **kann** der Cluster sie ziehen, und `--load` ist der
+schnellere Weg statt eines nötigen. Ein Image, das nur lokal gebaut und nie gepusht wurde, kennt
+der Cluster dagegen nicht (`ImagePullBackOff`) — dann muss es geladen werden:
 
 | Cluster | Befehl |
 |---|---|
-| kind | `kind load docker-image redetim-backend:$TAG redetim-chatclient:$TAG redetim-frontend:$TAG` |
+| kind | `kind load docker-image ghcr.io/dianatin23/redetim-{backend,chatclient,frontend}:$TAG` |
 | kind + Podman | `podman save` → `kind load image-archive` (macht das Skript automatisch) |
-| minikube | `minikube image load redetim-backend:$TAG redetim-chatclient:$TAG redetim-frontend:$TAG` |
+| minikube | `minikube image load ghcr.io/dianatin23/redetim-{backend,chatclient,frontend}:$TAG` |
 | Docker Desktop | nichts nötig — gemeinsamer Image-Store |
 
 `$TAG` ist die abgeleitete Version; mit `--load` erledigt das Skript diesen Schritt selbst.
 
 > `imagePullPolicy: Never` wäre hier **schlechter**: es scheitert mit `ErrImageNeverPull`,
 > statt auf einen Pull zurückzufallen, und bricht damit den Docker-Desktop-Weg.
+
+### GHCR-Pakete müssen einmal auf public gestellt werden
+
+GHCR legt ein Paket beim ersten Push **privat** an, unabhängig davon, ob das Repository public
+ist. Solange das so bleibt, scheitert jeder Pull im Cluster mit `ImagePullBackOff` — einem
+Fehler, der wie ein Tippfehler im Image-Namen aussieht, aber keiner ist.
+
+Einmalig, durch den Eigentümer des Repositories: `github.com/users/dianatin23/packages` → je
+Paket *Package settings* → *Change visibility* → **Public**, und *Connect repository*. Danach
+zieht `docker pull` auch abgemeldet.
+
+Bleiben die Pakete privat, ist der Weg ein Pull-Secret:
+
+```bash
+kubectl create secret docker-registry ghcr -n redetim \
+  --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT mit read:packages>
+helm upgrade ... --set imagePullSecrets[0].name=ghcr
+```
 
 ---
 
@@ -755,10 +776,10 @@ Begründung in [docs/observability.md](docs/observability.md#bewusst-nur-metrike
 | Faktor | Umsetzung | Einschränkung |
 |---|---|---|
 | Codebase | ein Git-Repo, **eine** Beschreibung des Deployments (das Chart), sieben Wertekombinationen rendern sauber daraus | ein gerendertes Manifest ist nicht reproduzierbar: `tls.yaml` findet ohne Cluster nichts nachzuschlagen und mintet bei jedem Lauf neue Schlüssel. Deshalb liegt keines im Repo (Abschnitt 7) |
-| Dependencies | NuGet zentral deklariert und per `packages.lock.json` inklusive transitiver Pakete festgenagelt, Restore nur gegen nuget.org; alle Registry-Images per Digest gepinnt; Frontend bewusst ohne Build-Tooling (Vanilla JS) | erzwungen wird das nur, wo jemand `./scripts/check-repro.sh` aufruft, und ohne CI ruft es niemand von selbst auf. Im Alltag schreibt ein `dotnet test` die Lock-Dateien weiterhin um, statt zu scheitern — absichtlich, siehe Abschnitt 13 |
+| Dependencies | NuGet zentral deklariert und per `packages.lock.json` inklusive transitiver Pakete festgenagelt, Restore nur gegen nuget.org; alle Registry-Images per Digest gepinnt; Frontend bewusst ohne Build-Tooling (Vanilla JS) | CI ruft `./scripts/check-repro.sh` und `dotnet test -p:ContinuousIntegrationBuild=true` bei jedem Push und PR auf. Im Alltag schreibt ein `dotnet test` die Lock-Dateien weiterhin um, statt zu scheitern — absichtlich, siehe Abschnitt 13 |
 | Config | laufzeitvariable Anwendungsparameter über Env-Variablen, im Cluster überwiegend aus der ConfigMap; Zugangsdaten getrennt davon per `secretKeyRef` aus einem Secret (`redpanda.auth.existingSecret`), `POD_NAME` aus der Downward API und TLS-Zertifikate als Secret-Mounts, nie geheime Werte aus `values.yaml` | kein Live-Reload: eine geänderte ConfigMap rollt die Pods über die `checksum/config`-Annotation, sie wird nicht im laufenden Prozess nachgelesen |
 | Backing Services | Redpanda über `REDPANDA_BOOTSTRAP_SERVERS`, Telemetrie-Backend über `OTEL_EXPORTER_OTLP_ENDPOINT` — beide ohne Codeänderung austauschbar, **und beide auch im Chart**: `redpanda.enabled=false` + `redpanda.external.bootstrapServers` bzw. `otelCollector.enabled=false` + `otelCollector.external.endpoint`, dessen privater CA das Backend über `otelCollector.external.caSecret` vertraut. TLS/SASL sind über `redpanda.auth` konfigurierbar und in Abschnitt 5 gegen einen echten SASL/TLS-Broker vorgeführt | der mitgelieferte Broker spricht weiterhin Plaintext, und das Chart lehnt die Kombination „abgesichertes Protokoll + mitgelieferter Broker" beim Rendern ab, weil sie nicht funktionieren kann. Ein fremder Collector schließt das mitgelieferte Prometheus aus: es kennt nur den mitgelieferten als Scrape-Ziel |
-| Build, Release, Run | drei getrennte Stufen mit identifizierbarem Release: unveränderlicher Image-Tag + Release-Datei, `helm rollback` funktioniert (siehe unten) | keine Registry: alte Images leben nur im Image-Store der Node. Kein CI (laut Aufgabe erlaubt) |
+| Build, Release, Run | drei getrennte Stufen mit identifizierbarem Release: unveränderlicher Image-Tag + Release-Datei, `helm rollback` funktioniert (siehe unten) | die Release-Datei wird von CI **einen Commit nach** dem gebauten Commit committet — `main` trägt nie eine Release-Datei für die eigene Spitze. Die Images sind amd64-only, weil der Runner es ist. CI hat keinen Cluster: die Abnahmeliste in Abschnitt 13 bleibt manuell |
 | Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut. Ein Leser, der weiter als 256 Nachrichten zurückfällt, bekommt seinen Stream **beendet** statt still gekürzt — der Browser verbindet sich neu und holt die Lücke per `Last-Event-ID` nach (`redetim_streams_cut_total`) |
 | Port Binding | Backend `:8443`, Frontend `:8443` (plus `:8080` nur für die `308`-Weiterleitung), kein externer Webserver nötig. TLS terminiert der Prozess selbst — es gibt keinen vorgelagerten Terminator, den das Deployment mitbringen müsste | das Zertifikat kommt als Secret-Mount von außen; das Image allein kann kein TLS und startet deshalb per Default auf `:8080` |
 | Concurrency | **Beide** Deployments laufen mit 2 Replicas, PodDisruptionBudget, `preStop`-Drain und Rollout ohne Unterbrechung (`maxUnavailable: 0`) — der SSE-Pfad ist damit von Caddy bis Kafka redundant, nicht nur an seinem hinteren Ende. Backend zusätzlich: Consumer-GroupId pro Pod ⇒ echter Fan-out, HPA optional, kein Sticky-Session-Bedarf, weil die SSE-`id` der Kafka-Offset ist. Caddy spricht zum Backend auf `versions 1.1` — über HTTP/2 liefe jeder Stream eines Pods über *eine* TCP-Verbindung und damit auf *einer* Backend-Replica | Offsets sind **pro Partition** eindeutig, nicht brokerweit. Bei `chat.partitions > 1` trägt die Konstruktion nur, weil beide Producer nach Raum keyen und ein Raum damit auf einer Partition bleibt. Jede Replica liest 100 % des Topics: der Fan-out skaliert das Ausliefern, nicht das Lesen. HPA braucht metrics-server und ist per Default aus |
@@ -796,12 +817,14 @@ Daraus folgt der Rest:
   wann gebaut, welche Images.
 - Es gibt genau **eine** Beschreibung des Deployments, nämlich das Chart. Ein zweites,
   gerendertes Manifest lag hier früher daneben und war irgendwann eine Version hinterher — zwei
-  Beschreibungen desselben Systems laufen ohne CI zuverlässig auseinander (Abschnitt 7).
+  Beschreibungen desselben Systems laufen zuverlässig auseinander (Abschnitt 7).
 
-Was fehlt: eine Registry und damit garantierte Aufbewahrung alter Images, und ein CI, das den
-Build automatisch anstößt. Beides ist laut Aufgabe nicht gefordert; der Ausbaupfad wäre ein
-`--push` in `build-images.sh` plus Digest-Pin auch für diese drei Images (Backend, Frontend und
-Konsolenclient — es waren einmal zwei, bevor der Admin-Prozess ein eigenes Image bekam).
+Eine Registry und ein CI, das den Build anstößt, fehlten hier lange. Beides gibt es jetzt:
+`scripts/build-images.sh --push` schiebt die drei Images (Backend,
+Frontend und Konsolenclient — es waren einmal zwei, bevor der Admin-Prozess ein eigenes Image
+bekam) nach `ghcr.io/dianatin23/`, und der `release`-Job in `.github/workflows/ci.yml` stößt
+genau das an. Was noch fehlt: ein Digest-Pin auch für diese drei Images. Der Tag ist
+unveränderlich, weil ihn niemand zweimal vergibt — nicht, weil die Registry es erzwänge.
 
 ---
 
@@ -835,7 +858,7 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 # Glob stillschweigend -- REL wäre leer und die Fehlermeldung zeigte woanders hin.
 REL=$(command ls -t deploy/releases/*.yaml | head -1)
 
-dotnet test                                    # 198 Tests
+dotnet test -p:ContinuousIntegrationBuild=true  # 204 Tests, locked mode wie in CI
 helm lint deploy/helm/redetim -f "$REL"
 helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
   | kubeconform -strict -summary -kubernetes-version 1.32.0
@@ -861,7 +884,8 @@ helm template redetim deploy/helm/redetim   # erwartet: Fehler "no release selec
 # Achtung: `helm lint` fängt das nicht — Helm 4 stuft ein `fail` im Template auf INFO herab
 # und meldet trotzdem "0 chart(s) failed". Nur `helm template` bricht wirklich ab.
 
-# Reproduzierbarkeit — ohne CI muss das jemand von Hand anstoßen:
+# Reproduzierbarkeit. CI stößt check-repro.sh bei jedem Push an und check-digests.sh
+# wöchentlich; von Hand lohnt es sich vor einem Release:
 ./scripts/check-repro.sh          # alle vier Projekte gegen ihre Lock-Dateien
 ./scripts/check-digests.sh        # Image-Digests + Broker-Parität lokal/Cluster
 ```
@@ -908,6 +932,19 @@ Unterschied zwischen einem Rollout von Sekundenbruchteilen und einem von 25 Seku
 
 Nicht automatisiert abgedeckt ist der Backfill selbst (`AutoOffsetReset.Earliest`, Partition-EOF,
 Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture entfernt.
+
+### Was CI davon selbst anstößt
+
+`.github/workflows/ci.yml` fährt bei jedem Push und PR den ganzen Block oben, außer dem, was
+einen Cluster braucht: `check-repro.sh`, `dotnet test -p:ContinuousIntegrationBuild=true`, beide
+HPA-Varianten aus `helm lint` und `helm template | kubeconform`, die `replicas`-Kopplung und den
+Fall ohne Release-Datei, der abbrechen muss. `digests.yml` ruft `check-digests.sh` wöchentlich
+auf; ein rotes Ergebnis dort heißt „Digest gewandert **oder** Manifest nicht lesbar" — also erst
+den Log lesen, dann glauben.
+
+Der `release`-Job läuft dabei nicht mit. Er hängt an `workflow_dispatch` mit `release: true` auf
+`main`, baut, pusht nach `ghcr.io` und committet die Release-Datei zurück — als **Kind** des
+Commits, den sie beschreibt: die Images zu einem Commit existieren erst nach ihm.
 
 ### Manuell durchzugehen
 
@@ -987,6 +1024,12 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
       Browser zeigt den alten Stand
 - [ ] `helm uninstall` entfernt alles bis auf das PVC
 - [ ] README von einer unbeteiligten Person nachvollzogen
+- [ ] **Registry-Probe:** die drei GHCR-Pakete auf *public* gestellt und mit dem Repo verknüpft;
+      dann `docker logout ghcr.io && docker pull ghcr.io/dianatin23/redetim-backend:<tag>` zieht
+      ohne Anmeldung
+- [ ] **Pull-Pfad:** frischer kind-Cluster, **nichts** geladen, nur `helm upgrade --install -f
+      deploy/releases/<version>.yaml` → alle Pods `Ready`. Prüft Sichtbarkeit,
+      `imagePullPolicy` und den Pull in einem Zug
 - [ ] Repository public, Gruppenmitglieder eingetragen
 
 ---
@@ -1063,12 +1106,26 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
   `helm template` mintet mangels `lookup` jedes Mal eine frische CA und vier private Schlüssel,
   und die stünden dann hier. Genau deshalb gibt es `deploy/k8s/rendered.yaml` nicht mehr
   (Abschnitt 7). Rendern zum Ansehen ist in Ordnung; installiert wird über Helm.
-- **Kein CI.** Die Reproduzierbarkeits-Prüfungen aus Abschnitt 13 — `./scripts/check-repro.sh` und
-  `./scripts/check-digests.sh` — laufen deshalb nicht automatisch. Sie melden Drift nur, wenn
-  jemand sie aufruft. Das ist die Lücke, aus der die beiden Fehler kamen, die dieses Repo zuletzt
-  hatte: ein gerendertes Manifest, das dem Chart um mehrere hundert Zeilen und fünf Secrets
-  hinterherhing, und ein Kafka-Client, der als einziger von sieben ohne Sicherheitseinstellungen
-  gebaut wurde.
+- **CI hat keinen Cluster.** `ci.yml` prüft Tests, Lock-Dateien und das Chart; die Abnahmeliste
+  aus Abschnitt 13 bleibt vollständig manuell. Genau aus dieser Lücke kamen die beiden Fehler,
+  die dieses Repo zuletzt hatte — ein gerendertes Manifest, das dem Chart um mehrere hundert
+  Zeilen und fünf Secrets hinterherhing, und ein Kafka-Client, der als einziger von neun ohne
+  Sicherheitseinstellungen gebaut wurde. Nur der zweite wäre heute aufgefallen
+  (`BrokerReadinessTests`).
+- **Die Release-Datei ist ein Kind-Commit.** Der `release`-Job committet sie *nach* dem Commit,
+  den sie beschreibt: `main` trägt nie eine Release-Datei für die eigene Spitze, sondern für
+  deren Eltern. Anders geht es nicht — der Dateiname enthält den Commit, den es zum Zeitpunkt
+  des Schreibens noch nicht gäbe.
+- **Die Images sind amd64-only.** Der GitHub-Runner ist amd64, und gebaut wird ohne buildx. Auf
+  Apple Silicon bedeutet das Emulation, im schlechtesten Fall einen kind-Cluster, der nicht
+  startet. Der Ausbaupfad wäre eine Zwei-Runner-Matrix (`ubuntu-latest` + `ubuntu-24.04-arm`)
+  mit `docker buildx imagetools create`.
+- **`check-digests.sh` kann rot werden, ohne dass etwas gedriftet ist.** „Digest gewandert" und
+  „Manifest nicht lesbar" teilen sich Exit-Code 1, und ein anonymes Docker-Hub-Rate-Limit von
+  einer geteilten Runner-IP sieht genauso aus. Erst den Log lesen.
+- **Geplante Workflows schlafen ein.** GitHub deaktiviert `schedule`-Trigger nach 60 Tagen ohne
+  Repository-Aktivität. Nach der Abgabe läuft `digests.yml` also irgendwann stillschweigend
+  nicht mehr.
 - **Die SSE-Verteilung auf zwei Backend-Replicas ist nicht gemessen.** Sie folgt daraus, dass Caddy
   per `versions 1.1` je Stream eine eigene TCP-Verbindung öffnet und kube-proxy pro *Verbindung*
   auswählt. Das ist die richtige Konstruktion und der Grund, warum HTTP/2 hier ausdrücklich

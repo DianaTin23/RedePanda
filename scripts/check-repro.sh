@@ -16,8 +16,8 @@
 # lock file; see the comment there. This script sets ContinuousIntegrationBuild=true, which is what
 # switches locked mode on.
 #
-# This repository has no CI, so nothing runs this on its own. README section 13 lists it, and
-# section 14 names the absence of CI as a known limitation.
+# CI runs this on every push and pull request (.github/workflows/ci.yml). README section 13
+# lists it as well; run it by hand before cutting a release from a machine.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

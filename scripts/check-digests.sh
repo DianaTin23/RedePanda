@@ -5,8 +5,8 @@
 #
 # Exit status: 0 when every pin still matches the tag it names, 1 when at least one has
 # drifted, 2 on a usage or tooling error. Nothing is ever rewritten -- the script prints the
-# replacement line and leaves the edit to a human, because this repository has no CI to catch
-# a bad automated rewrite of a Dockerfile or of values.yaml.
+# replacement line and leaves the edit to a human -- an automated rewrite of a Dockerfile or of
+# values.yaml is exactly what nobody would review. CI runs this weekly (digests.yml).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

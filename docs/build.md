@@ -1,8 +1,9 @@
 # Build, Images, Reproduzierbarkeit
 
 Ein Build soll zweimal dasselbe ergeben, und ein Release soll benennbar sein. Beides ist hier
-ohne CI umgesetzt, was den Aufwand von der Automatik in die Konstruktion verschiebt: Was nicht
-geprüft werden kann, wird stattdessen unmöglich gemacht.
+zuerst in der Konstruktion umgesetzt und nicht in der Automatik: Was nicht geprüft werden kann,
+wird stattdessen unmöglich gemacht. CI (`.github/workflows/ci.yml`) prüft seitdem zusätzlich —
+es ersetzt die Konstruktion nicht, es merkt nur, wenn sie verletzt wurde.
 
 Die Befehle stehen in README Abschnitt 4 und 6. Hier steht, warum sie so aussehen.
 
@@ -66,8 +67,8 @@ ausführen.
 aller Lockfiles vor und nach dem Lauf: Ein Restore im locked mode schreibt die Datei trotzdem
 neu, wenn er zu dem Schluss kommt, dass er darf.
 
-Das Skript läuft nicht von selbst. README Abschnitt 13 listet es, Abschnitt 14 nennt das
-fehlende CI als bekannte Einschränkung.
+CI ruft das Skript bei jedem Push und PR auf; README Abschnitt 13 listet es außerdem für den
+Lauf von Hand vor einem Release.
 
 ### Der doppelte Bindestrich
 
@@ -91,9 +92,10 @@ jeder Architektur auf. Fragte man skopeo stattdessen nach einem plattformspezifi
 entstünde ein Pin, der nur auf amd64 funktioniert.
 
 `scripts/check-digests.sh` meldet, wenn ein Tag upstream weitergewandert ist. Es schreibt
-**nichts** um: Es druckt die Ersatzzeile und überlässt die Änderung einem Menschen, weil es hier
-kein CI gibt, das eine fehlerhafte automatische Umschreibung eines Dockerfiles oder von
-`values.yaml` auffinge.
+**nichts** um: Es druckt die Ersatzzeile und überlässt die Änderung einem Menschen. Eine
+automatische Umschreibung eines Dockerfiles oder von `values.yaml` wäre genau die Änderung, die
+niemand mehr liest. Der wöchentliche CI-Lauf (`digests.yml`) meldet also nur — entscheiden muss
+weiterhin jemand.
 
 Die Dateiliste im Skript ist ausgeschrieben und nicht geglobbt. Ein neuer Pin in einer Datei,
 die niemand dort eingetragen hat, bleibt damit ungeprüft — das ist sichtbar. Die Alternative
@@ -224,16 +226,20 @@ Manifeste**.
 `kind load docker-image` liest den *Docker*-Speicher, den podman nicht füllt. Der Weg über ein
 Archiv ist die unterstützte Route für ein mit podman gebautes Image.
 
-Das Umtaggen davor ist nicht kosmetisch. Podman legt ein lokal gebautes Image unter
-`localhost/<name>` ab, und `podman save` schreibt diesen Namen ins Archiv — der Node hielte also
-`localhost/redetim-backend:<tag>`. Das Chart fragt nach dem blanken
-`redetim-backend:<tag>`, was containerd zu `docker.io/library/redetim-backend:<tag>`
-normalisiert: ein Name, den das Archiv nie trug. Der kubelet tut daraufhin das Einzige, was ihm
-bleibt, und versucht von Docker Hub zu ziehen — `ImagePullBackOff` für ein Image, das
-nachweislich schon auf dem Node liegt.
+Früher stand vor dem `podman save` ein Umtaggen auf `docker.io/library/<name>`, und das war
+nicht kosmetisch: Podman legt ein lokal gebautes Image unter `localhost/<name>` ab und schreibt
+diesen Namen ins Archiv, während containerd den blanken `redetim-backend:<tag>` aus dem Chart zu
+`docker.io/library/redetim-backend:<tag>` normalisiert — ein Name, den das Archiv nie trug. Der
+kubelet tat daraufhin das Einzige, was ihm blieb, und versuchte von Docker Hub zu ziehen:
+`ImagePullBackOff` für ein Image, das nachweislich schon auf dem Node lag.
 
-Unter dem vollqualifizierten Namen zu speichern bringt beide zur Deckung. `docker save` hängt
-kein Präfix an, der andere Zweig braucht davon nichts.
+Seit die Namen in `values.yaml` registry-qualifiziert sind (`ghcr.io/dianatin23/redetim-*`),
+entfällt das. Ein Name mit Registry-Anteil normalisiert auf sich selbst, podman speichert ihn
+unverändert, und beide Seiten meinen dieselbe Zeichenkette. Das alte Umtaggen wäre jetzt sogar
+falsch — es ergäbe `docker.io/library/ghcr.io/dianatin23/redetim-backend`.
+
+**Auf einem kind-Cluster ist das nicht nachgeprüft** — auf dieser Maschine ist kein kind
+installiert. Der Schluss folgt aus der Namensauflösung, nicht aus einem Lauf.
 
 Der minikube-Zweig hat dasselbe Problem und dieselbe Behebung, ist hier aber **nicht** auf einem
 echten Cluster erprobt worden — es gibt kein minikube auf den Entwicklungsmaschinen.
@@ -242,13 +248,28 @@ Wird `podman` und `docker` beides gefunden, gewinnt podman: Auf den Maschinen di
 ist `docker` ohnehin oft ein podman-Shim, und ausdrücklich zu sein erspart Überraschungen
 darüber, in welchem Speicher das Image landet.
 
+`ENGINE=docker|podman` schaltet diese Erkennung ab. CI braucht das: Ein GitHub-Runner hat beide,
+und `docker/login-action` legt die Zugangsdaten nach `~/.docker/config.json`, während podman
+zuerst in `$XDG_RUNTIME_DIR/containers/auth.json` schaut. Trifft der Rückfallpfad nicht, wird
+aus einem Anmeldeproblem ein blankes `unauthorized` mitten im Push.
+
+### Push nach ghcr.io
+
+`--push` impliziert `--release` — ein Image in einer Registry, das keinen Commit benennt, ist
+genau das, was die Tag-Wächter des Charts aus einem Cluster heraushalten sollen. Aus demselben
+Grund verweigert `--push` ein gesetztes `IMAGE_TAG`, und zwar **vor** dem Bauen.
+
+Die Image-Namen stehen nicht mehr doppelt da. `build-images.sh` liest `*.image.repository` aus
+`values.yaml`, statt dieselben drei Namen ein zweites Mal zu führen: Das Skript kann damit nichts
+unter einem Namen bauen, den das Chart nicht ausrollt.
+
 ## Die `--help`-Köpfe der Skripte
 
 Drei Skripte geben ihren eigenen Kommentarkopf als Hilfetext aus:
 
 | Skript | Zeile | Bereich |
 |---|---|---|
-| `scripts/build-images.sh` | 30 | `sed -n '2,14p' "$0"` |
+| `scripts/build-images.sh` | 36 | `sed -n '2,18p' "$0"` |
 | `scripts/check-digests.sh` | 16 | `sed -n '2,9p' "$0"` |
 | `scripts/check-repro.sh` | 27 | `sed -n '2,20p' "$0"` |
 

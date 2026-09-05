@@ -1,3 +1,5 @@
+| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. CI rendert beide Varianten und prüft genau das. |
+| Digest-Pins in `values.yaml` und den Dockerfiles | den Tags upstream | `scripts/check-digests.sh` meldet es, wöchentlich aus `digests.yml`. Umgeschrieben wird nichts. |
 # Architektur
 
 RedeTim besteht aus zwei eigenständig geschriebenen und eigenständig ausgelieferten
@@ -126,9 +128,9 @@ keine Client-Eingabe.
 
 ## Manuelle Kopplungen
 
-Es gibt kein CI (README Abschnitt 14). Ein paar Werte hängen deshalb an Werten in anderen
-Dateien, ohne dass irgendetwas das prüft. An diesen Stellen steht im Code je eine Zeile, die
-darauf hinweist — sie sind die einzige Kontrolle, die es gibt.
+CI prüft Tests, Lock-Dateien und das Chart (README Abschnitt 13), die folgenden Kopplungen aber
+nicht — sie hängen an Werten in anderen Dateien, ohne dass irgendetwas sie vergleicht. An diesen
+Stellen steht im Code je eine Zeile, die darauf hinweist; sie sind die einzige Kontrolle.
 
 | Ort | hängt an | Was bei Drift passiert |
 |---|---|---|
@@ -136,12 +138,12 @@ darauf hinweist — sie sind die einzige Kontrolle, die es gibt.
 | `RedeTim-kafka-docker/make-tls.sh` | `docker-compose.yml`, `redpanda.image` in `values.yaml` | Die lokale Broker-Version weicht von der im Cluster ab — Dev/Prod-Parität nur noch auf dem Papier. |
 | `ChatMetrics` (Instrumentnamen) | Suffixregeln des Prometheus-Exporters | Namen kommen mit falschem oder doppeltem Suffix in Prometheus an, die PromQL-Beispiele laufen leer. |
 | `Directory.Build.props` | XML erlaubt kein `--` im Kommentar | MSBuild meldet ein leeres `TargetFramework` aus einer völlig anderen Datei. |
-| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. |
-| Digest-Pins in `values.yaml` und den Dockerfiles | den Tags upstream | `scripts/check-digests.sh` meldet es — aber nur, wenn jemand es startet. |
+| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. CI rendert beide Varianten und prüft genau das. |
+| Digest-Pins in `values.yaml` und den Dockerfiles | den Tags upstream | `scripts/check-digests.sh` meldet es, wöchentlich aus `digests.yml`. Umgeschrieben wird nichts. |
 
-Die beiden Skripte `check-digests.sh` und `check-repro.sh` sind der automatisierbare Teil
-davon. Sie laufen nicht von selbst; README Abschnitt 13 listet sie, Abschnitt 14 nennt das
-fehlende CI als bekannte Einschränkung.
+Die beiden Skripte `check-digests.sh` und `check-repro.sh` sind der automatisierbare Teil davon
+und laufen inzwischen von selbst: `check-repro.sh` bei jedem Push und PR, `check-digests.sh`
+wöchentlich. Die Zeilen der Tabelle darüber bleiben unbewacht — deshalb stehen sie hier.
 
 ## Prozesse
 

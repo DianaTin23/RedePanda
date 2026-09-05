@@ -48,9 +48,10 @@ Bei Unsicherheit über die Begründung: `docs/kafka.md`, `docs/streaming.md`,
    Partitionen und die Offsets je Stream steigen nicht mehr streng monoton — womit Punkt 3
    fällt.
 
-5. **`ChatMessageSerializer` ist die einzige Stelle mit `JsonSerializer`-Optionen.** Ein
+5. **`WireFormat` ist die einzige Stelle mit `JsonSerializer`-Optionen.** Ein
    `JsonSerializer.Serialize/Deserialize` mit eigenen Options im Backend oder im Konsolenclient
-   ist ein Befund, auch wenn es zufällig dasselbe Ergebnis liefert.
+   ist ein Befund, auch wenn es zufällig dasselbe Ergebnis liefert. `PresenceKey` ist die
+   dokumentierte Ausnahme: Record-Key, nicht Payload.
 
 6. **Kein `/metrics` im Backend.** Das Backend pusht über OTLP und hat bewusst keinen
    Prometheus-Endpunkt (`curl` → 404). Ein neu eingebauter Endpunkt oder ein

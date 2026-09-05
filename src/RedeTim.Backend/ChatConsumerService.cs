@@ -92,7 +92,7 @@ public sealed class ChatConsumerService(
                         continue;
                     }
 
-                    var message = ChatMessageSerializer.Deserialize(payload);
+                    var message = WireFormat.Deserialize<ChatMessage>(payload);
                     if (message is null)
                     {
                         logger.LogWarning("Skipped an unreadable record at offset {Offset}", result.Offset);

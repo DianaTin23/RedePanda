@@ -76,7 +76,7 @@ public sealed class PresenceProducer : IPresenceProducer, IDisposable
         var message = new Message<string, string>
         {
             Key = PresenceKey.Encode(room, nickname),
-            Value = PresenceEventSerializer.Serialize(record),
+            Value = WireFormat.Serialize(record),
         };
 
         await ProduceAsync(message, cancellationToken);

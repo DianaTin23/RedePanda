@@ -135,7 +135,7 @@ public class ChatStreamTests
 
         Assert.Equal("message", stream.Current.EventType);
 
-        var received = ChatMessageSerializer.Deserialize(stream.Current.Data);
+        var received = WireFormat.Deserialize<ChatMessage>(stream.Current.Data);
         Assert.NotNull(received);
         Assert.Equal("hallo", received.Text);
         Assert.Equal("general", received.Room);
@@ -159,14 +159,14 @@ public class ChatStreamTests
         Assert.Equal(ChatStream.HeartbeatEventType, stream.Current.EventType);
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The first history item never arrived."));
-        Assert.Equal("erste", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("erste", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The second history item never arrived."));
-        Assert.Equal("zweite", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("zweite", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         broadcaster.Publish(Message("general", "live"), offset: 2);
         Assert.True(await MoveNextWithin(stream, Promptly, "The live message never arrived."));
-        Assert.Equal("live", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("live", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         await cts.CancelAsync();
     }
@@ -208,7 +208,7 @@ public class ChatStreamTests
         Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The missed message never arrived."));
-        Assert.Equal("verpasst", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("verpasst", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         var moved = stream.MoveNextAsync().AsTask();
         var winner = await Task.WhenAny(

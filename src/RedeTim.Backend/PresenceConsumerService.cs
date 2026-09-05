@@ -126,7 +126,7 @@ public sealed class PresenceConsumerService(
             return;
         }
 
-        var record = PresenceEventSerializer.Deserialize(message.Value);
+        var record = WireFormat.Deserialize<PresenceRecord>(message.Value);
         if (record is null)
         {
             logger.LogWarning("Skipped an unreadable presence record");

@@ -1275,7 +1275,7 @@ ohne Cluster ist geprüft — die Abnahmeliste in Abschnitt 13 bleibt davon unbe
 
 - `kafka-invariant-reviewer` prüft einen Diff gegen die tragenden Invarianten:
   `KafkaSecurity.ApplyTo` an jedem Kafka-Client, Consumer-Group je Pod, SSE-`id` = Offset, Raum
-  als Record-Key, `ChatMessageSerializer` als einzige Serialisierungsstelle, kein `/metrics`,
+  als Record-Key, `WireFormat` als einzige Serialisierungsstelle, kein `/metrics`,
   Metriknamen ohne Suffix.
 - `doc-sync-checker` prüft die Kopplungen, die kein Build sieht: Bereich → Dokument in `docs/`,
   die Abschnittsnummern dieser README, die Textlängengrenze in `app.js` gegen

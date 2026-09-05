@@ -93,11 +93,13 @@ Grenzen: Raum 64 Zeichen, Nickname 32, Text `MAX_MESSAGE_LENGTH` (Vorgabe 500).
 Die Längenprüfung läuft **nach** dem Trimmen, damit man das Limit nicht mit angehängten
 Leerzeichen auslösen kann.
 
-### `ChatMessageSerializer`
+### `WireFormat`
 
-Die einzige Stelle, an der das Payload-Format definiert ist. Weder Backend noch Konsolenclient
-dürfen `JsonSerializer` mit eigenen Optionen aufrufen — serialisierten sie unterschiedlich,
-verstünden sie einander still nicht mehr.
+Die einzige Stelle, an der das Payload-Format definiert ist — für die Chat-Nachricht wie für
+den Präsenz-Record. Weder Backend noch Konsolenclient dürfen `JsonSerializer` mit eigenen
+Optionen aufrufen — serialisierten sie unterschiedlich, verstünden sie einander still nicht
+mehr. Genau das war hier schon der Fall: die Präsenz hatte eine zweite, zeichengleiche Kopie
+derselben Optionen, und nichts hätte gemeldet, wenn eine der beiden abgewichen wäre.
 
 `Deserialize` gibt bei allem Unlesbaren `null` zurück. Ein fremder oder beschädigter Record
 darf die Consume-Schleife nicht beenden.

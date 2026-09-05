@@ -44,7 +44,7 @@ public sealed class Consumer : IDisposable
                     continue;
                 }
 
-                var message = ChatMessageSerializer.Deserialize(payload);
+                var message = WireFormat.Deserialize<ChatMessage>(payload);
                 if (message is null)
                 {
                     continue;

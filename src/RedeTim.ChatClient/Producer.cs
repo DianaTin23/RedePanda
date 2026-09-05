@@ -27,7 +27,7 @@ public sealed class Producer : IDisposable
         var record = new Message<string, string>
         {
             Key = message.Room,
-            Value = ChatMessageSerializer.Serialize(message),
+            Value = WireFormat.Serialize(message),
         };
 
         try

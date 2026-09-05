@@ -113,8 +113,11 @@ steht jeweils in `docs/`; hier steht nur, was gilt.
 - **Der Raum ist der Kafka-Record-Key.** Alle Nachrichten eines Raums liegen damit auf einer
   Partition, und die Offsets je Stream steigen streng monoton. Offsets sind **pro Partition**
   eindeutig; genau deshalb trägt die Konstruktion auch bei `chat.partitions > 1`.
-- **`ChatMessageSerializer` ist die einzige Stelle mit `JsonSerializer`-Optionen.** Backend und
-  Konsolenclient dürfen nicht eigenständig serialisieren.
+- **`WireFormat` ist die einzige Stelle mit `JsonSerializer`-Optionen.** Backend und
+  Konsolenclient dürfen nicht eigenständig serialisieren; Chat- *und* Präsenz-Payload gehen
+  durch dieselben Optionen. Einzige gewollte Ausnahme: `PresenceKey`, dessen JSON ein
+  undurchsichtiger Record-*Key* ist und dessen Form von den Records im kompaktierten Topic
+  festliegt.
 - **`KafkaSecurity.ApplyTo` gilt für *jeden* Kafka-Client im Repo** (Producer, Consumer, Admin).
   Ein neuer Client ohne diesen Aufruf funktioniert gegen den Plaintext-Demo-Broker und
   scheitert still gegen jeden abgesicherten; genau so entstand der Readiness-Bug.

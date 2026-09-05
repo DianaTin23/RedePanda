@@ -181,7 +181,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
 
         Assert.StartsWith("data: ", frame);
 
-        var received = ChatMessageSerializer.Deserialize(frame["data: ".Length..]);
+        var received = WireFormat.Deserialize<ChatMessage>(frame["data: ".Length..]);
         Assert.NotNull(received);
         Assert.Equal("hallo", received.Text);
         Assert.Equal("general", received.Room);
@@ -208,7 +208,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
         Assert.Contains("id: 11", frame);
 
         var data = Assert.Single(frame, line => line.StartsWith("data: ", StringComparison.Ordinal));
-        Assert.Equal("vorher gesagt", ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
+        Assert.Equal("vorher gesagt", WireFormat.Deserialize<ChatMessage>(data["data: ".Length..])?.Text);
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
         Assert.Contains("id: 21", frame);
 
         var data = Assert.Single(frame, line => line.StartsWith("data: ", StringComparison.Ordinal));
-        Assert.Equal("verpasst", ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
+        Assert.Equal("verpasst", WireFormat.Deserialize<ChatMessage>(data["data: ".Length..])?.Text);
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
             ids.Add(long.Parse(id["id: ".Length..]));
 
             var data = Assert.Single(frame, line => line.StartsWith("data: ", StringComparison.Ordinal));
-            Assert.Equal(expected, ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
+            Assert.Equal(expected, WireFormat.Deserialize<ChatMessage>(data["data: ".Length..])?.Text);
         }
 
         Assert.Equal([30L, 31L, 32L], ids);

@@ -94,7 +94,7 @@ internal static class ChatStream
     }
 
     private static SseItem<string> Data(ChatRecord record) =>
-        new(ChatMessageSerializer.Serialize(record.Message))
+        new(WireFormat.Serialize(record.Message))
         {
             EventId = record.Offset.ToString(CultureInfo.InvariantCulture),
         };

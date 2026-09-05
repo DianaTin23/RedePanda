@@ -211,8 +211,9 @@ export REDPANDA_SASL_USERNAME=chat
 export REDPANDA_SASL_PASSWORD=chat-secret-pw
 export REDPANDA_SSL_CA_LOCATION=$PWD/RedeTim-kafka-docker/tls/ca.crt
 
-dotnet run --project src/RedeTim.ChatClient -- --print-config     # was wirklich ankommt
-dotnet run --project src/RedeTim.ChatClient -- --ensure-topic
+dotnet run --project src/RedeTim.ChatClient -- --ensure-topic     # legt den Topic an -- und ist
+                                                                  # zugleich die Probe, dass die
+                                                                  # SASL/TLS-Einstellungen ankommen
 OTEL_SDK_DISABLED=true ASPNETCORE_URLS=http://127.0.0.1:5080 \
   dotnet run --project src/RedeTim.Backend
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5080/health/ready   # 200
@@ -780,8 +781,8 @@ Begründung in [docs/observability.md](docs/observability.md#bewusst-nur-metrike
 | Concurrency | **Beide** Deployments laufen mit 2 Replicas, PodDisruptionBudget, `preStop`-Drain und Rollout ohne Unterbrechung (`maxUnavailable: 0`) — der SSE-Pfad ist damit von Caddy bis Kafka redundant, nicht nur an seinem hinteren Ende. Backend zusätzlich: Consumer-GroupId pro Pod ⇒ echter Fan-out, HPA optional, kein Sticky-Session-Bedarf, weil die SSE-`id` der Kafka-Offset ist. Caddy spricht zum Backend auf `versions 1.1` — über HTTP/2 liefe jeder Stream eines Pods über *eine* TCP-Verbindung und damit auf *einer* Backend-Replica | Offsets sind **pro Partition** eindeutig, nicht brokerweit. Bei `chat.partitions > 1` trägt die Konstruktion nur, weil beide Producer nach Raum keyen und ein Raum damit auf einer Partition bleibt. Jede Replica liest 100 % des Topics: der Fan-out skaliert das Ausliefern, nicht das Lesen. HPA braucht metrics-server und ist per Default aus |
 | Disposability | SIGTERM: Consumer `Close()` (auf 5 s begrenzt, sonst wird der Broker nicht mehr abgewartet), Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten. Frontend analog: Caddy hat `grace_period 5s`, sonst wartete es unbegrenzt auf SSE-Antworten, die per Definition nie fertig werden | das Budget ist ≈ 35 s, nicht 30: `ChatProducer.Dispose()` flusht bis zu 5 s **nachdem** `Host.StopAsync` zurückgekehrt ist, also `preStop` 5 s + 25 s + 5 s < Grace Period 45 s. Der `Close()`-Term von 5 s liegt *innerhalb* der 25 s und zählt nicht doppelt (Aufstellung: [docs/kafka.md](docs/kafka.md#herunterfahren)). Der `Close()`-Term ist neu begrenzt: `HostOptions.ShutdownTimeout` bricht ihn nicht ab (der Timeout kündigt ein Token, das dieser Aufruf gar nicht entgegennimmt), also lief er gegen einen unerreichbaren Broker über das ganze Budget hinaus in ein stilles SIGKILL. Die Readiness hängt am Broker: ohne erreichbaren Broker wird der Pod nie `Ready` — richtig so, aber es macht eine Broker-Störung zu einem Rollout, der stehen bleibt |
 | Dev/Prod Parity | derselbe Broker lokal und im Cluster, **inklusive Digest** und im selben `--mode=dev-container`; identisch gepinntes .NET-SDK in `global.json`, `flake.nix` und beiden Build-Dockerfiles | **die Anwendungs-Images laufen lokal nicht**: Abschnitt 5 startet Backend und Konsolenclient per `dotnet run` aus dem Quelltext, und das Frontend läuft lokal überhaupt nicht — die Browser-Oberfläche gibt es nur über den Cluster-Weg. Redpanda ist ein einzelner Broker ohne Replikation |
-| Logs | strukturiert (JSON) nach stdout, keine Logdateien: Backend über `AddJsonConsole` mit `Timestamp`/`LogLevel`/`Category`, Frontend als Caddy-Access-Log (eine Zeile pro Request, Probes ausgenommen). Auch librdkafkas eigene Ausgabe geht über `SetLogHandler` durch `ILogger`, statt roh auf stderr an `LOG_LEVEL` vorbei | Logs laufen bewusst **nicht** über OTLP. Die beiden JSON-Schemata sind nicht vereinheitlicht — Caddy loggt zap-artig (`ts`/`level`/`msg`/`request`), .NET mit `Timestamp`/`LogLevel`/`Category`. Und die Admin-Prozesse sind gar nicht strukturiert: sie schreiben einfache Zeilen mit `Console.WriteLine` und kennen kein `LOG_LEVEL` |
-| Admin Processes | vier Admin-Prozesse aus **demselben Build unter demselben Tag** wie die Anwendung und mit **derselben ConfigMap** per `envFrom`: `--ensure-topic` (legt den Topic an und zieht die Partitionszahl nach), `--describe-topic`, `--print-config` und der interaktive Chat-Client. Der erste läuft bei jedem Install/Upgrade als Job, die übrigen ad hoc über `adminJob.enabled=true` — inklusive `kubectl attach -ti`. Kein Shell-Skript in einem fremden Image, keine zweite Konfigurationsquelle | „dasselbe Image" wäre zu viel gesagt: es sind zwei Images auf zwei Laufzeit-Basen (`aspnet:10.0` für das Backend, `runtime:10.0` für den Client). Gemeinsam sind Build, Tag und Konfiguration — und darauf kommt es an. Ein Job-Name trägt die Release-Revision, zwei verschiedene Kommandos in derselben Revision brauchen also zwei `helm upgrade` |
+| Logs | strukturiert (JSON) nach stdout, keine Logdateien: Backend über `AddJsonConsole` mit `Timestamp`/`LogLevel`/`Category`, Frontend als Caddy-Access-Log (eine Zeile pro Request, Probes ausgenommen). Auch librdkafkas eigene Ausgabe geht über `SetLogHandler` durch `ILogger`, statt roh auf stderr an `LOG_LEVEL` vorbei | Logs laufen bewusst **nicht** über OTLP. Die beiden JSON-Schemata sind nicht vereinheitlicht — Caddy loggt zap-artig (`ts`/`level`/`msg`/`request`), .NET mit `Timestamp`/`LogLevel`/`Category`. Und der Chat-Client ist gar nicht strukturiert — Admin-Prozess wie interaktiver Betrieb: er schreibt einfache Zeilen mit `Console.WriteLine` und kennt kein `LOG_LEVEL` |
+| Admin Processes | `--ensure-topic` läuft aus **demselben Build unter demselben Tag** wie die Anwendung und mit **derselben ConfigMap** per `envFrom` — bei jedem Install und Upgrade als Job. Es legt den Topic an und zieht die Partitionszahl nach. Kein Shell-Skript in einem fremden Image, keine zweite Konfigurationsquelle | „dasselbe Image" wäre zu viel gesagt: es sind zwei Images auf zwei Laufzeit-Basen (`aspnet:10.0` für das Backend, `runtime:10.0` für den Client). Gemeinsam sind Build, Tag und Konfiguration — und darauf kommt es an. Der Job-Name trägt die Release-Revision, das Pod-Template ist unveränderlich. Ein zweiter Job mit frei setzbaren Argumenten stand hier einmal; ihn hat nie jemand aufgerufen |
 
 ### Build, Release, Run im Einzelnen
 
@@ -844,7 +845,7 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 ## 13. Tests und Abnahme-Checkliste
 
 ```bash
-dotnet test -p:ContinuousIntegrationBuild=true  # 204 Tests, locked mode wie in CI
+dotnet test -p:ContinuousIntegrationBuild=true  # 197 Tests, locked mode wie in CI
 ./scripts/validate-chart.sh                     # beide HPA-Varianten, replicas, Negativfall
 ./scripts/check-repro.sh                        # alle vier Projekte gegen ihre Lock-Dateien
 ./scripts/check-digests.sh                      # Image-Digests + Broker-Parität lokal/Cluster
@@ -1095,7 +1096,7 @@ einem Commit existieren erst nach ihm.
 - **`chat.maxMessageLength` wirkt nur halb.** Der Server liest es aus der Umgebung, das Frontend hat
   die 500 in `index.html` und `app.js` fest stehen und kennt keinen Konfigurationsendpunkt. Wer den
   Server-Wert erhöht, bekommt ein Eingabefeld, das trotzdem bei 500 abschneidet.
-- **`RedeTim.ChatClient` hat kein Testprojekt.** Die Admin-Prozesse sind gegen einen echten Broker
+- **`RedeTim.ChatClient` hat kein Testprojekt.** `--ensure-topic` ist gegen einen echten Broker
   vorgeführt (Abschnitt 5), aber nicht durch Unit-Tests abgesichert — dieselbe Form von Lücke, aus
   der der Readiness-Fehler entstanden ist.
 

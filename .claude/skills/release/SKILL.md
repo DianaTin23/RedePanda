@@ -55,7 +55,7 @@ Was der Job dann tut:
 
 ```bash
 git pull                                    # holt den Release-Commit
-REL=100 1 27 57 100./scripts/select-release.sh)| head -1)
+REL=$(./scripts/select-release.sh)
 helm upgrade --install redetim deploy/helm/redetim -n redetim -f "$REL"
 ```
 

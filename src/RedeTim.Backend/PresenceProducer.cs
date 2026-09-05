@@ -3,17 +3,13 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>Renews or releases one (room, nickname) reservation on the presence topic.</summary>
 internal interface IPresenceProducer
 {
-    /// <summary>Marks the reservation as still alive, resetting its TTL clock on every pod.</summary>
     Task RenewAsync(string room, string nickname, CancellationToken cancellationToken);
 
-    /// <summary>Frees the reservation immediately via a Kafka tombstone, instead of waiting out the TTL.</summary>
     Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken);
 }
 
-/// <summary>Publishes presence heartbeats and tombstones to the presence topic.</summary>
 public sealed class PresenceProducer : IPresenceProducer, IDisposable
 {
     private readonly IProducer<string, string> _producer;
@@ -49,11 +45,9 @@ public sealed class PresenceProducer : IPresenceProducer, IDisposable
             .Build();
     }
 
-    /// <summary>The producer's configuration, separate so it can be asserted on without a broker.</summary>
     internal static ProducerConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <summary>The producer's configuration, reading security settings through <paramref name="read"/>.</summary>
     internal static ProducerConfig BuildConfig(BackendOptions options, Func<string, string?> read)
     {
         var config = new ProducerConfig
@@ -69,7 +63,6 @@ public sealed class PresenceProducer : IPresenceProducer, IDisposable
         return config;
     }
 
-    /// <summary>How a failed produce is reported to the browser.</summary>
     internal static int StatusCodeFor(Error error) => error.Code switch
     {
         ErrorCode.Local_MsgTimedOut or ErrorCode.Local_TimedOut =>

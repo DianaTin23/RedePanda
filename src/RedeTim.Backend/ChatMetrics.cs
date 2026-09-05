@@ -2,7 +2,6 @@ using System.Diagnostics.Metrics;
 
 namespace RedeTim.Backend;
 
-/// <summary>The application's own metrics.</summary>
 public sealed class ChatMetrics
 {
     public const string MeterName = "RedeTim";
@@ -24,15 +23,11 @@ public sealed class ChatMetrics
         _streamsCut = meter.CreateCounter<long>("redetim.streams.cut");
     }
 
-    /// <summary>A message was accepted and handed to the producer.</summary>
     public void RecordMessageSent() => _messagesSent.Add(1);
 
-    /// <summary>A message came back from the topic through the consumer.</summary>
     public void RecordMessageReceived() => _messagesReceived.Add(1);
 
-    /// <summary>A produce or consume operation failed.</summary>
     public void RecordKafkaError() => _kafkaErrors.Add(1);
 
-    /// <summary>An SSE subscriber fell far enough behind that its stream was ended.</summary>
     public void RecordStreamCut() => _streamsCut.Add(1);
 }

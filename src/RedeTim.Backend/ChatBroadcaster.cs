@@ -5,7 +5,6 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>Fans messages coming off the Kafka topic out to the SSE connections held by this pod.</summary>
 public sealed class ChatBroadcaster
 {
     private readonly ConcurrentDictionary<Guid, Subscriber> _subscribers = new();
@@ -29,13 +28,10 @@ public sealed class ChatBroadcaster
         meter.CreateObservableUpDownCounter("redetim.active_connections", () => _subscribers.Count);
     }
 
-    /// <summary>Messages one SSE connection may fall behind before its stream is ended.</summary>
     internal const int SubscriberBufferSize = 256;
 
-    /// <summary>Number of open SSE connections on this pod.</summary>
     public int Count => _subscribers.Count;
 
-    /// <summary>Registers an SSE connection for one room and hands back everything already said in it.</summary>
     public Subscription Subscribe(string room, long afterOffset = -1)
     {
         var channel = Channel.CreateBounded<ChatRecord>(new BoundedChannelOptions(SubscriberBufferSize)
@@ -57,7 +53,6 @@ public sealed class ChatBroadcaster
         return new Subscription(this, id, channel.Reader, backlog);
     }
 
-    /// <summary>Records a message and delivers it to every connection watching its room.</summary>
     public void Publish(ChatMessage message, long offset)
     {
         var record = new ChatRecord(offset, message);
@@ -98,7 +93,6 @@ public sealed class ChatBroadcaster
 
     private sealed record Subscriber(string Room, Channel<ChatRecord> Channel);
 
-    /// <summary>Hands out the backlog and the reader, and removes the subscriber again on dispose.</summary>
     public sealed class Subscription(
         ChatBroadcaster broadcaster,
         Guid id,
@@ -106,7 +100,6 @@ public sealed class ChatBroadcaster
         IReadOnlyList<ChatRecord> backlog)
         : IDisposable
     {
-        /// <summary>What was already said in the room, oldest first. Replay this before reading.</summary>
         public IReadOnlyList<ChatRecord> Backlog { get; } = backlog;
 
         public ChannelReader<ChatRecord> Reader { get; } = reader;

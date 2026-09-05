@@ -3,16 +3,6 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>
-/// Reads the presence topic and projects it into the pod's local <see cref="PresenceStore"/>.
-///
-/// Deliberately less strict than <see cref="ChatConsumerService"/>: presence is a nicety on top
-/// of chat (blocking a duplicate nickname), not chat itself. Where a broken chat consumer takes
-/// the whole pod down ("a pod that cannot consume is broken, not merely limited" — docs/kafka.md),
-/// a broken presence consumer instead degrades open: the nickname lock stops being enforceable
-/// until the topic recovers, but chat keeps working and the pod stays ready. See docs/kafka.md
-/// for the reasoning.
-/// </summary>
 public sealed class PresenceConsumerService(
     BackendOptions options,
     PresenceStore store,
@@ -36,11 +26,9 @@ public sealed class PresenceConsumerService(
             TaskScheduler.Default);
     }
 
-    /// <summary>The consumer's configuration, separate so it can be asserted on without a broker.</summary>
     internal static ConsumerConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <summary>The consumer's configuration, reading security settings through <paramref name="read"/>.</summary>
     internal static ConsumerConfig BuildConfig(BackendOptions options, Func<string, string?> read)
     {
         var config = new ConsumerConfig
@@ -114,7 +102,6 @@ public sealed class PresenceConsumerService(
         }
         catch (OperationCanceledException)
         {
-            // Normal shutdown.
         }
         catch (Exception e)
         {

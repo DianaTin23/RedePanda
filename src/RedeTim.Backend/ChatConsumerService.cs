@@ -3,7 +3,6 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>Reads the chat topic and hands every message to the <see cref="ChatBroadcaster"/>.</summary>
 public sealed class ChatConsumerService(
     BackendOptions options,
     ChatBroadcaster broadcaster,
@@ -29,11 +28,9 @@ public sealed class ChatConsumerService(
             TaskScheduler.Default);
     }
 
-    /// <summary>The consumer's configuration, separate so it can be asserted on without a broker.</summary>
     internal static ConsumerConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <summary>The consumer's configuration, reading security settings through <paramref name="read"/>.</summary>
     internal static ConsumerConfig BuildConfig(BackendOptions options, Func<string, string?> read)
     {
         var config = new ConsumerConfig
@@ -118,7 +115,6 @@ public sealed class ChatConsumerService(
         }
         catch (OperationCanceledException)
         {
-            // Normal shutdown.
         }
         catch (Exception e)
         {
@@ -131,7 +127,6 @@ public sealed class ChatConsumerService(
 
     private static readonly TimeSpan WatermarkTimeout = TimeSpan.FromSeconds(10);
 
-    /// <summary>Where to start reading one partition, given the offsets the broker still holds.</summary>
     internal static long StartOffsetFor(long low, long high, int replayRecords) =>
         replayRecords <= 0 ? low : Math.Max(low, high - replayRecords);
 
@@ -193,13 +188,9 @@ public sealed class ChatConsumerService(
             "Replayed topic {Topic} to the end; the pod is ready to serve history", options.Topic);
     }
 
-    /// <summary>How long the leave-group round trip may take before the pod stops waiting for it.</summary>
     internal static readonly TimeSpan CloseBudget = TimeSpan.FromSeconds(5);
 
-    /// <summary>
-    /// Runs <paramref name="close"/> on an abandonable background thread and waits at most
-    /// <paramref name="budget"/> for it. Returns <c>true</c> if it finished inside the budget.
-    /// </summary>
+    // Abandonable: the close runs on a background thread and the pod stops waiting after budget.
     internal static bool TryCloseWithin(Action close, TimeSpan budget, out Exception? failure)
     {
         Exception? caught = null;

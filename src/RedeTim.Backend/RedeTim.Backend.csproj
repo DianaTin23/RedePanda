@@ -5,8 +5,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Versions pinned in Directory.Packages.props, which also carries the note on why
-             Confluent.Kafka constrains the container base image (see Dockerfile). -->
         <PackageReference Include="Confluent.Kafka" />
 
         <PackageReference Include="OpenTelemetry.Extensions.Hosting" />

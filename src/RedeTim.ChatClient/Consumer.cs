@@ -25,7 +25,6 @@ public sealed class Consumer : IDisposable
         _consumer.Subscribe(topic);
     }
 
-    /// <summary>Consumes until cancelled, on a dedicated thread because <c>Consume</c> blocks.</summary>
     public Task RunAsync(CancellationToken token) =>
         Task.Factory.StartNew(
             () => ConsumeLoop(token),
@@ -57,7 +56,6 @@ public sealed class Consumer : IDisposable
         }
         catch (OperationCanceledException)
         {
-            // Normal shutdown.
         }
         catch (ConsumeException e)
         {

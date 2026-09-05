@@ -31,10 +31,8 @@ builder.Services.AddHostedService<ChatConsumerService>();
 
 builder.Services.AddSingleton<PresenceStore>();
 
-// A single registration, not AddSingleton<PresenceProducer>() plus a delegate wrapping it in
-// IPresenceProducer: two registrations for the same disposable instance make the container
-// track and dispose it twice, and the second Dispose() throws because librdkafka's handle is
-// already gone by then.
+// One registration, not two: the container would track the same disposable instance twice and
+// the second Dispose() throws, librdkafka's handle being gone by then.
 builder.Services.AddSingleton<IPresenceProducer>(sp => ActivatorUtilities.CreateInstance<PresenceProducer>(sp));
 
 builder.Services.AddHostedService<PresenceConsumerService>();
@@ -178,5 +176,5 @@ app.MapGet("/api/stream", IResult (
 
 app.Run();
 
-/// <summary>Exposed so the test project can reference the entry-point assembly.</summary>
+// Exposed so the test project can reference the entry-point assembly.
 public partial class Program;

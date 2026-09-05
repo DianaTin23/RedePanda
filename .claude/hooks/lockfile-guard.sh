@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Claude Code PostToolUse hook. Wired in .claude/settings.json for `Bash(dotnet *)`.
 #
-# `dotnet build`, `dotnet test` and `dotnet run` rewrite packages.lock.json when the resolved
-# graph no longer matches it. They do not say so, and the rewrite is easy to commit without
-# noticing -- the file that records what was tested quietly becomes a record of whatever
-# resolved most recently. This makes that visible in the same turn it happens.
+# `dotnet build/test/run` rewrite packages.lock.json silently when the graph no longer matches.
+# This makes that visible in the same turn it happens. Why it matters: docs/build.md.
 #
 # Exit code 2 is what hands the message back to the model rather than only to the terminal.
 # The real proof is scripts/check-repro.sh; this is only an early warning.

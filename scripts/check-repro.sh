@@ -3,21 +3,14 @@
 #
 #   ./scripts/check-repro.sh
 #
-# Exit status: 0 when every project restores against its committed lock file, 1 when one of them
-# has drifted, 2 on a usage or tooling error.
-#
-# Why this is a script rather than a habit: `dotnet build`, `dotnet test` and `dotnet run` all
-# *rewrite* a lock file when the resolved graph no longer matches it. They do not complain, and the
-# rewrite is easy to commit without noticing -- so the file that is supposed to be the record of
-# what was tested quietly becomes a record of whatever resolved most recently. Locked mode turns
-# that same mismatch into a failure, which is the whole value of having the file.
-#
-# It is not on by default in Directory.Build.props because a dependency change *should* rewrite the
-# lock file; see the comment there. This script sets ContinuousIntegrationBuild=true, which is what
-# switches locked mode on.
+# Locked mode is off by default because a deliberate dependency change *should* rewrite the lock
+# file; this script turns it on. Why that matters: docs/build.md.
 #
 # CI runs this on every push and pull request (.github/workflows/dotnet.yml). README section 13
 # lists it as well; run it by hand before cutting a release from a machine.
+#
+# Exit status: 0 when every project restores against its committed lock file, 1 when one of them
+# has drifted, 2 on a usage or tooling error.
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"

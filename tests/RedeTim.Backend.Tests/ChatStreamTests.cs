@@ -393,10 +393,8 @@ public class ChatStreamTests
             Assert.True(await MoveNextWithin(stream, Promptly, "A published message never arrived."));
         }
 
-        // A busy room satisfies subscription.Reader.ReadAsync well before any heartbeat timeout,
-        // so renewal must be gated on elapsed time, not on the heartbeat branch specifically --
-        // otherwise it would never renew at all. About 1s of traffic at a 200ms interval should
-        // renew a handful of times, nowhere near the number of published messages.
+        // A busy room never reaches the heartbeat branch, so renewal must be gated on elapsed
+        // time instead -- otherwise it would never renew at all.
         Assert.InRange(producer.Renewals.Count, 2, 10);
         Assert.True(
             producer.Renewals.Count < offset,

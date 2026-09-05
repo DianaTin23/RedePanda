@@ -40,7 +40,6 @@ public sealed class Producer : IDisposable
         }
         catch (OperationCanceledException)
         {
-            // Shutting down.
         }
     }
 

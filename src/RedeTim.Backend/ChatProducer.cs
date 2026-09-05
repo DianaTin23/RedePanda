@@ -3,7 +3,6 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>Publishes accepted messages to the Kafka topic.</summary>
 public sealed class ChatProducer : IDisposable
 {
     private readonly IProducer<string, string> _producer;
@@ -39,11 +38,9 @@ public sealed class ChatProducer : IDisposable
             .Build();
     }
 
-    /// <summary>The producer's configuration, separate so it can be asserted on without a broker.</summary>
     internal static ProducerConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <summary>The producer's configuration, reading security settings through <paramref name="read"/>.</summary>
     internal static ProducerConfig BuildConfig(BackendOptions options, Func<string, string?> read)
     {
         var config = new ProducerConfig
@@ -59,7 +56,6 @@ public sealed class ChatProducer : IDisposable
         return config;
     }
 
-    /// <summary>How a failed produce is reported to the browser.</summary>
     internal static int StatusCodeFor(Error error) => error.Code switch
     {
         ErrorCode.Local_MsgTimedOut or ErrorCode.Local_TimedOut =>
@@ -67,7 +63,6 @@ public sealed class ChatProducer : IDisposable
         _ => StatusCodes.Status502BadGateway,
     };
 
-    /// <summary>Produces one message, keyed by room so per-room ordering survives repartitioning.</summary>
     public async Task ProduceAsync(ChatMessage message, CancellationToken cancellationToken)
     {
         var record = new Message<string, string>

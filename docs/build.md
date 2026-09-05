@@ -260,8 +260,8 @@ sed -e '1d' -e '/^[^#]/,$d' "$0"
 Hier stand vorher eine Tabelle mit fest eingetragenen Bereichen — je einer pro Skript — und
 daneben die Mahnung, sie beim Bearbeiten mitzuziehen. Die Bereiche selbst stimmten; was nicht
 stimmte, war alles andere, das sie wiederholte: CLAUDE.md schrieb `2,18p` für alle drei, obwohl
-es `2,18`, `2,9` und `2,20` waren, `gate.sh` und `make-tls.sh` fehlten in jeder Aufzählung, und
-bei `make-tls.sh` gab `--help` längst Quelltext statt Hilfe aus. Genau das ist der Grund für die
+es `2,18`, `2,9` und `2,20` waren, `make-tls.sh` fehlte in jeder Aufzählung, und
+sein `--help` gab längst Quelltext statt Hilfe aus. Genau das ist der Grund für die
 selbstbegrenzende Form: sie kennt keine Bereiche, die veralten können. Was sie noch braucht, ist
 nur, dass der Kopf zusammenhängt — eine Leerzeile oder Anweisung mittendrin schneidet ihn ab.
 

@@ -54,8 +54,7 @@ jobs:
             | sudo tar -xz -C /usr/local/bin kubeconform
           kubeconform -v
 
-      # Every chart rule lives in this one script, which /abnahme and the edit hook also call.
-      # They used to carry their own transcription of it, and the copies had already drifted.
+      # Every chart rule lives in this one script, which CI is the only caller of.
       - name: Validate the chart
         env:
           # Must match the actions/cache path above.

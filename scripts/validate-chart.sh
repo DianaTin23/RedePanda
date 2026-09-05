@@ -2,7 +2,6 @@
 # Validates the Helm chart. Everything .github/workflows/chart.yml checks, in one place.
 #
 #   ./scripts/validate-chart.sh              # all four checks
-#   ./scripts/validate-chart.sh --quick      # only what renders offline: no lint, no kubeconform
 #   ./scripts/validate-chart.sh --committed-only  # pick the release file from git only (CI)
 #
 # Four things are easy to leave out by hand, and each is the whole point of its check:
@@ -12,9 +11,6 @@
 #   * rendering *without* a release file must fail, or `helm rollback` stops meaning anything;
 #   * `helm lint` cannot be that last gate: Helm 4 reports a template `fail` as INFO and still
 #     says "0 chart(s) failed". Only `helm template` actually aborts.
-#
-# --quick exists for .claude/hooks/chart-guard.sh, which runs on every edit: kubeconform fetches
-# its schemas over the network, so schema validation stays in CI and /abnahme.
 #
 # Exit status: 0 when every check passed, 1 when one failed, 2 on a usage or tooling error.
 set -uo pipefail
@@ -28,19 +24,17 @@ K8S_VERSION="1.32.0"
 # would not fail, it would just silently never hit the cache.
 KUBECONFORM_CACHE="${KUBECONFORM_CACHE:-${TMPDIR:-/tmp}/kubeconform}"
 
-mode="full"
 select_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help) usage ;;
-        --quick) mode="quick"; shift ;;
         --committed-only) select_args+=(--committed-only); shift ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
 require_tool helm
-[[ "${mode}" == "quick" ]] || require_tool kubeconform
+require_tool kubeconform
 
 REL="$(./scripts/select-release.sh ${select_args[@]+"${select_args[@]}"})" || exit 2
 printf '==> release file: %s\n' "${REL}"
@@ -65,12 +59,10 @@ render() {
         report "helm template failed ${label}"
         return
     fi
-    if [[ "${mode}" != "quick" ]]; then
-        helm lint "${CHART}" -f "${REL}" "$@" >/dev/null || report "helm lint failed ${label}"
-        helm template redetim "${CHART}" -n redetim -f "${REL}" "$@" \
-            | kubeconform -strict -summary -kubernetes-version "${K8S_VERSION}" \
-                -cache "${KUBECONFORM_CACHE}" || report "kubeconform failed ${label}"
-    fi
+    helm lint "${CHART}" -f "${REL}" "$@" >/dev/null || report "helm lint failed ${label}"
+    helm template redetim "${CHART}" -n redetim -f "${REL}" "$@" \
+        | kubeconform -strict -summary -kubernetes-version "${K8S_VERSION}" \
+            -cache "${KUBECONFORM_CACHE}" || report "kubeconform failed ${label}"
     echo "    ok"
 }
 

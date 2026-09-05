@@ -28,10 +28,6 @@ mono_crash.*
 !deploy/releases/
 # A build from an unclean tree is not a release and is not committed. The tag says so too.
 deploy/releases/*-dirty.*.yaml
-# ...and not .claude/skills/release either: `[Rr]elease/` above matches that directory too, which
-# silently dropped the /release slash command from the repository. Same rule as for
-# deploy/releases: the directory has to be un-excluded, not just the files in it.
-!.claude/skills/release/
 x64/
 x86/
 [Ww][Ii][Nn]32/
@@ -447,7 +443,3 @@ RedeTim-kafka-docker/tls/
 # Nix
 .direnv/
 /result
-
-# Claude Code: .claude/ ist eingecheckt (README Abschnitt 16), die persoenlichen Abweichungen
-# darin nicht.
-.claude/settings.local.json

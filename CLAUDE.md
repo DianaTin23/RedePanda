@@ -7,9 +7,8 @@ wo beides auseinanderläuft, gilt das Ziel des Verweises.
 
 ## Sprache
 
-README.md, `docs/`, die Kommentare in `values.yaml`/`.csproj` und die Prosa unter `.claude/`
-(`agents/*.md`, `skills/*/SKILL.md`) sind auf **Deutsch**; die `--help`-Köpfe der Skripte,
-`flake.nix`, die Shell-Skripte unter `.claude/` und die Code-Kommentare in C# sind auf
+README.md, `docs/` und die Kommentare in `values.yaml`/`.csproj` sind auf **Deutsch**;
+die `--help`-Köpfe der Skripte, `flake.nix` und die Code-Kommentare in C# sind auf
 **Englisch**. Beim Bearbeiten die Sprache der jeweiligen Datei beibehalten.
 
 ## Wo die Begründungen stehen
@@ -33,8 +32,7 @@ Code und Doku heraus referenziert** — beim Umsortieren die Verweise mitziehen.
 ## Befehle
 
 ```bash
-nix develop                    # Dev-Shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo,
-                               #            jq (nur fuer .claude/)
+nix develop                    # Dev-Shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo
 
 dotnet build                   # TreatWarningsAsErrors=true, keine Ausnahmen im Repo
 dotnet test                    # gesamte Suite (RedeTim.Backend.Tests, xunit v3)
@@ -45,8 +43,8 @@ dotnet test --filter "FullyQualifiedName~ChatHistoryTests.RoomsAreKeptApart"  # 
 ./scripts/check-digests.sh     # Digest-Drift + Broker-Parität lokal/Cluster (braucht skopeo)
 ```
 
-`validate-chart.sh` ist die einzige Stelle, an der die Chart-Regeln stehen; CI, `/abnahme` und
-der Edit-Hook rufen dasselbe Skript. Wer eine Regel ändert, ändert sie dort — und nur dort.
+`validate-chart.sh` ist die einzige Stelle, an der die Chart-Regeln stehen; CI ruft dasselbe
+Skript. Wer eine Regel ändert, ändert sie dort — und nur dort.
 
 Lokaler Lauf ohne Kubernetes und die Variante gegen einen TLS/SASL-Broker: README Abschnitt 5.
 Images bauen und pushen: `./scripts/build-images.sh [--release] [--push]`, README
@@ -59,20 +57,6 @@ Abschnitt 6. Demo mit Port-Forwards: `./scripts/demo.sh`.
 Abschnitt 12.
 
 Einen Cluster hat CI nicht — die manuelle Abnahmeliste in README Abschnitt 12 bleibt manuell.
-
-## Was `.claude/` automatisiert
-
-Eingecheckt, gilt also für jeden, der das Repo auscheckt. Vollständig in README Abschnitt 15.
-
-- **Zwei Hooks** (`.claude/settings.json`): `lockfile-guard.sh` meldet nach jedem `dotnet`-Aufruf
-  still neu geschriebene `packages.lock.json`; `chart-guard.sh` ruft nach jeder Änderung unter
-  `deploy/helm/` `validate-chart.sh --quick` auf (offline, ohne kubeconform). Beide melden sich
-  per Exit-Code 2.
-- **Zwei Skills**, nur auf Zuruf (`.claude/skills/`, `disable-model-invocation`): `/abnahme` (das
-  lokale Gate) und `/release` (Vorbedingungen plus `workflow_dispatch`). Ein Verzeichnis
-  `.claude/commands/` gibt es nicht.
-- **Zwei Subagents** vor einem PR: `kafka-invariant-reviewer` prüft die Invarianten unten am
-  Diff, `doc-sync-checker` die Doku-Kopplungen und Abschnittsnummern.
 
 ## Architektur
 

@@ -79,8 +79,7 @@ nix develop        # oder: direnv allow
 ```
 
 Diese Shell liefert .NET 10, `rpk`, `kubectl`, `helm`, `kubeconform`, `skopeo` und
-`docker-compose`. Dazu `jq` — das braucht nicht das Projekt, sondern die
-Claude-Code-Automatisierung in `.claude/` (Abschnitt 15).
+`docker-compose`.
 
 ### Zentrale Build-Konfiguration
 
@@ -736,8 +735,6 @@ dotnet test -p:ContinuousIntegrationBuild=true  # 197 Tests, locked mode wie in 
 ./scripts/check-digests.sh                      # Image-Digests + Broker-Parität lokal/Cluster
 ```
 
-Oder alles zusammen, in einem Lauf: `.claude/skills/abnahme/gate.sh` (Abschnitt 15).
-
 Was `validate-chart.sh` prüft und warum jede Prüfung dort steht, sagt sein `--help`. Kurz: das
 Chart wird **zweimal** gerendert, weil der HPA per Vorgabe aus ist und `backend-hpa.yaml` sonst
 nie jemand validiert; `replicas` muss ohne HPA dem Wert aus `values.yaml` entsprechen und mit
@@ -1084,58 +1081,6 @@ Drei Dinge müssen in der Ausgabe stehen:
 
 ---
 
-## 15. Claude-Code-Automatisierung
-
-`.claude/` ist eingecheckt und gilt damit für jeden, der das Repo auscheckt.
-Nichts davon wird zum Bauen, Testen oder Deployen gebraucht — es macht nur die Regeln
-durchsetzbar, die sonst niemand prüft. Persönliche Abweichungen gehören in
-`.claude/settings.local.json` (nicht eingecheckt).
-
-Die Dev-Shell liefert dafür `jq` mit.
-
-### Hooks — laufen von selbst
-
-| Wann | Skript | Was es meldet |
-|---|---|---|
-| nach jedem `dotnet`-Aufruf | `.claude/hooks/lockfile-guard.sh` | `packages.lock.json` wurde still neu geschrieben (Abschnitt 4, „Zentrale Build-Konfiguration") |
-| nach jeder Änderung unter `deploy/helm/` | `.claude/hooks/chart-guard.sh` | ruft `./scripts/validate-chart.sh --quick` auf und gibt dessen Befund zurück |
-
-Beide sind rein prüfend und ändern nichts. `chart-guard.sh` trägt die Regeln nicht selbst — es
-ruft dasselbe Skript wie CI und `/abnahme`, nur mit `--quick`: `kubeconform` holt seine Schemata
-über das Netz und gehört deshalb ins Gate und in CI, nicht an jede Bearbeitung.
-
-Abschalten, falls sie einmal im Weg sind: `/hooks` im laufenden Claude Code, oder
-`"disableAllHooks": true` in `.claude/settings.local.json`.
-
-### Skills — nur auf Zuruf
-
-```
-/abnahme      # das lokale Gate, spiegelt dotnet.yml und chart.yml
-/release      # Vorbedingungen pruefen, dann den workflow_dispatch auf main ausloesen
-```
-
-Das Gate ist auch ohne Claude Code brauchbar:
-
-```bash
-.claude/skills/abnahme/gate.sh              # alles
-.claude/skills/abnahme/gate.sh --chart-only # ohne die .NET-Haelfte
-```
-
-Es prüft `check-repro.sh`, die Suite im locked mode, dass der Testlauf keine Lock-Datei
-umgeschrieben hat, und ruft dann `./scripts/validate-chart.sh` auf. Grün heißt: alles Prüfbare
-ohne Cluster ist geprüft — die Abnahmeliste in Abschnitt 12 bleibt davon unberührt.
-
-### Subagents — vor einem PR
-
-- `kafka-invariant-reviewer` prüft einen Diff gegen die tragenden Invarianten:
-  `KafkaSecurity.ApplyTo` an jedem Kafka-Client, Consumer-Group je Pod, SSE-`id` = Offset, Raum
-  als Record-Key, `WireFormat` als einzige Serialisierungsstelle und keine Telemetrie.
-- `doc-sync-checker` prüft die Kopplungen, die kein Build sieht: Bereich → Dokument in `docs/`,
-  die Abschnittsnummern dieser README, die Textlängengrenze in `app.js` gegen
-  `ChatMessage.DefaultMaxTextLength`, die Broker-Image-Parität und die `--help`-Köpfe der Skripte.
-
----
-
 ## Projektstruktur
 
 ```text
@@ -1149,5 +1094,4 @@ deploy/releases/            generierte Release-Dateien (Image-Tags + Commit pro 
 scripts/                    build-images.sh, validate-chart.sh, select-release.sh, check-repro.sh,
                             check-digests.sh, demo.sh, lib/common.sh
 RedeTim-kafka-docker/     Redpanda für lokale Entwicklung ohne Kubernetes
-.claude/                    Hooks, Subagents, Skills (Abschnitt 15)
 ```

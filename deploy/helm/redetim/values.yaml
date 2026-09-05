@@ -1,9 +1,6 @@
 # Vorgabewerte des redetim-Charts.
 # Begruendungen zu allen Schaltern: docs/deployment.md
 
-nameOverride: ""
-fullnameOverride: ""
-
 # Wird von deploy/releases/<version>.yaml gefuellt. Ohne Release-Datei bricht das Chart ab.
 release:
   version: ""

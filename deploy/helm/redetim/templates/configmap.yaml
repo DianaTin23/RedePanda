@@ -19,7 +19,7 @@
 {{- if and .Values.otelCollector.external.caSecret (not (hasPrefix "https://" (toString .Values.otelCollector.external.endpoint))) -}}
 {{- fail (printf "otelCollector.external.caSecret is set, but otelCollector.external.endpoint is %q, which is not an https:// address. A CA bundle is only meaningful for a connection that verifies a certificate." .Values.otelCollector.external.endpoint) -}}
 {{- end -}}
-{{- if and .Values.redpanda.auth.caSecret (not (include "redetim.brokerTls" .)) -}}
+{{- if and .Values.redpanda.auth.caSecret (not (has (include "redetim.securityProtocol" .) (list "Ssl" "SaslSsl"))) -}}
 {{- fail (printf "redpanda.auth.caSecret is set, but redpanda.auth.securityProtocol is %q, which does not use TLS. Set it to Ssl or SaslSsl, or remove the CA Secret." .Values.redpanda.auth.securityProtocol) -}}
 {{- end -}}
 apiVersion: v1

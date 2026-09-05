@@ -49,15 +49,12 @@ builder.Services.AddOpenTelemetry()
 
 var app = builder.Build();
 
-foreach (var prefix in new[] { "", "/api" })
-{
-    app.MapGet($"{prefix}/health/live", () => Results.Ok("live"));
+app.MapGet("/health/live", () => Results.Ok("live"));
 
-    app.MapGet($"{prefix}/health/ready", async (BrokerReadiness readiness, CancellationToken ct) =>
-        await readiness.IsReadyAsync(ct)
-            ? Results.Ok("ready")
-            : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
-}
+app.MapGet("/health/ready", async (BrokerReadiness readiness, CancellationToken ct) =>
+    await readiness.IsReadyAsync(ct)
+        ? Results.Ok("ready")
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 
 app.MapPost("/api/messages", async (
     SendMessageRequest request,

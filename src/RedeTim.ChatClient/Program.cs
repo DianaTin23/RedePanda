@@ -39,24 +39,13 @@ internal static class Program
 
         var room = GetArg(args, "--room") ?? DefaultRoom;
         var nick = GetArg(args, "--nick");
-        var showHistory = GetArg(args, "--hist") == "true";
-        var newTopic = GetArg(args, "--newTopic");
+        var showHistory = HasFlag(args, "--hist");
 
         if (string.IsNullOrWhiteSpace(nick))
         {
             Console.Error.WriteLine("Missing required argument --nick.");
             PrintUsage();
             return 1;
-        }
-
-        if (!string.IsNullOrWhiteSpace(newTopic))
-        {
-            topic = newTopic;
-
-            if (await EnsureTopicAsync(bootstrap, topic) != 0)
-            {
-                return 1;
-            }
         }
 
         Console.WriteLine($"Broker    {bootstrap}");
@@ -79,7 +68,7 @@ internal static class Program
 
         while (!cts.IsCancellationRequested)
         {
-            var line = ReadInput();
+            var line = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(line))
             {
                 break;
@@ -448,29 +437,11 @@ internal static class Program
 
     private static bool HasFlag(string[] args, string key) => Array.IndexOf(args, key) >= 0;
 
-    private static string? ReadInput()
-    {
-        var line = Console.ReadLine();
-        if (line is null)
-        {
-            return null;
-        }
-
-        if (!Console.IsOutputRedirected && Console.CursorTop > 0)
-        {
-            Console.SetCursorPosition(0, Console.CursorTop - 1);
-            Console.Write(new string(' ', Console.WindowWidth));
-            Console.SetCursorPosition(0, Console.CursorTop);
-        }
-
-        return line;
-    }
-
     private static void PrintUsage()
     {
         Console.WriteLine("""
             Usage:
-              dotnet run --project src/RedeTim.ChatClient -- --nick NAME [--room general] [--topic NAME] [--hist true] [--newTopic NAME]
+              dotnet run --project src/RedeTim.ChatClient -- --nick NAME [--room general] [--topic NAME] [--hist]
               dotnet run --project src/RedeTim.ChatClient -- --ensure-topic
               dotnet run --project src/RedeTim.ChatClient -- --describe-topic
               dotnet run --project src/RedeTim.ChatClient -- --print-config
@@ -499,10 +470,6 @@ internal static class Program
                 --set-json 'adminJob.args=["--describe-topic"]'
               kubectl -n redetim logs job/redetim-admin-<revision>
 
-            --newTopic runs that same --ensure-topic process before joining, so a topic created
-            from here gets the release's own CHAT_PARTITIONS and CHAT_REPLICATION_FACTOR rather
-            than a hard-coded single partition.
-
             Environment:
               REDPANDA_BOOTSTRAP_SERVERS   broker list                 (default: redpanda:9092)
               REDPANDA_TOPIC               topic to join               (default: redetim-chat)
@@ -512,7 +479,7 @@ internal static class Program
               REDPANDA_SASL_PASSWORD       required for a SASL protocol
               REDPANDA_SSL_CA_LOCATION     CA bundle for a private CA  (TLS only)
 
-            --ensure-topic and --newTopic additionally read:
+            --ensure-topic additionally reads:
               CHAT_PARTITIONS              partitions to create        (default: 1)
               CHAT_REPLICATION_FACTOR      replication factor          (default: 1)
               TOPIC_WAIT_SECONDS           how long to wait for a broker (default: 180)

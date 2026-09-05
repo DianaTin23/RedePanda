@@ -1,27 +1,22 @@
 {{- define "redetim.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+Collapses to the bare release name whenever it already contains the chart name -- which the
+usual release name `redetim` does. That is what keeps the service names in the README short.
+*/}}
 {{- define "redetim.fullname" -}}
-{{- if .Values.fullnameOverride -}}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
-{{- else -}}
-{{- $name := default .Chart.Name .Values.nameOverride -}}
-{{- if contains $name .Release.Name -}}
+{{- if contains .Chart.Name .Release.Name -}}
 {{- .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
-{{- end -}}
-{{- end -}}
-
-{{- define "redetim.brokerService" -}}
-{{- .Values.redpanda.serviceName -}}
 {{- end -}}
 
 {{- define "redetim.bootstrapServers" -}}
 {{- if .Values.redpanda.enabled -}}
-{{- printf "%s:9092" (include "redetim.brokerService" .) -}}
+{{- printf "%s:9092" .Values.redpanda.serviceName -}}
 {{- else if .Values.redpanda.external.bootstrapServers -}}
 {{- .Values.redpanda.external.bootstrapServers -}}
 {{- else -}}
@@ -42,13 +37,6 @@
 {{- define "redetim.saslEnabled" -}}
 {{- $protocol := include "redetim.securityProtocol" . -}}
 {{- if or (eq $protocol "SaslSsl") (eq $protocol "SaslPlaintext") -}}
-true
-{{- end -}}
-{{- end -}}
-
-{{- define "redetim.brokerTls" -}}
-{{- $protocol := include "redetim.securityProtocol" . -}}
-{{- if or (eq $protocol "Ssl") (eq $protocol "SaslSsl") -}}
 true
 {{- end -}}
 {{- end -}}

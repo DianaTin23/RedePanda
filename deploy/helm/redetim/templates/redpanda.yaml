@@ -2,12 +2,12 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "redetim.brokerService" . }}
+  name: {{ .Values.redpanda.serviceName }}
   labels:
     {{- include "redetim.labels" . | nindent 4 }}
     app.kubernetes.io/component: broker
 spec:
-  serviceName: {{ include "redetim.brokerService" . }}
+  serviceName: {{ .Values.redpanda.serviceName }}
   replicas: 1
   selector:
     matchLabels:
@@ -32,7 +32,7 @@ spec:
             - --smp={{ .Values.redpanda.smp }}
             - --memory={{ .Values.redpanda.memory }}
             - --kafka-addr=internal://0.0.0.0:9092
-            - --advertise-kafka-addr=internal://{{ include "redetim.brokerService" . }}:9092
+            - --advertise-kafka-addr=internal://{{ .Values.redpanda.serviceName }}:9092
           ports:
             - name: kafka
               containerPort: 9092
@@ -74,7 +74,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "redetim.brokerService" . }}
+  name: {{ .Values.redpanda.serviceName }}
   labels:
     {{- include "redetim.labels" . | nindent 4 }}
     app.kubernetes.io/component: broker

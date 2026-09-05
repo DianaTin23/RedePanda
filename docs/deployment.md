@@ -259,29 +259,6 @@ Der Wert stand einmal fest im Template, während README Abschnitt 9 `TOPIC_WAIT_
 Einstellung führte. Gegen einen fremden, langsam startenden Broker war das eine Änderung an
 einem Template statt an einer Wertedatei.
 
-## Der Ad-hoc-Admin-Job
-
-Ein einmaliger Job im Image und in der Konfiguration *dieses* Releases — derselbe Build,
-dieselbe ConfigMap, dasselbe SASL-Secret wie der Topic-Job. Es gibt also keine zweite
-Konfigurationsquelle, die abweichen könnte.
-
-```sh
-helm upgrade redetim deploy/helm/redetim -f "$REL" \
-  --set adminJob.enabled=true \
-  --set-json 'adminJob.args=["--describe-topic"]'
-kubectl -n redetim logs job/redetim-admin-<revision>
-```
-
-Auch hier trägt der Name die Revision, und das Pod-Template ist unveränderlich. Zwei
-verschiedene Kommandos innerhalb *derselben* Revision scheitern an „field is immutable"; jedes
-`helm upgrade` zählt die Revision hoch, ein zweiter Lauf mit anderen Argumenten ist also ein
-weiteres `upgrade` und kein Sonderfall.
-
-`activeDeadlineSeconds` und `ttlSecondsAfterFinished` zählen Verschiedenes: die Laufzeit *bis*
-zum Ende und die Aufbewahrung *danach*. Die Deadline ist wegen `interactive: true` nötig — der
-Chat-Client liest dann von stdin und wartet auf ein `kubectl attach`. Passiert das nie, liefe der
-Pod ohne diese Grenze unbegrenzt weiter und hielte einen Consumer samt Speicher.
-
 ## Austauschbare Backing Services
 
 Zwei Schalter machen aus einer Behauptung einen Nachweis:

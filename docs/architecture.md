@@ -147,10 +147,9 @@ wöchentlich. Die Zeilen der Tabelle darüber bleiben unbewacht — deshalb steh
 
 ## Prozesse
 
-Es gibt vier Admin-Prozesse, alle als Kubernetes-Job:
+Es gibt einen Admin-Prozess, als Kubernetes-Job:
 
 - Topic anlegen (`RedeTim.ChatClient --ensure-topic`)
-- die drei weiteren Aufgaben im `admin-job`
 
 Der Topic-Job ist **kein** Helm-Hook. Ein `post-install`-Hook wartete auf ein Backend, das
 ohne Topic nie `Ready` wird — ein Deadlock. Details in [deployment.md](deployment.md).

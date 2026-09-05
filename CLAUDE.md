@@ -90,7 +90,7 @@ Browser ──HTTPS──▶ Caddy (Frontend) ──proxy /api──▶ Backend 
 
 Vier Projekte: `RedeTim.Contracts` (geteiltes Wire-Format + `KafkaSecurity`),
 `RedeTim.Backend` (ASP.NET Core Minimal API), `RedeTim.ChatClient` (Konsolenclient **und**
-Admin-Prozess: `--ensure-topic`, `--describe-topic`, `--print-config`), `RedeTim.Frontend`
+Admin-Prozess: `--ensure-topic`), `RedeTim.Frontend`
 (nur Caddyfile + vier statische Dateien, kein Build-Tooling).
 
 Zwei Trennungen tragen den Entwurf und sind vorführbar:

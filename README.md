@@ -644,7 +644,6 @@ Secret-Dateien gemountet.
 | `LOG_LEVEL` | `Information` | Backend |
 | `BACKEND_HOST` | `redetim-backend:8443` | Frontend (Caddyfile) |
 | `PUBLIC_HTTPS_PORT` | `8443` | Frontend (Ziel-Port der `308`-Weiterleitung) |
-| `TLS_CERT_FILE` / `TLS_KEY_FILE` / `TLS_CA_FILE` | `/etc/redetim/tls/{tls.crt,tls.key,ca.crt}` | Frontend (Caddyfile) |
 | `FRONTEND_LOG_LEVEL` | `INFO` | Frontend (Caddy: Access-Log **und** Runtime-Log) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `https://redetim-otel-collector:4317` | Backend |
 | `SSL_CERT_FILE` | `/etc/redetim/ca-bundle/ca-bundle.crt` | Backend (prüft den Collector; **nicht** `OTEL_EXPORTER_OTLP_CERTIFICATE`, siehe Abschnitt 14) |

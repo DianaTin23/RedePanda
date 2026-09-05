@@ -430,9 +430,10 @@ kubectl -n redetim get deploy redetim-frontend -o jsonpath='{..image}'
 Die Spalte `DESCRIPTION` kommt aus `--description` im Deploy-Befehl. `APP VERSION` taugt dafür
 **nicht**: die liest Helm aus `Chart.yaml` und sie ist auf jeder Revision dieselbe.
 
-> Voraussetzung ist, dass das alte Image noch im Image-Store der Node liegt. Es gibt keine
-> Registry — wurde es weggeräumt, baut man es aus dem Commit neu, der in der Release-Datei
-> unter `release.gitSha` steht. Das ist die bewusste Grenze der Registry-losen Variante.
+> Voraussetzung ist, dass das alte Image noch erreichbar ist. Aus `ghcr.io` ist es das, solange
+> das Paket nicht gelöscht wurde; wer nur lokal gebaut hat (`--load kind`, ohne `--push`), ist auf
+> den Image-Store der Node angewiesen. Ist es dort weggeräumt, baut man es aus dem Commit neu,
+> der in der Release-Datei unter `release.gitSha` steht.
 
 ### Schalter in `values.yaml`
 

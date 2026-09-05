@@ -9,7 +9,7 @@ public class PresenceProducerDisposalTests
     {
         // Two disposal-tracked slots for one object made a real host throw on every shutdown:
         // the second Dispose() called Flush() on a destroyed librdkafka handle. Pins the fix.
-        await using var factory = new ChatStreamEndpointTests.BrokerlessBackend();
+        await using var factory = new BrokerlessBackend();
         using var client = factory.CreateClient();
 
         // Mirrors what GET /api/stream and POST /api/join do on every request.

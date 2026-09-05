@@ -39,32 +39,6 @@ public class ChatStreamTests
             shutdown: CancellationToken.None,
             ct: ct);
 
-    private sealed class FakePresenceProducer : IPresenceProducer
-    {
-        public List<(string Room, string Nickname)> Renewals { get; } = [];
-        public List<(string Room, string Nickname)> Releases { get; } = [];
-
-        public Task RenewAsync(string room, string nickname, CancellationToken cancellationToken)
-        {
-            lock (Renewals)
-            {
-                Renewals.Add((room, nickname));
-            }
-
-            return Task.CompletedTask;
-        }
-
-        public Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken)
-        {
-            lock (Releases)
-            {
-                Releases.Add((room, nickname));
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
     private static async Task<bool> MoveNextWithin(
         IAsyncEnumerator<SseItem<string>> stream, TimeSpan timeout, string because)
     {

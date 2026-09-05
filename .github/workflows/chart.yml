@@ -30,8 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Full history on purpose. The release file is picked below by *when it was committed*,
-          # which needs more than one commit to be visible.
+          # Full history on purpose: scripts/select-release.sh picks the release file by *when it
+          # was committed*, which needs more than one commit to be visible.
           fetch-depth: 0
 
       - uses: azure/setup-helm@v5
@@ -50,55 +50,11 @@ jobs:
 
       - name: Install kubeconform
         run: |
-          # actions/cache does not create the directory on a miss, and kubeconform refuses to
-          # start against a -cache path that does not exist.
-          mkdir -p /tmp/kubeconform
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
             | sudo tar -xz -C /usr/local/bin kubeconform
           kubeconform -v
 
-      # README section 13 uses `command ls -t` for this, which is right on a machine that just
-      # built something -- and wrong here. A fresh clone writes every file at the same moment,
-      # so mtime says nothing and CI would validate against an arbitrary old release. Git knows
-      # which release file was added last; that is the same question, asked of the right source.
-      - name: Select the release file
-        run: |
-          set -euo pipefail
-          REL=$(git log --diff-filter=A --name-only --format= -- 'deploy/releases/*.yaml' \
-            | grep -v -- '-dirty\.' | grep . | head -1)
-          test -n "${REL}"
-          echo "REL=${REL}" >> "$GITHUB_ENV"
-          echo "::notice::validating against ${REL}"
-
-      - name: Lint and validate, both HPA variants
-        run: |
-          set -euo pipefail
-          helm lint deploy/helm/redetim -f "$REL"
-          helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
-            | kubeconform -strict -summary -kubernetes-version 1.32.0 -cache /tmp/kubeconform
-
-          # The HPA combination has to be rendered separately, or nothing validates
-          # backend-hpa.yaml.
-          helm lint deploy/helm/redetim -f "$REL" --set backend.autoscaling.enabled=true
-          helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
-            --set backend.autoscaling.enabled=true \
-            | kubeconform -strict -summary -kubernetes-version 1.32.0 -cache /tmp/kubeconform
-
-      - name: replicas belongs to the HPA or to the chart, never to both
-        run: |
-          set -euo pipefail
-          with_hpa=$(helm template redetim deploy/helm/redetim -f "$REL" \
-            --set backend.autoscaling.enabled=true --show-only templates/backend.yaml \
-            | grep -c '^  replicas:' || true)
-          test "$with_hpa" -eq 0 || { echo "replicas rendered while the HPA owns it" >&2; exit 1; }
-          helm template redetim deploy/helm/redetim -f "$REL" \
-            --show-only templates/backend.yaml | grep -q '^  replicas: 2'
-
-      # The chart must refuse to render without a release file. `helm lint` does not catch this:
-      # Helm 4 reports a template `fail` as INFO. Only `helm template` actually aborts.
-      - name: Rendering without a release file must fail
-        run: |
-          if helm template redetim deploy/helm/redetim >/dev/null 2>&1; then
-            echo "The chart rendered without a release file -- the tag guard is gone." >&2
-            exit 1
-          fi
+      # Every chart rule lives in this one script, which /abnahme and the edit hook also call.
+      # They used to carry their own transcription of it, and the copies had already drifted.
+      - name: Validate the chart
+        run: ./scripts/validate-chart.sh --committed-only

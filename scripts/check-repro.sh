@@ -20,19 +20,17 @@
 # lists it as well; run it by hand before cutting a release from a machine.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+REPO_ROOT="$(repo_root)"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) usage ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
-if ! command -v dotnet >/dev/null 2>&1; then
-    echo "dotnet not found on PATH. It is in the Nix dev shell: nix develop" >&2
-    exit 2
-fi
+require_tool dotnet
 
 PROJECTS=(
     "src/RedeTim.Contracts/RedeTim.Contracts.csproj"

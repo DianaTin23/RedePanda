@@ -18,7 +18,8 @@
 # `helm rollback` restore an actual image rather than the same mutable name it started from.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+REPO_ROOT="$(repo_root)"
 CHART_DIR="${REPO_ROOT}/deploy/helm/redetim"
 RELEASE_DIR="${REPO_ROOT}/deploy/releases"
 
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --load) LOAD_INTO="${2:-}"; shift 2 ;;
         --release) REQUIRE_CLEAN=1; shift ;;
         --push) PUSH=1; REQUIRE_CLEAN=1; shift ;;
-        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+        -h|--help) usage ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done

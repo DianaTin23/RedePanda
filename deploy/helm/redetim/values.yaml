@@ -11,7 +11,7 @@ release:
 # IfNotPresent, nicht Never: Never scheitert auf Docker Desktop mit ErrImageNeverPull.
 imagePullPolicy: IfNotPresent
 
-# Nur noetig, solange die GHCR-Pakete privat sind. Rezept: README Abschnitt 7.
+# Nur noetig, solange die GHCR-Pakete privat sind. Rezept: README Abschnitt 6.
 imagePullSecrets: []
 
 # Das Chart stellt bei der ersten Installation eine eigene CA aus. Kein Ausschalter.

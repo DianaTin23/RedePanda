@@ -118,8 +118,12 @@ gepinnt, nicht nur per Tag.
 ```
 
 Warum locked mode nicht dauerhaft an ist, warum der Manifest-Listen-Digest gepinnt wird und
-warum die beiden lokal gebauten Images keinen Digest tragen:
+warum die selbst gebauten Images keinen Digest tragen:
 siehe [docs/build.md](docs/build.md).
+
+**Zum Ausprobieren braucht es davon nur einen Cluster, `kubectl` und Helm.** Die Images liegen
+in `ghcr.io` und werden gezogen, nicht gebaut; .NET SDK und Container-Engine braucht nur, wer
+selbst baut (Abschnitt 6). Sonst direkt weiter mit Abschnitt 7.
 
 ---
 
@@ -215,20 +219,22 @@ Das Passwort steht im Klartext in der Compose-Datei, weil dieser Broker nichts s
 
 ---
 
-## 6. Images bauen und in den Cluster laden
+## 6. Images bauen und nach ghcr.io schieben
+
+> **Zum Ausprobieren nicht nötig.** Die drei Images liegen fertig in `ghcr.io`, der Cluster zieht
+> sie selbst — weiter mit Abschnitt 7. Dieser Abschnitt beschreibt, wie sie dorthin kommen.
 
 ```bash
-./scripts/build-images.sh                  # nur bauen
-./scripts/build-images.sh --load kind      # bauen + in kind laden
-./scripts/build-images.sh --load minikube  # bauen + in minikube laden
-./scripts/build-images.sh --release --load kind   # Release schneiden (nur aus sauberem Baum)
-./scripts/build-images.sh --push           # --release, dann nach ghcr.io schieben
+./scripts/build-images.sh            # nur bauen
+./scripts/build-images.sh --release  # Release schneiden (nur aus sauberem Baum)
+./scripts/build-images.sh --push     # --release, dann nach ghcr.io schieben
 ```
 
 Der Tag wird **abgeleitet, nicht gewählt**: `appVersion` aus `Chart.yaml` plus der kurze
 Git-Commit, also `ghcr.io/dianatin23/redetim-backend:0.1.0-g103b98b`. Den Namensteil davor liest
-das Skript aus `values.yaml`, damit es nichts unter einem Namen baut, den das Chart nicht ausrollt. Er wird nie wiederverwendet. Am Ende
-schreibt das Skript die dazugehörige **Release-Datei** und gibt den Deploy-Befehl aus:
+das Skript aus `values.yaml`, damit es nichts unter einem Namen baut, den das Chart nicht
+ausrollt. Er wird nie wiederverwendet. Am Ende schreibt das Skript die dazugehörige
+**Release-Datei** und gibt den Deploy-Befehl aus:
 
 ```text
 ==> Built redetim-backend:0.1.0-g103b98b, redetim-chatclient:0.1.0-g103b98b and redetim-frontend:0.1.0-g103b98b
@@ -246,31 +252,16 @@ Bei einem **unsauberen Arbeitsbaum** warnt das Skript und hängt einen Hash des 
 Standes an (`0.1.0-g103b98b-dirty.5f4f110`) — auch dieser Tag bleibt damit eindeutig, aber die
 Datei ist per `.gitignore` von einem Release ausgenommen. `--release` bricht in dem Fall ab.
 
-Seit die Images nach `ghcr.io` gehen, **kann** der Cluster sie ziehen, und `--load` ist der
-schnellere Weg statt eines nötigen. Ein Image, das nur lokal gebaut und nie gepusht wurde, kennt
-der Cluster dagegen nicht (`ImagePullBackOff`) — dann muss es geladen werden:
-
-| Cluster | Befehl |
-|---|---|
-| kind | `kind load docker-image ghcr.io/dianatin23/redetim-{backend,chatclient,frontend}:$TAG` |
-| kind + Podman | `podman save` → `kind load image-archive` (macht das Skript automatisch) |
-| minikube | `minikube image load ghcr.io/dianatin23/redetim-{backend,chatclient,frontend}:$TAG` |
-| Docker Desktop | nichts nötig — gemeinsamer Image-Store |
-
-`$TAG` ist die abgeleitete Version; mit `--load` erledigt das Skript diesen Schritt selbst.
-
-> `imagePullPolicy: Never` wäre hier **schlechter**: es scheitert mit `ErrImageNeverPull`,
-> statt auf einen Pull zurückzufallen, und bricht damit den Docker-Desktop-Weg.
-
 ### GHCR-Pakete müssen einmal auf public gestellt werden
 
+Das ist die einzige Voraussetzung dafür, dass eine Installation **ohne eigenen Build** gelingt:
 GHCR legt ein Paket beim ersten Push **privat** an, unabhängig davon, ob das Repository public
 ist. Solange das so bleibt, scheitert jeder Pull im Cluster mit `ImagePullBackOff` — einem
 Fehler, der wie ein Tippfehler im Image-Namen aussieht, aber keiner ist.
 
 Einmalig, durch den Eigentümer des Repositories: `github.com/users/dianatin23/packages` → je
 Paket *Package settings* → *Change visibility* → **Public**, und *Connect repository*. Danach
-zieht `docker pull` auch abgemeldet.
+zieht `docker pull` auch abgemeldet — und der Cluster ebenso.
 
 Bleiben die Pakete privat, ist der Weg ein Pull-Secret:
 
@@ -279,6 +270,9 @@ kubectl create secret docker-registry ghcr -n redetim \
   --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT mit read:packages>
 helm upgrade ... --set imagePullSecrets[0].name=ghcr
 ```
+
+> `imagePullPolicy: Never` wäre hier **schlechter**: es scheitert mit `ErrImageNeverPull`, statt
+> überhaupt zu ziehen. Deshalb steht in `values.yaml` `IfNotPresent`.
 
 ---
 
@@ -412,9 +406,8 @@ Die Spalte `DESCRIPTION` kommt aus `--description` im Deploy-Befehl. `APP VERSIO
 **nicht**: die liest Helm aus `Chart.yaml` und sie ist auf jeder Revision dieselbe.
 
 > Voraussetzung ist, dass das alte Image noch erreichbar ist. Aus `ghcr.io` ist es das, solange
-> das Paket nicht gelöscht wurde; wer nur lokal gebaut hat (`--load kind`, ohne `--push`), ist auf
-> den Image-Store der Node angewiesen. Ist es dort weggeräumt, baut man es aus dem Commit neu,
-> der in der Release-Datei unter `release.gitSha` steht.
+> das Paket nicht gelöscht wurde. Ist es weg, baut man es aus dem Commit neu, der in der
+> Release-Datei unter `release.gitSha` steht.
 
 ### Schalter in `values.yaml`
 
@@ -999,10 +992,11 @@ der Topic-Job legt `redetim-chat` an, und ein `POST /api/messages` trägt bis au
 (`202`, Key `general`, Offset 0). Alles mit `curl --cacert` gegen die Release-CA, nicht mit `-k`. Das Upgrade
 behält dieselbe CA, statt sie stillschweigend zu rotieren.
 
-Zwei Dinge zeigte erst der echte Cluster, beide behoben: der Podman-Pfad von `--load kind` legte
-die Images unter `localhost/...` ab, wo das Chart sie nie findet; und der Topic-Job konnte als
-`post-install`-Hook prinzipiell nicht laufen, weil `--wait` auf ein Backend wartete, das ohne
-Topic nie `Ready` wird.
+Zwei Dinge zeigte erst der echte Cluster, beide behoben: mit podman gebaute Images lagen unter
+`localhost/...`, wo das Chart sie nie findet — seit die Namen in `values.yaml`
+registry-qualifiziert sind, entfällt das; und der Topic-Job konnte als `post-install`-Hook
+prinzipiell nicht laufen, weil `--wait` auf ein Backend wartete, das ohne Topic nie `Ready`
+wird.
 
 **Nicht verifiziert** bleibt, was erst ein Scheduler mit mehreren Knoten zeigt: der `preStop`-Hook
 des Frontends, `honor_labels`-Verhalten, Pod-Neustart-Resilienz, und dass `helm uninstall` das PVC
@@ -1072,7 +1066,7 @@ Drei Dinge müssen in der Ausgabe stehen:
 
 | Symptom | Ursache |
 |---|---|
-| `ImagePullBackOff` | Images nicht in den Cluster geladen → Abschnitt 6 |
+| `ImagePullBackOff` | GHCR-Paket noch privat, oder der Tag existiert dort nicht → Abschnitt 6 |
 | Broker `CrashLoopBackOff`, „Argument parse error" | `command:` überschreibt den Entrypoint. Muss `[rpk, redpanda, start]` sein |
 | Topic-Job läuft in den Timeout | Er wartet `TOPIC_WAIT_SECONDS` (180) auf Broker-**Metadaten**. Läuft das ab, ist der Broker nicht erreichbar — nicht der Job kaputt. Log des Job-Pods lesen: er nennt den letzten Fehler |
 | Topic-Job endet sofort mit „no such host" | `REDPANDA_BOOTSTRAP_SERVERS` aus der ConfigMap zeigt ins Leere. Bei `redpanda.enabled=false` ist das `redpanda.external.bootstrapServers` |

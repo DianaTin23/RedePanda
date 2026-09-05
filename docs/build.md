@@ -223,28 +223,7 @@ Helm ist der Installationsweg. Das Release-Artefakt ist `deploy/releases/<versio
 Ein wichtiger Nachsatz: Die Aufgabenstellung verlangt Manifeste, und **Templates *sind*
 Manifeste**.
 
-### Laden in einen lokalen Cluster
-
-`kind load docker-image` liest den *Docker*-Speicher, den podman nicht füllt. Der Weg über ein
-Archiv ist die unterstützte Route für ein mit podman gebautes Image.
-
-Früher stand vor dem `podman save` ein Umtaggen auf `docker.io/library/<name>`, und das war
-nicht kosmetisch: Podman legt ein lokal gebautes Image unter `localhost/<name>` ab und schreibt
-diesen Namen ins Archiv, während containerd den blanken `redetim-backend:<tag>` aus dem Chart zu
-`docker.io/library/redetim-backend:<tag>` normalisiert — ein Name, den das Archiv nie trug. Der
-kubelet tat daraufhin das Einzige, was ihm blieb, und versuchte von Docker Hub zu ziehen:
-`ImagePullBackOff` für ein Image, das nachweislich schon auf dem Node lag.
-
-Seit die Namen in `values.yaml` registry-qualifiziert sind (`ghcr.io/dianatin23/redetim-*`),
-entfällt das. Ein Name mit Registry-Anteil normalisiert auf sich selbst, podman speichert ihn
-unverändert, und beide Seiten meinen dieselbe Zeichenkette. Das alte Umtaggen wäre jetzt sogar
-falsch — es ergäbe `docker.io/library/ghcr.io/dianatin23/redetim-backend`.
-
-**Auf einem kind-Cluster ist das nicht nachgeprüft** — auf dieser Maschine ist kein kind
-installiert. Der Schluss folgt aus der Namensauflösung, nicht aus einem Lauf.
-
-Der minikube-Zweig hat dasselbe Problem und dieselbe Behebung, ist hier aber **nicht** auf einem
-echten Cluster erprobt worden — es gibt kein minikube auf den Entwicklungsmaschinen.
+### Docker oder Podman
 
 Wird `podman` und `docker` beides gefunden, gewinnt podman: Auf den Maschinen dieses Projekts
 ist `docker` ohnehin oft ein podman-Shim, und ausdrücklich zu sein erspart Überraschungen

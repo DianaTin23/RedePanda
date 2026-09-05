@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 # Builds the three application images under an immutable version tag and writes the release
-# file that deploys them. Optionally loads them into a local cluster, or pushes them.
+# file that deploys them. Optionally pushes them to the registry.
 #
 #   ./scripts/build-images.sh                  # build only
-#   ./scripts/build-images.sh --load kind      # build, then load into kind
-#   ./scripts/build-images.sh --load minikube  # build, then load into minikube
 #   ./scripts/build-images.sh --release        # refuse to build from an unclean working tree
 #   ./scripts/build-images.sh --push           # implies --release, then push to the registry
-#
-# Docker Desktop with Kubernetes enabled needs no load step: it shares one image store.
 #
 # The image names are read from the chart's values.yaml, so this cannot build under a name the
 # chart does not deploy. Set ENGINE=docker|podman to override the engine probe.
@@ -23,15 +19,11 @@ REPO_ROOT="$(repo_root)"
 CHART_DIR="${REPO_ROOT}/deploy/helm/redetim"
 RELEASE_DIR="${REPO_ROOT}/deploy/releases"
 
-LOAD_INTO=""
 REQUIRE_CLEAN=0
 PUSH=0
-CLUSTER_NAME="${CLUSTER_NAME:-kind}"
-MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --load) LOAD_INTO="${2:-}"; shift 2 ;;
         --release) REQUIRE_CLEAN=1; shift ;;
         --push) PUSH=1; REQUIRE_CLEAN=1; shift ;;
         -h|--help) usage ;;
@@ -150,35 +142,6 @@ chatClient:
     tag: "${VERSION}"
 EOF
 echo "==> Wrote ${RELEASE_FILE#"${REPO_ROOT}/"}"
-
-if [[ -n "${LOAD_INTO}" ]]; then
-    case "${LOAD_INTO}" in
-        kind)
-            if [[ "${ENGINE}" == "podman" ]]; then
-                echo "==> Loading into kind cluster '${CLUSTER_NAME}' via image archive"
-                TMP="$(mktemp -d)"
-                trap 'rm -rf "${TMP}"' EXIT
-                podman save -o "${TMP}/backend.tar" "${BACKEND}"
-                podman save -o "${TMP}/chatclient.tar" "${CHATCLIENT}"
-                podman save -o "${TMP}/frontend.tar" "${FRONTEND}"
-                kind load image-archive "${TMP}/backend.tar" --name "${CLUSTER_NAME}"
-                kind load image-archive "${TMP}/chatclient.tar" --name "${CLUSTER_NAME}"
-                kind load image-archive "${TMP}/frontend.tar" --name "${CLUSTER_NAME}"
-            else
-                kind load docker-image "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}" --name "${CLUSTER_NAME}"
-            fi
-            ;;
-        minikube)
-            echo "==> Loading into minikube profile '${MINIKUBE_PROFILE}'"
-            minikube image load "${BACKEND}" "${CHATCLIENT}" "${FRONTEND}" -p "${MINIKUBE_PROFILE}"
-            ;;
-        *)
-            echo "Unknown --load target '${LOAD_INTO}'. Use 'kind' or 'minikube'." >&2
-            exit 2
-            ;;
-    esac
-    echo "==> Images are available inside the cluster"
-fi
 
 cat <<EOF
 

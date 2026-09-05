@@ -59,7 +59,7 @@
             echo "  topics:  rpk topic list -X brokers=localhost:19092"
             echo "  chat:    REDPANDA_BOOTSTRAP_SERVERS=localhost:19092 \\"
             echo "           dotnet run --project src/RedeTim.ChatClient -- --nick alice"
-            echo "  build:   ./scripts/build-images.sh --load kind"
+            echo "  build:   ./scripts/build-images.sh"
             echo "  chart:   helm template redetim deploy/helm/redetim -f deploy/releases/<version>.yaml"
           '';
         };

@@ -49,7 +49,7 @@ dotnet test --filter "FullyQualifiedName~ChatHistoryTests.RoomsAreKeptApart"  # 
 der Edit-Hook rufen dasselbe Skript. Wer eine Regel ändert, ändert sie dort — und nur dort.
 
 Lokaler Lauf ohne Kubernetes und die Variante gegen einen TLS/SASL-Broker: README Abschnitt 5.
-Images bauen und laden: `./scripts/build-images.sh [--load kind] [--release] [--push]`, README
+Images bauen und pushen: `./scripts/build-images.sh [--release] [--push]`, README
 Abschnitt 6. Demo mit Port-Forwards: `./scripts/demo.sh`.
 
 **CI** (`.github/workflows/`): ein Workflow je Sache, kein Sammelbecken. `dotnet.yml` und

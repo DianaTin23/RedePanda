@@ -59,6 +59,8 @@ public sealed record ChatMessage(string Room, string Nickname, string Text, Date
         return true;
     }
 
+    // Callers that also have a nickname must use TryNormalizeRoomAndNickname instead: only the
+    // combined helper enforces the reserved-name check, and skipping it fails silently.
     public static bool TryNormalizeRoom(
         string? room,
         [NotNullWhen(true)] out string? normalizedRoom,

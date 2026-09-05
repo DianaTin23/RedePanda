@@ -10,7 +10,7 @@
 # A `dotnet test` without ContinuousIntegrationBuild=true silently rewrites the lock files
 # instead of failing on drift, which is why the flag is not cosmetic here.
 #
-# This does not replace README section 13: the manual acceptance list needs a cluster, and CI
+# This does not replace README section 12: the manual acceptance list needs a cluster, and CI
 # does not have one either.
 #
 # Exit status: 0 when every step passed, 1 when one of them failed, 2 on a usage or tooling error.
@@ -54,7 +54,7 @@ step "Chart: both HPA variants, the replicas coupling, and the release-file guar
 echo
 if [[ "${failed}" -eq 0 ]]; then
     echo "==> Everything that is checkable without a cluster passed."
-    echo "    The manual list in README section 13 still needs a cluster."
+    echo "    The manual list in README section 12 still needs a cluster."
 else
     echo "==> The gate failed. Nothing above was pushed." >&2
 fi

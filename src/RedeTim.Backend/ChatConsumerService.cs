@@ -7,24 +7,21 @@ public sealed class ChatConsumerService : KafkaConsumerService
 {
     private readonly BackendOptions _options;
     private readonly ChatBroadcaster _broadcaster;
-    private readonly ChatMetrics _metrics;
     private readonly BrokerReadiness _readiness;
     private readonly IHostApplicationLifetime _lifetime;
 
     public ChatConsumerService(
         BackendOptions options,
         ChatBroadcaster broadcaster,
-        ChatMetrics metrics,
         BrokerReadiness readiness,
         IHostApplicationLifetime lifetime,
         ILogger<ChatConsumerService> logger)
         : base(
             "chat consumer", options.Topic, options.ConsumerGroupId,
-            BuildConfig(options), metrics, logger)
+            BuildConfig(options), logger)
     {
         _options = options;
         _broadcaster = broadcaster;
-        _metrics = metrics;
         _readiness = readiness;
         _lifetime = lifetime;
     }
@@ -62,12 +59,6 @@ public sealed class ChatConsumerService : KafkaConsumerService
         }
 
         _broadcaster.Publish(message, result.Offset.Value);
-
-        // Only after the replay: the backlog is history, not traffic.
-        if (Replayed)
-        {
-            _metrics.RecordMessageReceived();
-        }
     }
 
     protected override void OnReplayed()

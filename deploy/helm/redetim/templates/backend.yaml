@@ -1,13 +1,3 @@
-{{- $otelEnabled := or .Values.otelCollector.enabled (ne (toString .Values.otelCollector.external.endpoint) "") }}
-{{- $otelCaPath := "" }}
-{{- $otelCaVolume := "" }}
-{{- if .Values.otelCollector.enabled }}
-{{- $otelCaPath = printf "%s/ca.crt" (include "redetim.tlsMountPath" .) }}
-{{- $otelCaVolume = "tls" }}
-{{- else if and .Values.otelCollector.external.endpoint .Values.otelCollector.external.caSecret }}
-{{- $otelCaPath = "/etc/redetim/otel-ca/ca.crt" }}
-{{- $otelCaVolume = "otel-ca" }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -50,33 +40,6 @@ spec:
         {{- include "redetim.topologySpread" (dict "ctx" . "component" "backend") | nindent 8 }}
       securityContext:
         {{- include "redetim.podSecurityContext" (dict "uid" 1654 "gid" 1654 "fsGroup" 1654) | nindent 8 }}
-{{- if $otelCaPath }}
-      initContainers:
-        - name: ca-bundle
-          image: {{ include "redetim.image" (dict "ctx" . "component" "backend") | quote }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
-          command: ["/bin/sh", "-c"]
-          args:
-            - cat /etc/ssl/certs/ca-certificates.crt {{ $otelCaPath }}
-              > /etc/redetim/ca-bundle/ca-bundle.crt
-          securityContext:
-            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
-          volumeMounts:
-            {{- if eq $otelCaVolume "tls" }}
-            - name: tls
-              mountPath: {{ include "redetim.tlsMountPath" . }}
-              readOnly: true
-            {{- else }}
-            - name: otel-ca
-              mountPath: /etc/redetim/otel-ca
-              readOnly: true
-            {{- end }}
-            - name: ca-bundle
-              mountPath: /etc/redetim/ca-bundle
-          resources:
-            requests: { cpu: 10m, memory: 32Mi }
-            limits: { memory: 64Mi }
-{{- end }}
       containers:
         - name: backend
           image: {{ include "redetim.image" (dict "ctx" . "component" "backend") | quote }}
@@ -93,14 +56,6 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             {{- include "redetim.saslEnv" (dict "ctx" .) | nindent 12 }}
-{{- if $otelEnabled }}
-            - name: OTEL_RESOURCE_ATTRIBUTES
-              value: "service.instance.id=$(POD_NAME)"
-{{- end }}
-{{- if $otelCaPath }}
-            - name: SSL_CERT_FILE
-              value: /etc/redetim/ca-bundle/ca-bundle.crt
-{{- end }}
             {{- with .Values.backend.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -129,11 +84,6 @@ spec:
             - name: tls
               mountPath: {{ include "redetim.tlsMountPath" . }}
               readOnly: true
-            {{- if $otelCaPath }}
-            - name: ca-bundle
-              mountPath: /etc/redetim/ca-bundle
-              readOnly: true
-            {{- end }}
             {{- if .Values.redpanda.auth.caSecret }}
             - name: broker-ca
               mountPath: /etc/redetim/ca
@@ -149,15 +99,6 @@ spec:
             secretName: {{ include "redetim.fullname" . }}-backend-tls
         - name: tmp
           emptyDir: {}
-        {{- if $otelCaPath }}
-        - name: ca-bundle
-          emptyDir: {}
-        {{- end }}
-        {{- if eq $otelCaVolume "otel-ca" }}
-        - name: otel-ca
-          secret:
-            secretName: {{ .Values.otelCollector.external.caSecret | quote }}
-        {{- end }}
         {{- if .Values.redpanda.auth.caSecret }}
         - name: broker-ca
           secret:

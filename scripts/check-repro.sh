@@ -6,7 +6,7 @@
 # Locked mode is off by default because a deliberate dependency change *should* rewrite the lock
 # file; this script turns it on. Why that matters: docs/build.md.
 #
-# CI runs this on every push and pull request (.github/workflows/dotnet.yml). README section 13
+# CI runs this on every push and pull request (.github/workflows/dotnet.yml). README section 12
 # lists it as well; run it by hand before cutting a release from a machine.
 #
 # Exit status: 0 when every project restores against its committed lock file, 1 when one of them

@@ -130,36 +130,3 @@ redpanda:
   resources:
     requests: { cpu: 200m, memory: 1Gi }
     limits: { memory: 2Gi }
-
-otelCollector:
-  enabled: true
-
-  # Steht hier ein Endpunkt, exportiert das Backend dorthin; steht keiner da, wird das SDK
-  # abgeschaltet. Prometheus muss dann ebenfalls aus.
-  external:
-    # z. B. "https://otel-collector.observability:4317"
-    endpoint: ""
-    # grpc oder http/protobuf, je nachdem, worauf der fremde Collector hoert.
-    protocol: "grpc"
-    # Secret mit dem Schluessel ca.crt: die CA eines *fremden* Collectors hinter privater CA.
-    caSecret: ""
-
-  # Core-Distribution, nicht contrib: core hat den Prometheus-Exporter und health_check bereits.
-  image: docker.io/otel/opentelemetry-collector:0.158.0@sha256:5b97e6e3550ec6e48a71dba6f6304d349a293af8df4ee1f51da67be94fce2ecd
-  logLevel: info
-  # "detailed" protokolliert jede empfangene Metrik.
-  debugVerbosity: basic
-  metricExportIntervalMs: 5000
-  resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { memory: 256Mi }
-
-# Braucht otelCollector.enabled: der Collector ist das einzige Scrape-Ziel.
-prometheus:
-  enabled: true
-  image: quay.io/prometheus/prometheus:v3.13.2@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
-  scrapeInterval: 5s
-  retention: 6h
-  resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { memory: 512Mi }

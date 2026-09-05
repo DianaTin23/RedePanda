@@ -1,6 +1,6 @@
 ---
 name: kafka-invariant-reviewer
-description: Prüft einen Diff gegen die tragenden Invarianten aus CLAUDE.md — KafkaSecurity, Consumer-Group je Pod, SSE-Offsets, Serializer, Metriknamen. Einsetzen, sobald etwas unter src/ oder tests/ geändert wurde, besonders an Kafka-Clients, SSE oder Telemetrie.
+description: Prüft einen Diff gegen die tragenden Invarianten aus CLAUDE.md — KafkaSecurity, Consumer-Group je Pod, SSE-Offsets, Serializer. Einsetzen, sobald etwas unter src/ oder tests/ geändert wurde, besonders an Kafka-Clients oder SSE.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -19,7 +19,7 @@ grep die Fundstellen, lies die Umgebung. Punkte, die der Diff nicht berührt, ü
 schweigend.
 
 Bei Unsicherheit über die Begründung: `docs/kafka.md`, `docs/streaming.md`,
-`docs/observability.md`, `docs/architecture.md`.
+`docs/architecture.md`.
 
 ## Die Liste
 
@@ -53,24 +53,18 @@ Bei Unsicherheit über die Begründung: `docs/kafka.md`, `docs/streaming.md`,
    ist ein Befund, auch wenn es zufällig dasselbe Ergebnis liefert. `PresenceKey` ist die
    dokumentierte Ausnahme: Record-Key, nicht Payload.
 
-6. **Kein `/metrics` im Backend.** Das Backend pusht über OTLP und hat bewusst keinen
-   Prometheus-Endpunkt (`curl` → 404). Ein neu eingebauter Endpunkt oder ein
-   `AddPrometheusExporter` ist ein Befund.
+6. **Keine Telemetrie.** Das Repo hat bewusst kein OpenTelemetry-SDK, keinen Collector, kein
+   Prometheus und keinen `/metrics`-Endpunkt. Ein neuer `Meter`, ein `AddOpenTelemetry`, ein
+   `AddPrometheusExporter` oder ein `/metrics`-Endpunkt ist ein Befund.
 
-7. **Metrik-Instrumentnamen**: punktgetrennt, klein, **ohne** `_total`, **ohne** Einheit im
-   Namen. Die Suffixe hängt der Prometheus-Exporter des Collectors an; wer sie selbst anhängt,
-   bekommt sie doppelt. Ebenso: im Backend steht kein `ConfigureResource(...AddService(...))` —
-   die Identität kommt aus `OTEL_SERVICE_NAME` / `OTEL_RESOURCE_ATTRIBUTES`.
+7. **Es gibt kein `GET /api/history`.** Der Verlauf sind die ersten Frames von `/api/stream`.
 
-8. **Es gibt kein `GET /api/history`.** Der Verlauf sind die ersten Frames von `/api/stream`.
+8. **Konfiguration nur über `BackendOptions.FromEnvironment()`**, explizit gelesen, schlichte
+   Namen. Genau eine Ausnahme: `ASPNETCORE_Kestrel__Certificates__Default__*`. Kein
+   `Section__Key`-Autobinding, keine Zugangsdaten in ConfigMap oder `values.yaml`.
 
-9. **Konfiguration nur über `BackendOptions.FromEnvironment()`**, explizit gelesen, schlichte
-   Namen. Genau zwei Ausnahmen: `OTEL_*` und
-   `ASPNETCORE_Kestrel__Certificates__Default__*`. Kein `Section__Key`-Autobinding, keine
-   Zugangsdaten in ConfigMap oder `values.yaml`.
-
-10. **`TreatWarningsAsErrors=true` ohne Ausnahme.** Kein `#pragma warning`, kein
-    `[SuppressMessage]`, kein `NoWarn` — im ganzen Repo nicht.
+9. **`TreatWarningsAsErrors=true` ohne Ausnahme.** Kein `#pragma warning`, kein
+   `[SuppressMessage]`, kein `NoWarn` — im ganzen Repo nicht.
 
 ## Bericht
 

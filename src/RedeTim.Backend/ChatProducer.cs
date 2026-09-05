@@ -7,13 +7,11 @@ public sealed class ChatProducer : IDisposable
 {
     private readonly KafkaJsonProducer _producer;
     private readonly BackendOptions _options;
-    private readonly ChatMetrics _metrics;
 
-    public ChatProducer(BackendOptions options, ChatMetrics metrics, ILogger<ChatProducer> logger)
+    public ChatProducer(BackendOptions options, ILogger<ChatProducer> logger)
     {
         _options = options;
-        _metrics = metrics;
-        _producer = new KafkaJsonProducer(BuildConfig(options), metrics, logger, "Kafka producer");
+        _producer = new KafkaJsonProducer(BuildConfig(options), logger, "Kafka producer");
     }
 
     internal static ProducerConfig BuildConfig(BackendOptions options) =>
@@ -33,8 +31,6 @@ public sealed class ChatProducer : IDisposable
         };
 
         await _producer.ProduceAsync(_options.Topic, record, cancellationToken);
-
-        _metrics.RecordMessageSent();
     }
 
     public void Dispose() => _producer.Dispose();

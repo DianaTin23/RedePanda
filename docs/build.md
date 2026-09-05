@@ -67,7 +67,7 @@ ausführen.
 aller Lockfiles vor und nach dem Lauf: Ein Restore im locked mode schreibt die Datei trotzdem
 neu, wenn er zu dem Schluss kommt, dass er darf.
 
-CI ruft das Skript bei jedem Push und PR auf; README Abschnitt 13 listet es außerdem für den
+CI ruft das Skript bei jedem Push und PR auf; README Abschnitt 12 listet es außerdem für den
 Lauf von Hand vor einem Release.
 
 ### Der doppelte Bindestrich
@@ -210,13 +210,13 @@ auch ohne Helm installieren ließ. Es kostete mehr, als es einbrachte:
 
 - Eine gerenderte Datei kann die `fail`-Prüfungen des Charts zur Renderzeit nicht mitnehmen —
   wer Helm übersprang, übersprang jede Kontrolle, die eine Fehlkonfiguration laut macht.
-- TLS hat keinen Ausschalter, jedes Rendern mintete also eine CA und vier private Schlüssel und
+- TLS hat keinen Ausschalter, jedes Rendern mintet also eine CA und zwei private Schlüssel und
   legte sie hier ab.
 - `helm template` rendert `.Release.Revision` immer als `1`, der Topic-Job behielt damit einen
   Namen, und das zweite `kubectl apply` scheiterte an einem unveränderlichen Feld.
-- Nichts bemerkte Drift, und es driftete — um fünf fehlende Secrets (exakt: das Chart rendert
-  fünf, die Datei enthielt keines) und eine Zeilenzahl, die davon abhängt, welche zwei Stände
-  man vergleicht. Sie stand hier zu lange als feste Zahl; siehe README Abschnitt 7.
+- Nichts bemerkte Drift, und es driftete — um jedes fehlende Secret (exakt: das Chart rendert
+  inzwischen drei, die Datei enthielt keines) und eine Zeilenzahl, die davon abhängt,
+  welche zwei Stände man vergleicht. Sie stand hier zu lange als feste Zahl; siehe README Abschnitt 7.
 
 Helm ist der Installationsweg. Das Release-Artefakt ist `deploy/releases/<version>.yaml`.
 

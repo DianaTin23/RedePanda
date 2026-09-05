@@ -19,11 +19,10 @@ Der Code trägt bewusst fast keine Prosa. Jede nicht offensichtliche Entscheidun
 
 | Bereich | Dokument |
 |---|---|
-| Dienste, Schnitt, geteilte Typen (`Contracts`), manuelle Kopplungen | `docs/architecture.md` |
+| Dienste, Schnitt, geteilte Typen (`Contracts`), manuelle Kopplungen, Logging | `docs/architecture.md` |
 | Producer, Consumer, Offsets, GroupId, Shutdown, `KafkaSecurity` | `docs/kafka.md` |
 | SSE, Verlaufspuffer, Backpressure, Heartbeats, Resume | `docs/streaming.md` |
 | Caddyfile, `app.js`, Frontend-Image | `docs/frontend.md` |
-| OTel-SDK, Collector, Prometheus, Metriknamen | `docs/observability.md` |
 | Helm-Chart, TLS, Probes, Jobs, HPA | `docs/deployment.md` |
 | Zentrale Build-Konfiguration, Lockfiles, Digest-Pins, `build-images.sh` | `docs/build.md` |
 
@@ -57,13 +56,13 @@ Abschnitt 6. Demo mit Port-Forwards: `./scripts/demo.sh`.
 `chart.yml` laufen bei Push auf `main` (ohne `deploy/releases/**`), bei jedem PR, per
 `workflow_dispatch` und per `workflow_call`; `release.yml` **nur** per `workflow_dispatch` auf
 `main` und hängt per `needs` an den beiden; `digests.yml` wöchentlich. Details: README
-Abschnitt 13.
+Abschnitt 12.
 
-Einen Cluster hat CI nicht — die manuelle Abnahmeliste in README Abschnitt 13 bleibt manuell.
+Einen Cluster hat CI nicht — die manuelle Abnahmeliste in README Abschnitt 12 bleibt manuell.
 
 ## Was `.claude/` automatisiert
 
-Eingecheckt, gilt also für jeden, der das Repo auscheckt. Vollständig in README Abschnitt 16.
+Eingecheckt, gilt also für jeden, der das Repo auscheckt. Vollständig in README Abschnitt 15.
 
 - **Zwei Hooks** (`.claude/settings.json`): `lockfile-guard.sh` meldet nach jedem `dotnet`-Aufruf
   still neu geschriebene `packages.lock.json`; `chart-guard.sh` ruft nach jeder Änderung unter
@@ -82,10 +81,7 @@ Eingecheckt, gilt also für jeden, der das Repo auscheckt. Vollständig in READM
 ```
 Browser ──HTTPS──▶ Caddy (Frontend) ──proxy /api──▶ Backend ──Kafka──▶ Redpanda
    ▲                :8443              HTTPS :8443    │                (StatefulSet)
-   └───── SSE (/api/stream) ◀──────────────────────── │
-                                                      │ OTLP/gRPC über TLS :4317 (push)
-                                                      ▼
-                                            OTel-Collector ──HTTPS :8889──▶ Prometheus
+   └───── SSE (/api/stream) ◀─────────────────────────┘
 ```
 
 Vier Projekte: `RedeTim.Contracts` (geteiltes Wire-Format + `KafkaSecurity`),
@@ -93,11 +89,13 @@ Vier Projekte: `RedeTim.Contracts` (geteiltes Wire-Format + `KafkaSecurity`),
 Admin-Prozess: `--ensure-topic`), `RedeTim.Frontend`
 (nur Caddyfile + vier statische Dateien, kein Build-Tooling).
 
-Zwei Trennungen tragen den Entwurf und sind vorführbar:
+Eine Trennung trägt den Entwurf und ist vorführbar:
 
 - **Das Frontend spricht kein Kafka.** Nur `/api/...`, kein npm/CDN/Webfonts.
-- **Das Backend spricht kein Prometheus.** Es pusht über OTLP und hat **keinen
-  `/metrics`-Endpunkt** (`curl` → 404). Keinen einbauen.
+
+Es gibt **keine Telemetrie**: kein OpenTelemetry-SDK, keinen Collector, kein Prometheus und
+keinen `/metrics`-Endpunkt. Das ist eine bewusste Entrümpelung — nichts davon wieder einbauen,
+ohne dass jemand danach fragt.
 
 ### Die tragenden Invarianten
 
@@ -123,10 +121,6 @@ steht jeweils in `docs/`; hier steht nur, was gilt.
   scheitert still gegen jeden abgesicherten; genau so entstand der Readiness-Bug.
   `BrokerReadinessTests` prüft das pro Client. → `docs/kafka.md#abgesicherte-broker`
 - **Es gibt kein `GET /api/history`.** Der Verlauf sind die ersten Frames von `/api/stream`.
-- **Metrik-Instrumentnamen**: punktgetrennt, klein, **ohne** `_total`, **ohne** Einheit — die
-  Suffixe hängt der Prometheus-Exporter des Collectors an. Im Backend steht bewusst kein
-  `ConfigureResource(...AddService(...))`; Identität kommt aus `OTEL_SERVICE_NAME` /
-  `OTEL_RESOURCE_ATTRIBUTES`. → `docs/observability.md#namensregeln`
 
 ### Release-Modell
 
@@ -139,10 +133,10 @@ einzige Installationsweg. → `docs/build.md#die-release-datei-ist-das-release`
 ### Konfiguration
 
 Ausschließlich Env-Variablen unter schlichten Namen; `BackendOptions.FromEnvironment()` liest
-sie **explizit**. Genau zwei Ausnahmen: `OTEL_*` (vom SDK selbst gelesen) und
-`ASPNETCORE_Kestrel__Certificates__Default__*` (Framework-Eigentum). Zugangsdaten stehen **nie**
-in der ConfigMap oder in `values.yaml`, immer per `secretKeyRef` aus
-`redpanda.auth.existingSecret`. Vollständige Tabelle: README Abschnitt 9.
+sie **explizit**. Genau eine Ausnahme: `ASPNETCORE_Kestrel__Certificates__Default__*`
+(Framework-Eigentum). Zugangsdaten stehen **nie** in der ConfigMap oder in `values.yaml`,
+immer per `secretKeyRef` aus `redpanda.auth.existingSecret`. Vollständige Tabelle:
+README Abschnitt 9.
 
 ## Fallen beim Bearbeiten
 

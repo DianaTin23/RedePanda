@@ -1,6 +1,6 @@
 apiVersion: v2
 name: redetim
-description: Browser chat over Redpanda, with OpenTelemetry metrics via an OTel Collector into Prometheus
+description: Browser chat over Redpanda, served as two separate deployments in Kubernetes
 type: application
 
 # Chart version and application version are tracked separately on purpose: the chart can be
@@ -12,5 +12,3 @@ keywords:
   - chat
   - redpanda
   - kafka
-  - opentelemetry
-  - prometheus

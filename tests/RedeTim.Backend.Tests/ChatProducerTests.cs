@@ -48,7 +48,6 @@ public class ChatProducerTests
     [Fact]
     public async Task ProducingToAnUnreachableBrokerGivesUpAfterTheTimeout()
     {
-        using var meterFactory = new TestMeterFactory();
         var options = TestOptions.Create() with
         {
             BootstrapServers = "127.0.0.1:1",
@@ -56,8 +55,7 @@ public class ChatProducerTests
             ProduceTimeoutMs = 2000,
         };
 
-        using var producer = new ChatProducer(
-            options, new ChatMetrics(meterFactory), NullLogger<ChatProducer>.Instance);
+        using var producer = new ChatProducer(options, NullLogger<ChatProducer>.Instance);
 
         Assert.True(ChatMessage.TryCreate(
             "general", "tester", "hello", DateTimeOffset.UtcNow,

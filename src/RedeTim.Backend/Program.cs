@@ -1,7 +1,5 @@
 using System.Globalization;
 using Confluent.Kafka;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
 using RedeTim.Backend;
 using RedeTim.Contracts;
 
@@ -23,7 +21,6 @@ if (options.LogLevel > LogLevel.Debug)
 }
 
 builder.Services.AddSingleton(options);
-builder.Services.AddSingleton<ChatMetrics>();
 builder.Services.AddSingleton<ChatBroadcaster>();
 builder.Services.AddSingleton<ChatProducer>();
 builder.Services.AddSingleton<BrokerReadiness>();
@@ -38,14 +35,6 @@ builder.Services.AddSingleton<IPresenceProducer>(sp => ActivatorUtilities.Create
 builder.Services.AddHostedService<PresenceConsumerService>();
 
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
-
-builder.Services.AddOpenTelemetry()
-    .WithMetrics(m => m
-        .AddAspNetCoreInstrumentation()
-        .AddRuntimeInstrumentation()
-        .AddMeter(ChatMetrics.MeterName)
-        .AddMeter("Microsoft.AspNetCore.Server.Kestrel")
-        .AddOtlpExporter());
 
 var app = builder.Build();
 

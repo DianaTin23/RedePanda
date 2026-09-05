@@ -15,12 +15,11 @@ public sealed class PresenceProducer : IPresenceProducer, IDisposable
     private readonly KafkaJsonProducer _producer;
     private readonly BackendOptions _options;
 
-    public PresenceProducer(
-        BackendOptions options, ChatMetrics metrics, ILogger<PresenceProducer> logger)
+    public PresenceProducer(BackendOptions options, ILogger<PresenceProducer> logger)
     {
         _options = options;
         _producer = new KafkaJsonProducer(
-            BuildConfig(options), metrics, logger, "Presence producer");
+            BuildConfig(options), logger, "Presence producer");
     }
 
     internal static ProducerConfig BuildConfig(BackendOptions options) =>

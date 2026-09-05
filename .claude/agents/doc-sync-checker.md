@@ -24,11 +24,10 @@ Ein reines Refactoring braucht keine Doku-Änderung; eine geänderte Entscheidun
 
 | Bereich | Dokument |
 |---|---|
-| Dienste, Schnitt, geteilte Typen (`Contracts`), manuelle Kopplungen | `docs/architecture.md` |
+| Dienste, Schnitt, geteilte Typen (`Contracts`), manuelle Kopplungen, Logging | `docs/architecture.md` |
 | Producer, Consumer, Offsets, GroupId, Shutdown, `KafkaSecurity` | `docs/kafka.md` |
 | SSE, Verlaufspuffer, Backpressure, Heartbeats, Resume | `docs/streaming.md` |
 | Caddyfile, `app.js`, Frontend-Image | `docs/frontend.md` |
-| OTel-SDK, Collector, Prometheus, Metriknamen | `docs/observability.md` |
 | Helm-Chart, TLS, Probes, Jobs, HPA | `docs/deployment.md` |
 | Zentrale Build-Konfiguration, Lockfiles, Digest-Pins, `build-images.sh` | `docs/build.md` |
 

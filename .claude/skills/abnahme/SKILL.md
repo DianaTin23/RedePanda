@@ -37,7 +37,7 @@ Zwei Dinge, die die Skripte selbst nicht sagen können:
 ## Danach
 
 Grün heißt: was ohne Cluster prüfbar ist, ist geprüft. Die manuelle Abnahmeliste in **README
-Abschnitt 13** bleibt davon unberührt — sie braucht einen Cluster, und CI hat auch keinen.
+Abschnitt 12** bleibt davon unberührt — sie braucht einen Cluster, und CI hat auch keinen.
 
 Wenn der Lock-Datei-Schritt anschlägt: die neu geschriebene Datei entweder verwerfen
 (`git checkout -- '*packages.lock.json'`) oder, wenn die Versionsänderung beabsichtigt war,

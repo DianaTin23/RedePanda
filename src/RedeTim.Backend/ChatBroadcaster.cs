@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using RedeTim.Contracts;
 
@@ -9,23 +8,14 @@ public sealed class ChatBroadcaster
 {
     private readonly ConcurrentDictionary<Guid, Subscriber> _subscribers = new();
     private readonly ChatHistory _history;
-    private readonly ChatMetrics _metrics;
     private readonly ILogger<ChatBroadcaster> _logger;
 
     private readonly Lock _gate = new();
 
-    public ChatBroadcaster(
-        BackendOptions options,
-        IMeterFactory meterFactory,
-        ChatMetrics metrics,
-        ILogger<ChatBroadcaster> logger)
+    public ChatBroadcaster(BackendOptions options, ILogger<ChatBroadcaster> logger)
     {
         _history = new ChatHistory(options.HistorySize, options.MaxRooms);
-        _metrics = metrics;
         _logger = logger;
-
-        var meter = meterFactory.Create(ChatMetrics.MeterName);
-        meter.CreateObservableUpDownCounter("redetim.active_connections", () => _subscribers.Count);
     }
 
     internal const int SubscriberBufferSize = 256;
@@ -71,7 +61,6 @@ public sealed class ChatBroadcaster
                 if (!subscriber.Channel.Writer.TryWrite(record) &&
                     subscriber.Channel.Writer.TryComplete())
                 {
-                    _metrics.RecordStreamCut();
                     _logger.LogWarning(
                         "A subscriber in room {Room} fell {Capacity} messages behind; its stream " +
                         "was ended so the browser reconnects and replays the gap instead of " +

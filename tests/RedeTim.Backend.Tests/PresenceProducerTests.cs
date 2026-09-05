@@ -11,7 +11,6 @@ public class PresenceProducerTests
     [Fact]
     public async Task RenewingAgainstAnUnreachableBrokerGivesUpAfterTheTimeout()
     {
-        using var meterFactory = new TestMeterFactory();
         var options = TestOptions.Create() with
         {
             BootstrapServers = "127.0.0.1:1",
@@ -20,7 +19,7 @@ public class PresenceProducerTests
         };
 
         using var producer = new PresenceProducer(
-            options, new ChatMetrics(meterFactory), NullLogger<PresenceProducer>.Instance);
+            options, NullLogger<PresenceProducer>.Instance);
 
         var stopwatch = Stopwatch.StartNew();
         var failure = await Assert.ThrowsAsync<ProduceException<string, string>>(

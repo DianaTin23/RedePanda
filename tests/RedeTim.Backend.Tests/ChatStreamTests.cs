@@ -12,12 +12,8 @@ public class ChatStreamTests
 
     private static ChatBroadcaster CreateBroadcaster()
     {
-        var meterFactory = new TestMeterFactory();
         return new ChatBroadcaster(
-            TestOptions.Create(),
-            meterFactory,
-            new ChatMetrics(meterFactory),
-            NullLogger<ChatBroadcaster>.Instance);
+            TestOptions.Create(), NullLogger<ChatBroadcaster>.Instance);
     }
 
     private static ChatMessage Message(string room, string text) =>

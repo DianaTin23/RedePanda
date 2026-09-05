@@ -58,10 +58,6 @@ true
 {{- end -}}
 {{- end -}}
 
-{{- define "redetim.collectorService" -}}
-{{- printf "%s-otel-collector" (include "redetim.fullname" .) -}}
-{{- end -}}
-
 {{- define "redetim.tlsMountPath" -}}
 /etc/redetim/tls
 {{- end -}}

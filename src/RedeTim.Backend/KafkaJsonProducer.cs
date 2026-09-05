@@ -10,18 +10,13 @@ namespace RedeTim.Backend;
 internal sealed class KafkaJsonProducer : IDisposable
 {
     private readonly IProducer<string, string> _producer;
-    private readonly ChatMetrics _metrics;
     private readonly LogThrottle _errorLog = new(KafkaLogging.ErrorInterval);
 
-    public KafkaJsonProducer(
-        ProducerConfig config, ChatMetrics metrics, ILogger logger, string role)
+    public KafkaJsonProducer(ProducerConfig config, ILogger logger, string role)
     {
-        _metrics = metrics;
-
         _producer = new ProducerBuilder<string, string>(config)
             .SetErrorHandler((_, error) =>
             {
-                _metrics.RecordKafkaError();
                 if (_errorLog.ShouldLog(out var suppressed))
                 {
                     logger.LogWarning(
@@ -62,19 +57,9 @@ internal sealed class KafkaJsonProducer : IDisposable
         _ => StatusCodes.Status502BadGateway,
     };
 
-    public async Task ProduceAsync(
-        string topic, Message<string, string> message, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _producer.ProduceAsync(topic, message, cancellationToken);
-        }
-        catch (ProduceException<string, string>)
-        {
-            _metrics.RecordKafkaError();
-            throw;
-        }
-    }
+    public Task ProduceAsync(
+        string topic, Message<string, string> message, CancellationToken cancellationToken) =>
+        _producer.ProduceAsync(topic, message, cancellationToken);
 
     public void Dispose()
     {

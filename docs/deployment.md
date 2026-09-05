@@ -21,7 +21,7 @@ harter Fehler statt Vorgabewert. Die Alternative wäre ein Backend, das hochkomm
 Verbindung gegen einen Service scheitern lässt, den niemand deployt hat.
 
 > **`helm lint` fängt das nicht.** Helm 4 stuft ein `fail` im Template auf INFO herab und meldet
-> trotzdem „0 chart(s) failed". Nur `helm template` bricht wirklich ab. README Abschnitt 13
+> trotzdem „0 chart(s) failed". Nur `helm template` bricht wirklich ab. README Abschnitt 12
 > nennt den Befehl.
 
 Die lokal gebauten Images tragen **keinen** Digest, anders als die Fremdimages. Sie werden nie
@@ -42,19 +42,17 @@ enthält nur unveränderliche Identität, damit der Selektor eines Deployments n
 
 ## TLS
 
-Das Chart stellt bei der ersten Installation eine eigene CA aus und signiert damit vier
+Das Chart stellt bei der ersten Installation eine eigene CA aus und signiert damit zwei
 Server-Zertifikate. Es gibt **keinen Ausschalter** dafür.
 
 Das ist Absicht: Eine Aus-Stellung, die niemand vorführt, ist ein ungetesteter Codepfad, und die
 Templates trügen dann eine zweite Variante jedes Ports, jeder Probe und jedes Mounts.
 
 Der private Schlüssel der CA bleibt im Cluster. Ein späteres Upgrade braucht ihn, um ein
-Zertifikat für eine Komponente zu signieren, die erst dann eingeschaltet wird — etwa
-`otelCollector.enabled`.
+Zertifikat für eine Komponente zu signieren, die erst dann hinzukommt.
 
 `ca.crt` liegt neben jedem Schlüsselpaar, damit ein Pod, der zugleich Server und Client ist —
-das Frontend als Proxy zum Backend, Prometheus beim Scrapen des Collectors — mit genau einem
-Mount auskommt. Aus demselben Grund ist der Mountpfad für alle Komponenten derselbe: Ein Pfad je
+das Frontend als Proxy zum Backend — mit genau einem Mount auskommt. Aus demselben Grund ist der Mountpfad für alle Komponenten derselbe: Ein Pfad je
 Komponente wäre nur eine weitere Sache, die man in einer Probe oder einer Konfigurationsdatei
 falsch machen kann.
 
@@ -114,10 +112,7 @@ bereits nur der neuen CA vertrauen.
 nie. Eine harte Bedingung (`DoNotSchedule` oder Anti-Affinität `requiredDuringScheduling`) ließe
 die zweite Replica auf den Ein-Node-Clustern, auf die dieses Chart zielt, für immer `Pending` —
 ein schlechteres Ergebnis als gar keine Verteilung. Auf einem Node nachweislich wirkungslos, auf
-mehreren richtig; README Abschnitt 14 sagt, welchen Fall die Demo tatsächlich vorführt.
-
-Es gibt **keine** `prometheus.io/scrape`-Annotationen. Das Backend pusht über OTLP und hat
-keinen `/metrics`-Endpunkt.
+mehreren richtig; README Abschnitt 13 sagt, welchen Fall die Demo tatsächlich vorführt.
 
 ### Probes und Shutdown
 
@@ -151,16 +146,15 @@ metrics-server, den weder kind noch Docker Desktop mitbringen. Ohne ihn existier
 liest für immer `<unknown>/70%` und skaliert nie — was kaputter aussieht als gar kein
 Autoscaler. README Abschnitt 7 hat die zwei Befehle zum Einschalten.
 
-**Skaliert wird über CPU**, weil das Backend per Entwurf keinen `/metrics`-Endpunkt hat: Die
-einzige Metrik, an die ein einfacher HPA herankommt, ist die des kubelet. Die interessante Zahl
-wäre `redetim_active_connections` je Pod, aber sie zu lesen bräuchte prometheus-adapter oder
-KEDA — eine ganze Zusatzkomponente, um eine Demo zu autoskalieren. Der Weg bleibt offen.
+**Skaliert wird über CPU**, weil das die einzige Metrik ist, an die ein einfacher HPA
+herankommt: die des kubelet. Die interessantere Zahl wäre die der offenen SSE-Verbindungen je
+Pod, aber sie zu lesen bräuchte erst eine Telemetriestrecke und dann prometheus-adapter oder
+KEDA — zwei ganze Zusatzkomponenten, um eine Demo zu autoskalieren. Der Weg bleibt offen.
 
 Die Zielauslastung bezieht sich auf den CPU-**Request**, nicht auf das Limit und nicht auf den
 Node. Deshalb steht der Request auf 100m und nicht auf den 50m, die für eine Ein-Pod-Demo
 gereicht hätten: Bei 50m sind 70 % gleich 35m, und daran streift ein untätiger
-ASP.NET-Core-Pod mit GC und einem 5-Sekunden-Metrikexport bereits — der HPA säße ab der ersten
-Sekunde bei `maxReplicas`.
+ASP.NET-Core-Pod mit GC bereits — der HPA säße ab der ersten Sekunde bei `maxReplicas`.
 
 **Es gibt weiterhin kein CPU-Limit**, wie überall sonst in diesem Chart. Es änderte an der
 Rechnung des HPA nichts (gemessen wird gegen den Request), und CFS-Throttling deckelte genau das
@@ -170,16 +164,16 @@ Signal, das der HPA liest: Ein überlasteter Pod meldete sich dann als bloß bes
 geschrieben sind. Bei einer Replica hat `maxSurge` nichts, wogegen es aufstocken könnte, und
 `maxUnavailable: 0` ist nicht einzuhalten.
 
-`maxReplicas: 4` ist Arithmetik, keine Schätzung: 4 × 100m + Redpanda 200m + Collector 50m +
-Prometheus 50m + 2 × Frontend 10m = 720m. Passt auf einen Ein-CPU-Node.
+`maxReplicas: 4` ist Arithmetik, keine Schätzung: 4 × 100m + Redpanda 200m +
+2 × Frontend 10m = 620m. Passt auf einen Ein-CPU-Node.
 
 Hoch schnell, runter langsam. Für das Hochskalieren bleibt bewusst die Kubernetes-Vorgabe (kein
 Stabilisierungsfenster) — eine Vorgabe auszuschreiben wäre Rauschen, nur die Asymmetrie ist
 festhaltenswert. Das Herunterskalieren steht auf 60 s statt der vorgegebenen 300 s: Letztere sind
 für den Produktivbetrieb richtig und länger als die ganze Demo.
 
-Das ist dieselbe Begründung wie beim Metrik-Exportintervall (5 s statt 60 s) und beim
-Scrape-Intervall (5 s statt 15 s): **Eine Zahl, die niemand sich bewegen sieht, beweist nichts.**
+Dahinter steht dieselbe Überlegung wie bei jeder anderen Demo-Zahl in diesem Chart:
+**Eine Zahl, die niemand sich bewegen sieht, beweist nichts.**
 
 ## ConfigMap
 
@@ -187,10 +181,8 @@ Alle Einstellungen der Anwendung stehen unter schlichten Namen (`REDPANDA_TOPIC`
 `LOG_LEVEL`, …), wie die Aufgabenstellung es verlangt. Deshalb liest `BackendOptions` sie
 ausdrücklich, statt sich auf ASP.NETs Auto-Binding zu verlassen, das `Section__Key` erwartet.
 
-Es gibt genau zwei Ausnahmen von der Regel „schlichte Namen":
+Es gibt genau eine Ausnahme von der Regel „schlichte Namen":
 
-- **`OTEL_*`** — von OpenTelemetry spezifiziert und vom SDK selbst gelesen. Sie im Code noch
-  einmal zu lesen erzeugte eine zweite Wahrheitsquelle.
 - **`ASPNETCORE_Kestrel__Certificates__Default__*`** — Framework-Konfiguration, die ASP.NET
   selbst besitzt.
 
@@ -261,33 +253,17 @@ einem Template statt an einer Wertedatei.
 
 ## Austauschbare Backing Services
 
-Zwei Schalter machen aus einer Behauptung einen Nachweis:
+Ein Schalter macht aus einer Behauptung einen Nachweis:
 
 **`redpanda.enabled: false`** deployt keinen Broker; die Anwendung zeigt dann auf
 `redpanda.external.bootstrapServers`. Ohne diesen Schalter bliebe die 12-Factor-Aussage in README
-Abschnitt 11 unbelegt.
-
-**`otelCollector.enabled: false`** plus `otelCollector.external.endpoint` exportiert an einen
-vorhandenen Collector. Die Anwendung konnte das immer — sie liest
-`OTEL_EXPORTER_OTLP_ENDPOINT` —, das Chart nicht: Der einzige Weg zu einem fremden Collector war
-eine Änderung an `templates/configmap.yaml`.
-
-Steht dort kein Endpunkt, wird das SDK per `OTEL_SDK_DISABLED` abgeschaltet, statt einen
-Endpunkt anzufragen, den es nicht gibt.
-
-Prometheus muss dabei ebenfalls aus: Das mitgelieferte Prometheus kennt als Scrape-Ziel nur den
-mitgelieferten Collector. Das Chart sagt das beim Rendern.
-
-`otelCollector.external.caSecret` gehört dazu. Ohne diesen Schlüssel galt der Austausch des
-Telemetrie-Backends nur unter einer Bedingung, die nirgends stand: Der Init-Container, der die
-CA in den Trust Store faltet, hing an `otelCollector.enabled`. Ein fremder Collector hinter
-privater CA war damit nicht erreichbar — ohne Fehlermeldung, die das erklärt hätte.
+Abschnitt 10 unbelegt.
 
 ## Helpers
 
 `redetim.fullname` kollabiert beim üblichen Release-Namen `redetim` zu `redetim`. Das ist
 es, was die Service-Namen in der README kurz hält: `redetim-backend`,
-`redetim-otel-collector`.
+`redetim-frontend`.
 
 **Der Service-Name des Brokers ist bewusst nicht release-qualifiziert.** Er steht in
 `--advertise-kafka-addr` des Brokers und im Bootstrap-Vorgabewert jedes Clients; ein kurzer,
@@ -319,13 +295,5 @@ genau das, siehe [build.md](build.md#broker-parität).
 ganzen Node.
 
 Redpanda läuft im `dev-container`-Modus mit einem einzelnen Broker. Das ist eine bewusste
-Einschränkung der Dev/Prod-Parität und in README Abschnitt 14 festgehalten.
+Einschränkung der Dev/Prod-Parität und in README Abschnitt 13 festgehalten.
 
-## Der Collector
-
-**Core-Distribution, nicht contrib.** Core enthält den Prometheus-Exporter und die
-`health_check`-Extension bereits. `otelcol-k8s` wäre falsch — es hat überhaupt keinen
-Prometheus-Exporter.
-
-Die Konfiguration selbst ist in [observability.md](observability.md#collector-konfiguration)
-beschrieben.

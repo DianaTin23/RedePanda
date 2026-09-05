@@ -15,7 +15,7 @@ public sealed class PresenceConsumerService : KafkaConsumerService
         ILogger<PresenceConsumerService> logger)
         : base(
             "presence consumer", options.PresenceTopic, options.PresenceConsumerGroupId,
-            BuildConfig(options), metrics: null, logger)
+            BuildConfig(options), logger)
     {
         _store = store;
         _readiness = readiness;

@@ -15,7 +15,6 @@ public abstract class KafkaConsumerService : BackgroundService
     private readonly string _topic;
     private readonly string _groupId;
     private readonly ConsumerConfig _config;
-    private readonly ChatMetrics? _metrics;
     private readonly ILogger _logger;
 
     private readonly LogThrottle _errorLog = new(KafkaLogging.ErrorInterval);
@@ -28,14 +27,12 @@ public abstract class KafkaConsumerService : BackgroundService
         string topic,
         string groupId,
         ConsumerConfig config,
-        ChatMetrics? metrics,
         ILogger logger)
     {
         _role = role;
         _topic = topic;
         _groupId = groupId;
         _config = config;
-        _metrics = metrics;
         _logger = logger;
     }
 
@@ -77,7 +74,6 @@ public abstract class KafkaConsumerService : BackgroundService
                 .SetPartitionsAssignedHandler(StartOffsets)
                 .SetErrorHandler((_, error) =>
                 {
-                    _metrics?.RecordKafkaError();
                     if (_errorLog.ShouldLog(out var suppressed))
                     {
                         _logger.LogWarning(
@@ -120,7 +116,6 @@ public abstract class KafkaConsumerService : BackgroundService
                 }
                 catch (ConsumeException e)
                 {
-                    _metrics?.RecordKafkaError();
                     _logger.LogWarning("{Role} consume failed: {Reason}", _role, e.Error.Reason);
                 }
             }

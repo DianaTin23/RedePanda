@@ -147,11 +147,8 @@ dem Moment, in dem jemand hineinsieht.
 Die zurückgehaltene Anzahl reist auf der nächsten durchgelassenen Zeile mit. Ein gedrosseltes
 Log bleibt so ehrlich: es faltet Wiederholung, es versteckt sie nicht.
 
-**Metriken werden bewusst nicht mitgedrosselt.** Ein Zähler, der Ereignisse auslässt, ist kein
-Zähler mehr. `redetim_kafka_errors_total` soll die echte Rate zeigen.
-
-Zustellfehler erreichen den Error-Callback nicht — librdkafkas `error_cb` meldet nur Ereignisse
-auf Client-Ebene. Deshalb zählt `ProduceAsync` sie selbst, im `catch`.
+Zustellfehler erreichen den Error-Callback ohnehin nicht — librdkafkas `error_cb` meldet nur
+Ereignisse auf Client-Ebene. Sie kommen stattdessen als `ProduceException` beim Aufrufer an.
 
 Die Umsetzung der Syslog-Level: librdkafkas Verbindungsgeplauder liegt auf `notice` und `info`,
 erst ab `warning` beschreibt es etwas, worauf jemand reagieren kann.

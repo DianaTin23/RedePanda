@@ -671,17 +671,18 @@ zweite Wahrheit für etwas anzulegen, das der Anwendung gar nicht gehört. Desha
 Cluster nicht startbar wäre. Das Chart überschreibt beides.
 
 Die fünf Verbindungsvariablen (`REDPANDA_SECURITY_PROTOCOL` bis `REDPANDA_SSL_CA_LOCATION`) liest
-dagegen `KafkaSecurity` in `RedeTim.Contracts` — einmal für alle **neun** Kafka-Clients im Repo,
-weil `ClientConfig` die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration ist.
-Ohne Konfiguration ändert die Klasse nichts; unvollständig konfiguriert bricht sie beim Start ab
-und nennt die fehlende Variable.
+dagegen `KafkaSecurity` in `RedeTim.Contracts` — einmal für *jeden* Kafka-Client im Repo, weil
+`ClientConfig` die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration ist. Ohne
+Konfiguration ändert die Klasse nichts; unvollständig konfiguriert bricht sie beim Start ab und
+nennt die fehlende Variable.
 
-Die Zahl stand hier lange auf „fünf", und das war nicht bloß ungenau: die beiden nicht mitgezählten
-Stellen waren die Admin-Clients, und einer davon wurde tatsächlich ohne diese Einstellungen gebaut
-(Abschnitt 5). Mit dem Presence-Topic (Abschnitt 9) kamen zwei weitere Backend-Clients hinzu —
-macht neun. Ein Test in `BrokerReadinessTests` prüft die Eigenschaft deshalb jetzt für jeden
-Client des Backends einzeln, statt sie zu behaupten. Zugangsdaten stehen dabei **nie** in der ConfigMap: sie kommen
-über `secretKeyRef` aus einem Secret, das man selbst anlegt (Schlüssel `username`, `password`).
+Hier stand einmal eine feste Zahl, und sie war jedes Mal wieder falsch — zuletzt, als mit
+`--describe-topic` zwei Clients verschwanden. Deshalb steht jetzt keine mehr, sondern die Prüfung:
+`BrokerReadinessTests` geht jeden Client des Backends einzeln durch, und ein Reflection-Test darin
+findet einen neuen von selbst. Die Herleitung steht in
+[docs/kafka.md](docs/kafka.md#abgesicherte-broker). Zugangsdaten stehen dabei **nie** in der
+ConfigMap: sie kommen über `secretKeyRef` aus einem Secret, das man selbst anlegt (Schlüssel
+`username`, `password`).
 
 `POD_NAME` ist dabei die einzige Variable ohne brauchbaren Default: die Consumer-GroupId wird
 daraus gebildet, und zwei Replicas in *einer* Gruppe teilen sich nicht die Last, sie legen

@@ -201,8 +201,8 @@ werden über einen Helper in beide Pod-Templates gerendert, die Kafka sprechen.
 landen in `helm get values`, im Shell-Verlauf und in jedem Repository, das die Datei enthält.
 
 `LOG_LEVEL` wird vom Backend gelesen, und **nur** von ihm. Es stand einmal in einer Aufzählung
-von Variablen, die der Topic-Job liest, was nie stimmte: Die Admin-Prozesse schreiben schlichte
-Zeilen nach stdout und haben keinen Logger, dessen Level man setzen könnte. Wer den Wert
+von Variablen, die der Topic-Job liest, was nie stimmte: Der Admin-Prozess schreibt schlichte
+Zeilen nach stdout und hat keinen Logger, dessen Level man setzen könnte. Wer den Wert
 hochdrehte, um einen scheiternden Topic-Job zu untersuchen, wartete auf Ausgabe, die nicht
 kommen kann.
 

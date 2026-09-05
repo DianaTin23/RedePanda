@@ -57,4 +57,7 @@ jobs:
       # Every chart rule lives in this one script, which /abnahme and the edit hook also call.
       # They used to carry their own transcription of it, and the copies had already drifted.
       - name: Validate the chart
+        env:
+          # Must match the actions/cache path above.
+          KUBECONFORM_CACHE: /tmp/kubeconform
         run: ./scripts/validate-chart.sh --committed-only

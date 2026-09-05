@@ -25,7 +25,9 @@ cd "$(repo_root)" || exit 2
 
 CHART="deploy/helm/redetim"
 K8S_VERSION="1.32.0"
-KUBECONFORM_CACHE="${TMPDIR:-/tmp}/kubeconform"
+# Overridable so CI can point it at the exact path actions/cache restores to; a mismatch there
+# would not fail, it would just silently never hit the cache.
+KUBECONFORM_CACHE="${KUBECONFORM_CACHE:-${TMPDIR:-/tmp}/kubeconform}"
 
 mode="full"
 select_args=()

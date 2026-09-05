@@ -1,0 +1,31 @@
+# check-digests.sh compares every digest-pinned base image against what its tag resolves to
+# today, and checks that the compose broker and the chart broker are the same image. It never
+# rewrites anything -- it reports, and a human decides.
+#
+# Weekly, not nightly: upstream digests do not move daily, and every run spends anonymous
+# Docker Hub pulls from a shared runner IP.
+name: digests
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  digests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The script needs skopeo, bash, grep and coreutils -- nothing that justifies a container.
+      # Its /etc/containers/registries.conf v1 workaround is inert here; Ubuntu ships v2.
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      # Exit 1 means drift OR an unreadable manifest (a Docker Hub rate limit reads the same).
+      # Read the log before believing a red run.
+      - name: check-digests.sh
+        run: ./scripts/check-digests.sh

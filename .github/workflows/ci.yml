@@ -1,0 +1,180 @@
+# Everything this repository used to ask a human to run by hand. README section 13 is the
+# acceptance list; the `verify` jobs below are that list, minus the steps that need a cluster.
+#
+# The release job is deliberately NOT triggered by a push. A release here is an identifiable
+# act -- that is why build-images.sh refuses an unclean tree -- so cutting one stays a decision
+# somebody makes, not a side effect of merging a typo fix.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    # The release job commits the release file back to main. Pushes made with GITHUB_TOKEN do
+    # not trigger workflows, so this is belt-and-braces -- but it is where somebody will look.
+    paths-ignore: ['deploy/releases/**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Build the images, push them to ghcr.io and commit the release file'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          # global.json pins 10.0.302 with rollForward: latestPatch.
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      # Restores all four projects with --locked-mode and fails if any packages.lock.json was
+      # rewritten behind its back.
+      - name: check-repro.sh
+        run: ./scripts/check-repro.sh
+
+      # ContinuousIntegrationBuild is what switches RestoreLockedMode on in Directory.Build.props.
+      # GitHub Actions does not set it, so passing it here is the whole point of this step.
+      # No --no-restore: the restore is the thing being verified.
+      - name: Test in locked mode
+        run: dotnet test -p:ContinuousIntegrationBuild=true
+
+      # check-repro.sh hashes the lock files itself, but a rewrite by `dotnet test` would land
+      # after it ran. This is the cheap second look.
+      - name: Lock files unchanged
+        run: git diff --exit-code -- '*packages.lock.json'
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          # Pinned, not 'latest': the chart's render-time `fail` is downgraded to INFO by
+          # `helm lint` in Helm 4, and README section 4 develops against exactly this version.
+          version: v4.2.3
+
+      # kubeconform fetches its JSON schemas over the network. Cache them, or an upstream
+      # hiccup turns chart validation red for a reason that has nothing to do with the chart.
+      - name: Cache kubeconform schemas
+        uses: actions/cache@v6
+        with:
+          path: /tmp/kubeconform
+          key: kubeconform-schemas-1.32.0
+
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      - name: Validate the chart (README section 13)
+        run: |
+          set -euo pipefail
+          REL=$(command ls -t deploy/releases/*.yaml | head -1)
+          echo "::notice::validating against ${REL}"
+
+          helm lint deploy/helm/redetim -f "$REL"
+          helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
+            | kubeconform -strict -summary -kubernetes-version 1.32.0 -cache /tmp/kubeconform
+
+          # The HPA combination has to be rendered separately, or nothing validates
+          # backend-hpa.yaml.
+          helm lint deploy/helm/redetim -f "$REL" --set backend.autoscaling.enabled=true
+          helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
+            --set backend.autoscaling.enabled=true \
+            | kubeconform -strict -summary -kubernetes-version 1.32.0 -cache /tmp/kubeconform
+
+      - name: replicas belongs to the HPA or to the chart, never to both
+        run: |
+          set -euo pipefail
+          REL=$(command ls -t deploy/releases/*.yaml | head -1)
+          with_hpa=$(helm template redetim deploy/helm/redetim -f "$REL" \
+            --set backend.autoscaling.enabled=true --show-only templates/backend.yaml \
+            | grep -c '^  replicas:' || true)
+          test "$with_hpa" -eq 0 || { echo "replicas rendered while the HPA owns it" >&2; exit 1; }
+          helm template redetim deploy/helm/redetim -f "$REL" \
+            --show-only templates/backend.yaml | grep -q '^  replicas: 2'
+
+      # The chart must refuse to render without a release file. `helm lint` does not catch this:
+      # Helm 4 reports a template `fail` as INFO. Only `helm template` actually aborts.
+      - name: Rendering without a release file must fail
+        run: |
+          if helm template redetim deploy/helm/redetim >/dev/null 2>&1; then
+            echo "The chart rendered without a release file -- the tag guard is gone." >&2
+            exit 1
+          fi
+
+  release:
+    needs: [dotnet, chart]
+    if: github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # commits the release file back to main
+      packages: write   # pushes to ghcr.io
+    concurrency:
+      # Queue, never cancel: a cancelled release leaves images pushed with no release file
+      # naming them.
+      group: release-main
+      cancel-in-progress: false
+    env:
+      # build-images.sh prefers podman, and ubuntu-latest has both. docker/login-action writes
+      # ~/.docker/config.json, which podman only reads as a fallback -- when that fallback misses
+      # the push fails as an opaque 'unauthorized'. Be explicit instead.
+      ENGINE: docker
+    steps:
+      - uses: actions/checkout@v7
+
+      # build-images.sh --push refuses an unclean tree, but four minutes into an image build.
+      # Fail as ourselves, immediately.
+      - name: Working tree must be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short >&2
+            echo "Refusing to cut a release from an unclean checkout." >&2
+            exit 1
+          fi
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        run: ./scripts/build-images.sh --push
+
+      # Unconditional: if the commit-back below fails because main moved, the release file is
+      # still recoverable from here rather than lost.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-file
+          path: deploy/releases/*.yaml
+          if-no-files-found: warn
+
+      - name: Commit the release file
+        run: |
+          set -euo pipefail
+          REL="$(git status --porcelain deploy/releases | awk '{print $2}')"
+          test -n "${REL}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${REL}"
+          git commit -m "release: $(basename "${REL}" .yaml)"
+          # No --force. If main moved while this ran, the push fails and the artifact above
+          # still holds the file.
+          git push origin HEAD:main

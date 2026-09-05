@@ -8,7 +8,7 @@ namespace RedeTim.Backend;
 // What the two do *not* share is deliberate and documented, so it stays with the subclasses:
 // where they start reading (docs/kafka.md#wiederaufnahme), and what a fatal error means. The
 // chat consumer takes the pod down with it; the presence consumer degrades open and keeps
-// serving. See docs/kafka.md and README section 14.
+// serving. See docs/kafka.md and README section 13.
 public abstract class KafkaConsumerService : BackgroundService
 {
     private readonly string _role;

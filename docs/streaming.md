@@ -72,10 +72,9 @@ Den Stream zu beenden ist dagegen reparabel:
 2. `EventSource` verbindet sich von selbst neu, mit `Last-Event-ID`.
 3. Der Replay füllt die Lücke exakt.
 
-Der Abbruch wird gezählt (`redetim_streams_cut_total`) und geloggt. `TryComplete` steht dabei
-**innerhalb** der Bedingung: Es liefert nur beim ersten Mal `true`, sodass ein bereits
-abgeschnittener und noch nicht entsorgter Abonnent nicht für den Rest seines Lebens einmal pro
-Nachricht loggen und zählen kann.
+Der Abbruch wird geloggt. `TryComplete` steht dabei **innerhalb** der Bedingung: Es liefert
+nur beim ersten Mal `true`, sodass ein bereits abgeschnittener und noch nicht entsorgter
+Abonnent nicht für den Rest seines Lebens einmal pro Nachricht loggen kann.
 
 ## Der Verlaufspuffer
 

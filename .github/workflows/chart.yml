@@ -1,4 +1,4 @@
-# The Helm half of what this repository used to ask a human to run by hand. README section 13
+# The Helm half of what this repository used to ask a human to run by hand. README section 12
 # is the acceptance list; this workflow is the part of it that a runner can check without a
 # cluster -- rendering and schema validation, not `helm install`.
 name: chart

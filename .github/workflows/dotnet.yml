@@ -1,4 +1,4 @@
-# The .NET half of what this repository used to ask a human to run by hand. README section 13
+# The .NET half of what this repository used to ask a human to run by hand. README section 12
 # is the acceptance list; this workflow is the part of it that needs neither a cluster nor Helm.
 name: dotnet
 

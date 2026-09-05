@@ -90,11 +90,6 @@ liefert, und eine leere Menge heißt, dass noch nichts zugewiesen ist.
 Ein Pod, der erst das halbe Topic gelesen hat, würde einem Browser ein halbes Gespräch zeigen.
 Deshalb bleibt er bis dahin aus den Service-Endpoints.
 
-Nachgeladene Nachrichten zählt `redetim_messages_received_total` **nicht** mit. Sie wurden
-gezählt, als sie zum ersten Mal ankamen. Zählte man sie erneut, spränge der Zähler bei jedem
-Pod-Neustart um die gesamte Retention — er soll den laufenden Chat abbilden, nicht das eigene
-Nachladen.
-
 ## Producer
 
 `EnableIdempotence = true` ist das, was einen Retry *sicher und in der richtigen Reihenfolge*

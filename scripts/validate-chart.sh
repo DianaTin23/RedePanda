@@ -2,7 +2,6 @@
 # Validates the Helm chart. Everything .github/workflows/chart.yml checks, in one place.
 #
 #   ./scripts/validate-chart.sh              # all four checks
-#   ./scripts/validate-chart.sh --lint-only  # only lint + kubeconform, both HPA variants
 #   ./scripts/validate-chart.sh --quick      # only what renders offline: no lint, no kubeconform
 #   ./scripts/validate-chart.sh --committed-only  # pick the release file from git only (CI)
 #
@@ -34,7 +33,6 @@ select_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help) usage ;;
-        --lint-only) mode="lint"; shift ;;
         --quick) mode="quick"; shift ;;
         --committed-only) select_args+=(--committed-only); shift ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -80,28 +78,26 @@ mkdir -p "${KUBECONFORM_CACHE}"
 render "without an HPA"
 render "with backend.autoscaling.enabled=true" --set backend.autoscaling.enabled=true
 
-if [[ "${mode}" != "lint" ]]; then
-    echo "==> replicas belongs to the HPA or to the chart, never both"
-    with_hpa="$(helm template redetim "${CHART}" -f "${REL}" --set backend.autoscaling.enabled=true \
-        --show-only templates/backend.yaml 2>/dev/null | grep -c '^  replicas:')"
-    without_hpa="$(helm template redetim "${CHART}" -f "${REL}" \
-        --show-only templates/backend.yaml 2>/dev/null | sed -n 's/^  replicas: //p' | head -1)"
-    if [[ "${with_hpa}" != "0" ]]; then
-        report "backend.yaml renders 'replicas' while the HPA owns it"
-    elif [[ -z "${without_hpa}" ]]; then
-        report "backend.yaml renders no 'replicas' even though no HPA is active"
-    elif [[ "${without_hpa}" != "${EXPECTED_REPLICAS}" ]]; then
-        report "backend.yaml renders 'replicas: ${without_hpa}', values.yaml says ${EXPECTED_REPLICAS}"
-    else
-        echo "    ok (replicas: ${EXPECTED_REPLICAS} without an HPA, absent with one)"
-    fi
+echo "==> replicas belongs to the HPA or to the chart, never both"
+with_hpa="$(helm template redetim "${CHART}" -f "${REL}" --set backend.autoscaling.enabled=true \
+    --show-only templates/backend.yaml 2>/dev/null | grep -c '^  replicas:')"
+without_hpa="$(helm template redetim "${CHART}" -f "${REL}" \
+    --show-only templates/backend.yaml 2>/dev/null | sed -n 's/^  replicas: //p' | head -1)"
+if [[ "${with_hpa}" != "0" ]]; then
+    report "backend.yaml renders 'replicas' while the HPA owns it"
+elif [[ -z "${without_hpa}" ]]; then
+    report "backend.yaml renders no 'replicas' even though no HPA is active"
+elif [[ "${without_hpa}" != "${EXPECTED_REPLICAS}" ]]; then
+    report "backend.yaml renders 'replicas: ${without_hpa}', values.yaml says ${EXPECTED_REPLICAS}"
+else
+    echo "    ok (replicas: ${EXPECTED_REPLICAS} without an HPA, absent with one)"
+fi
 
-    echo "==> rendering without a release file must fail"
-    if helm template redetim "${CHART}" >/dev/null 2>&1; then
-        report "the chart rendered without a release file -- the tag guard is gone"
-    else
-        echo "    ok"
-    fi
+echo "==> rendering without a release file must fail"
+if helm template redetim "${CHART}" >/dev/null 2>&1; then
+    report "the chart rendered without a release file -- the tag guard is gone"
+else
+    echo "    ok"
 fi
 
 exit "${failed}"

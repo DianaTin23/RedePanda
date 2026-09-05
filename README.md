@@ -79,7 +79,7 @@ nix develop        # oder: direnv allow
 ```
 
 Diese Shell liefert .NET 10, `rpk`, `kubectl`, `helm`, `kubeconform`, `skopeo` und
-`docker-compose`. Dazu `jq` und `nodejs` — die braucht nicht das Projekt, sondern die
+`docker-compose`. Dazu `jq` — das braucht nicht das Projekt, sondern die
 Claude-Code-Automatisierung in `.claude/` (Abschnitt 15).
 
 ### Zentrale Build-Konfiguration
@@ -1086,12 +1086,12 @@ Drei Dinge müssen in der Ausgabe stehen:
 
 ## 15. Claude-Code-Automatisierung
 
-`.claude/` und `.mcp.json` sind eingecheckt und gelten damit für jeden, der das Repo auscheckt.
+`.claude/` ist eingecheckt und gilt damit für jeden, der das Repo auscheckt.
 Nichts davon wird zum Bauen, Testen oder Deployen gebraucht — es macht nur die Regeln
 durchsetzbar, die sonst niemand prüft. Persönliche Abweichungen gehören in
 `.claude/settings.local.json` (nicht eingecheckt).
 
-Die Dev-Shell liefert dafür `jq` und `nodejs` mit.
+Die Dev-Shell liefert dafür `jq` mit.
 
 ### Hooks — laufen von selbst
 
@@ -1133,15 +1133,6 @@ ohne Cluster ist geprüft — die Abnahmeliste in Abschnitt 12 bleibt davon unbe
 - `doc-sync-checker` prüft die Kopplungen, die kein Build sieht: Bereich → Dokument in `docs/`,
   die Abschnittsnummern dieser README, die Textlängengrenze in `app.js` gegen
   `ChatMessage.DefaultMaxTextLength`, die Broker-Image-Parität und die `--help`-Köpfe der Skripte.
-
-### MCP-Server
-
-`.mcp.json` bietet zwei an, beide beim ersten Start zu bestätigen:
-
-| Server | Transport | Wofür |
-|---|---|---|
-| `github` | HTTP, OAuth | Workflow-Läufe, PRs, Issues — vor allem der Release-`workflow_dispatch` und die Logs eines roten Laufs |
-| `kubernetes` | `npx mcp-server-kubernetes` | Cluster-Zustand während der Abnahmeliste. `ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS=true` ist gesetzt: lesen ja, löschen nein |
 
 ---
 

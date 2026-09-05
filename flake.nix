@@ -43,11 +43,9 @@
             # Reads a registry manifest without pulling the image, which is how
             # scripts/check-digests.sh resolves the digests that the Dockerfiles and the chart pin.
             pkgs.skopeo
-            # The Claude Code hooks in .claude/hooks/ read the tool payload from stdin as JSON,
-            # and .mcp.json starts the Kubernetes MCP server through npx. Neither is needed to
-            # build, test or deploy the project; both are missing on a bare NixOS host.
+            # The Claude Code hooks in .claude/hooks/ read the tool payload from stdin as JSON.
+            # Not needed to build, test or deploy the project; missing on a bare NixOS host.
             pkgs.jq
-            pkgs.nodejs
           ];
 
           DOTNET_CLI_TELEMETRY_OPTOUT = 1;

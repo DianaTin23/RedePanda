@@ -34,7 +34,7 @@ Code und Doku heraus referenziert** — beim Umsortieren die Verweise mitziehen.
 
 ```bash
 nix develop                    # Dev-Shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo,
-                               #            jq + nodejs (nur fuer .claude/)
+                               #            jq (nur fuer .claude/)
 
 dotnet build                   # TreatWarningsAsErrors=true, keine Ausnahmen im Repo
 dotnet test                    # gesamte Suite (RedeTim.Backend.Tests, xunit v3)
@@ -73,8 +73,6 @@ Eingecheckt, gilt also für jeden, der das Repo auscheckt. Vollständig in READM
   `.claude/commands/` gibt es nicht.
 - **Zwei Subagents** vor einem PR: `kafka-invariant-reviewer` prüft die Invarianten unten am
   Diff, `doc-sync-checker` die Doku-Kopplungen und Abschnittsnummern.
-- `.mcp.json` bietet GitHub (HTTP) und einen Kubernetes-Server (`npx`, nur lesend) an; beide
-  müssen beim ersten Start bestätigt werden.
 
 ## Architektur
 

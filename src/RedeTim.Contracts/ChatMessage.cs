@@ -10,6 +10,8 @@ public sealed record ChatMessage(string Room, string Nickname, string Text, Date
     public const int MaxNicknameLength = 32;
     public const int DefaultMaxTextLength = 500;
 
+    private const string ReservedNickname = "claude";
+
     public static bool TryCreate(
         string? room,
         string? nickname,
@@ -80,7 +82,10 @@ public sealed record ChatMessage(string Room, string Nickname, string Text, Date
             return false;
         }
 
-        if (ReservedNicknames.IsReserved(trimmedNickname))
+        // Exact match, not a substring: "claudia" and "the-claude" are ordinary nicknames. And
+        // only here, after the strip and trim above, so an invisible-character variant of the
+        // reserved name cannot slip past.
+        if (trimmedNickname.Equals(ReservedNickname, StringComparison.OrdinalIgnoreCase))
         {
             normalizedNickname = null;
             error = "'nickname' is reserved.";

@@ -23,11 +23,7 @@ spec:
       {{- end }}
       restartPolicy: Never
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1654
-        runAsGroup: 1654
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "redetim.podSecurityContext" (dict "uid" 1654 "gid" 1654) | nindent 8 }}
       containers:
         - name: admin
           image: {{ include "redetim.image" (dict "ctx" . "component" "chatClient") | quote }}
@@ -47,27 +43,11 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-            {{- if .Values.redpanda.auth.caSecret }}
-            - name: broker-ca
-              mountPath: /etc/redetim/ca
-              readOnly: true
-            {{- end }}
+            {{- include "redetim.chatClientJobVolumeMounts" . | nindent 12 }}
           resources:
-            requests: { cpu: 10m, memory: 32Mi }
-            limits: { memory: 128Mi }
+            {{- include "redetim.chatClientJobResources" . | nindent 12 }}
       volumes:
-        - name: tmp
-          emptyDir: {}
-        {{- if .Values.redpanda.auth.caSecret }}
-        - name: broker-ca
-          secret:
-            secretName: {{ .Values.redpanda.auth.caSecret | quote }}
-        {{- end }}
+        {{- include "redetim.chatClientJobVolumes" . | nindent 8 }}
 {{- end }}

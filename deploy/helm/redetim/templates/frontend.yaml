@@ -34,18 +34,9 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds }}
 
       topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              {{- include "redetim.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 14 }}
+        {{- include "redetim.topologySpread" (dict "ctx" . "component" "frontend") | nindent 8 }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "redetim.podSecurityContext" (dict "uid" 65532 "gid" 65532) | nindent 8 }}
       containers:
         - name: caddy
           image: {{ include "redetim.image" (dict "ctx" . "component" "frontend") | quote }}
@@ -81,10 +72,7 @@ spec:
               exec:
                 command: ["/bin/sleep", "5"]
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
             - name: tls
               mountPath: {{ include "redetim.tlsMountPath" . }}

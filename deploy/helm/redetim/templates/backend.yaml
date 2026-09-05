@@ -47,19 +47,9 @@ spec:
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
       topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              {{- include "redetim.selectorLabels" (dict "ctx" . "component" "backend") | nindent 14 }}
+        {{- include "redetim.topologySpread" (dict "ctx" . "component" "backend") | nindent 8 }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1654
-        runAsGroup: 1654
-        fsGroup: 1654
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "redetim.podSecurityContext" (dict "uid" 1654 "gid" 1654 "fsGroup" 1654) | nindent 8 }}
 {{- if $otelCaPath }}
       initContainers:
         - name: ca-bundle
@@ -70,10 +60,7 @@ spec:
             - cat /etc/ssl/certs/ca-certificates.crt {{ $otelCaPath }}
               > /etc/redetim/ca-bundle/ca-bundle.crt
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
             {{- if eq $otelCaVolume "tls" }}
             - name: tls
@@ -137,10 +124,7 @@ spec:
               exec:
                 command: ["/bin/sleep", "5"]
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
             - name: tls
               mountPath: {{ include "redetim.tlsMountPath" . }}

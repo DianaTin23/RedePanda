@@ -125,3 +125,78 @@ app.kubernetes.io/name: {{ include "redetim.name" .ctx }}
 app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end -}}
+
+{{/*
+The container-level hardening every workload in this chart gets. Only the broker opts out of
+readOnlyRootFilesystem: `rpk redpanda start` rewrites /etc/redpanda/redpanda.yaml on each start.
+Call as: (dict "readOnlyRootFilesystem" false) -- omit the key for the default of true.
+*/}}
+{{- define "redetim.containerSecurityContext" -}}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: {{ if kindIs "invalid" .readOnlyRootFilesystem }}true{{ else }}{{ .readOnlyRootFilesystem }}{{ end }}
+capabilities:
+  drop: [ALL]
+{{- end -}}
+
+{{/*
+The pod-level hardening. uid/gid differ per image; fsGroup is only set where a volume has to be
+group-writable. Call as: (dict "uid" 1654 "gid" 1654 "fsGroup" 1654).
+*/}}
+{{- define "redetim.podSecurityContext" -}}
+runAsNonRoot: true
+runAsUser: {{ .uid }}
+runAsGroup: {{ .gid }}
+{{- with .fsGroup }}
+fsGroup: {{ . }}
+{{- end }}
+{{- with .fsGroupChangePolicy }}
+fsGroupChangePolicy: {{ . }}
+{{- end }}
+seccompProfile:
+  type: RuntimeDefault
+{{- end -}}
+
+{{/*
+Spread replicas over nodes where the cluster has more than one. ScheduleAnyway, not
+DoNotSchedule: a hard constraint would leave the second replica Pending forever on a one-node
+cluster, which is what a demo runs on. Call as: (dict "ctx" . "component" "backend").
+*/}}
+{{- define "redetim.topologySpread" -}}
+- maxSkew: 1
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: ScheduleAnyway
+  labelSelector:
+    matchLabels:
+      {{- include "redetim.selectorLabels" (dict "ctx" .ctx "component" .component) | nindent 6 }}
+{{- end -}}
+
+{{/*
+The tail both ChatClient jobs share: a writable /tmp on a read-only root filesystem, the broker
+CA when one is configured, and the same small resource envelope. topic-job and admin-job stay
+two files -- they differ in backoffLimit, deadlines, args and interactivity -- but everything
+below the container's command is identical, and was drifting apart as two copies.
+*/}}
+{{- define "redetim.chatClientJobVolumeMounts" -}}
+- name: tmp
+  mountPath: /tmp
+{{- if .Values.redpanda.auth.caSecret }}
+- name: broker-ca
+  mountPath: /etc/redetim/ca
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{- define "redetim.chatClientJobVolumes" -}}
+- name: tmp
+  emptyDir: {}
+{{- if .Values.redpanda.auth.caSecret }}
+- name: broker-ca
+  secret:
+    secretName: {{ .Values.redpanda.auth.caSecret | quote }}
+{{- end }}
+{{- end -}}
+
+{{- define "redetim.chatClientJobResources" -}}
+requests: { cpu: 10m, memory: 32Mi }
+limits: { memory: 128Mi }
+{{- end -}}

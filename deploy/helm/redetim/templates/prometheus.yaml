@@ -21,12 +21,7 @@ spec:
         checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
     spec:
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 65534
-        runAsGroup: 65534
-        fsGroup: 65534
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "redetim.podSecurityContext" (dict "uid" 65534 "gid" 65534 "fsGroup" 65534) | nindent 8 }}
       containers:
         - name: prometheus
           image: {{ .Values.prometheus.image | quote }}
@@ -54,10 +49,7 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus

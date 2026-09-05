@@ -20,13 +20,7 @@ spec:
     spec:
       terminationGracePeriodSeconds: 30
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 101
-        runAsGroup: 101
-        fsGroup: 101
-        fsGroupChangePolicy: OnRootMismatch
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "redetim.podSecurityContext" (dict "uid" 101 "gid" 101 "fsGroup" 101 "fsGroupChangePolicy" "OnRootMismatch") | nindent 8 }}
       containers:
         - name: redpanda
           image: {{ .Values.redpanda.image | quote }}
@@ -59,10 +53,7 @@ spec:
             periodSeconds: 5
             failureThreshold: 12
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" (dict "readOnlyRootFilesystem" false) | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/redpanda/data

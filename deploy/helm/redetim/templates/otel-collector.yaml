@@ -21,11 +21,7 @@ spec:
         checksum/tls: {{ include (print $.Template.BasePath "/tls.yaml") . | sha256sum }}
     spec:
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "redetim.podSecurityContext" (dict "uid" 10001 "gid" 10001) | nindent 8 }}
       containers:
         - name: otel-collector
           image: {{ .Values.otelCollector.image | quote }}
@@ -62,10 +58,7 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 10
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /conf

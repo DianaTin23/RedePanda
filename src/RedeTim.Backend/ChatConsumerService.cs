@@ -3,29 +3,30 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-public sealed class ChatConsumerService(
-    BackendOptions options,
-    ChatBroadcaster broadcaster,
-    ChatMetrics metrics,
-    BrokerReadiness readiness,
-    IHostApplicationLifetime lifetime,
-    ILogger<ChatConsumerService> logger) : BackgroundService
+public sealed class ChatConsumerService : KafkaConsumerService
 {
-    private IConsumer<string, string>? _consumer;
+    private readonly BackendOptions _options;
+    private readonly ChatBroadcaster _broadcaster;
+    private readonly ChatMetrics _metrics;
+    private readonly BrokerReadiness _readiness;
+    private readonly IHostApplicationLifetime _lifetime;
 
-    private readonly LogThrottle _errorLog = new(KafkaLogging.ErrorInterval);
-
-    private readonly HashSet<TopicPartition> _caughtUp = [];
-
-    private bool _historyLoaded;
-
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    public ChatConsumerService(
+        BackendOptions options,
+        ChatBroadcaster broadcaster,
+        ChatMetrics metrics,
+        BrokerReadiness readiness,
+        IHostApplicationLifetime lifetime,
+        ILogger<ChatConsumerService> logger)
+        : base(
+            "chat consumer", options.Topic, options.ConsumerGroupId,
+            BuildConfig(options), metrics, logger)
     {
-        return Task.Factory.StartNew(
-            () => ConsumeLoop(stoppingToken),
-            stoppingToken,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
+        _options = options;
+        _broadcaster = broadcaster;
+        _metrics = metrics;
+        _readiness = readiness;
+        _lifetime = lifetime;
     }
 
     internal static ConsumerConfig BuildConfig(BackendOptions options) =>
@@ -46,83 +47,44 @@ public sealed class ChatConsumerService(
         return config;
     }
 
-    private void ConsumeLoop(CancellationToken stoppingToken)
+    protected override void Handle(ConsumeResult<string, string> result)
     {
-        try
+        if (result.Message.Value is not { } payload)
         {
-            _consumer = new ConsumerBuilder<string, string>(BuildConfig(options))
-                .SetPartitionsAssignedHandler(StartOffsets)
-                .SetErrorHandler((_, error) =>
-                {
-                    metrics.RecordKafkaError();
-                    if (_errorLog.ShouldLog(out var suppressed))
-                    {
-                        logger.LogWarning(
-                            "Kafka consumer error: {Reason}{Suppressed}",
-                            error.Reason,
-                            LogThrottle.Describe(suppressed));
-                    }
-                })
-                .SetLogHandler((_, message) =>
-                    logger.Log(
-                        KafkaLogging.ToLogLevel(message.Level),
-                        "librdkafka {Facility}: {Message}",
-                        message.Facility,
-                        message.Message))
-                .Build();
-
-            _consumer.Subscribe(options.Topic);
-            logger.LogInformation(
-                "Consuming topic {Topic} as group {GroupId}", options.Topic, options.ConsumerGroupId);
-
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                try
-                {
-                    var result = _consumer.Consume(stoppingToken);
-
-                    if (result is not null && result.IsPartitionEOF)
-                    {
-                        NoteCaughtUp(result.TopicPartition);
-                        continue;
-                    }
-
-                    if (result?.Message?.Value is not { } payload)
-                    {
-                        continue;
-                    }
-
-                    var message = WireFormat.Deserialize<ChatMessage>(payload);
-                    if (message is null)
-                    {
-                        logger.LogWarning("Skipped an unreadable record at offset {Offset}", result.Offset);
-                        continue;
-                    }
-
-                    broadcaster.Publish(message, result.Offset.Value);
-
-                    if (_historyLoaded)
-                    {
-                        metrics.RecordMessageReceived();
-                    }
-                }
-                catch (ConsumeException e)
-                {
-                    metrics.RecordKafkaError();
-                    logger.LogWarning("Consume failed: {Reason}", e.Error.Reason);
-                }
-            }
+            return;
         }
-        catch (OperationCanceledException)
+
+        var message = WireFormat.Deserialize<ChatMessage>(payload);
+        if (message is null)
         {
+            Logger.LogWarning("Skipped an unreadable record at offset {Offset}", result.Offset);
+            return;
         }
-        catch (Exception e)
+
+        _broadcaster.Publish(message, result.Offset.Value);
+
+        // Only after the replay: the backlog is history, not traffic.
+        if (Replayed)
         {
-            logger.LogCritical(
-                e, "The chat consumer stopped fatally; this pod cannot serve the chat");
-            Environment.ExitCode = 1;
-            lifetime.StopApplication();
+            _metrics.RecordMessageReceived();
         }
+    }
+
+    protected override void OnReplayed()
+    {
+        _readiness.MarkHistoryLoaded();
+        Logger.LogInformation(
+            "Replayed topic {Topic} to the end; the pod is ready to serve history", Topic);
+    }
+
+    // The chat is what this pod exists for: without a consumer it cannot serve, so it goes down
+    // and lets Kubernetes replace it. The presence consumer deliberately does the opposite.
+    protected override void OnFatal(Exception exception)
+    {
+        Logger.LogCritical(
+            exception, "The chat consumer stopped fatally; this pod cannot serve the chat");
+        Environment.ExitCode = 1;
+        _lifetime.StopApplication();
     }
 
     private static readonly TimeSpan WatermarkTimeout = TimeSpan.FromSeconds(10);
@@ -130,15 +92,14 @@ public sealed class ChatConsumerService(
     internal static long StartOffsetFor(long low, long high, int replayRecords) =>
         replayRecords <= 0 ? low : Math.Max(low, high - replayRecords);
 
-    private IEnumerable<TopicPartitionOffset> StartOffsets(
+    protected override IEnumerable<TopicPartitionOffset> StartOffsets(
         IConsumer<string, string> consumer, List<TopicPartition> partitions)
     {
-        if (options.ReplayRecords <= 0)
+        if (_options.ReplayRecords <= 0)
         {
-            logger.LogInformation(
-                "CHAT_REPLAY_RECORDS is 0: replaying every partition of {Topic} in full",
-                options.Topic);
-            return partitions.Select(p => new TopicPartitionOffset(p, Offset.Beginning));
+            Logger.LogInformation(
+                "CHAT_REPLAY_RECORDS is 0: replaying every partition of {Topic} in full", Topic);
+            return base.StartOffsets(consumer, partitions);
         }
 
         var assignments = new List<TopicPartitionOffset>(partitions.Count);
@@ -148,16 +109,16 @@ public sealed class ChatConsumerService(
             {
                 var watermarks = consumer.QueryWatermarkOffsets(partition, WatermarkTimeout);
                 var start = StartOffsetFor(
-                    watermarks.Low.Value, watermarks.High.Value, options.ReplayRecords);
+                    watermarks.Low.Value, watermarks.High.Value, _options.ReplayRecords);
 
-                logger.LogInformation(
+                Logger.LogInformation(
                     "Starting {Partition} at offset {Offset} (watermarks {Low}..{High})",
                     partition, start, watermarks.Low.Value, watermarks.High.Value);
                 assignments.Add(new TopicPartitionOffset(partition, new Offset(start)));
             }
             catch (KafkaException e)
             {
-                logger.LogWarning(
+                Logger.LogWarning(
                     "Could not read the watermarks for {Partition} ({Reason}); replaying it in full",
                     partition, e.Error.Reason);
                 assignments.Add(new TopicPartitionOffset(partition, Offset.Beginning));
@@ -165,92 +126,5 @@ public sealed class ChatConsumerService(
         }
 
         return assignments;
-    }
-
-    private void NoteCaughtUp(TopicPartition partition)
-    {
-        if (_historyLoaded)
-        {
-            return;
-        }
-
-        _caughtUp.Add(partition);
-
-        var assignment = _consumer!.Assignment;
-        if (assignment.Count == 0 || !assignment.All(_caughtUp.Contains))
-        {
-            return;
-        }
-
-        _historyLoaded = true;
-        readiness.MarkHistoryLoaded();
-        logger.LogInformation(
-            "Replayed topic {Topic} to the end; the pod is ready to serve history", options.Topic);
-    }
-
-    internal static readonly TimeSpan CloseBudget = TimeSpan.FromSeconds(5);
-
-    // Abandonable: the close runs on a background thread and the pod stops waiting after budget.
-    internal static bool TryCloseWithin(Action close, TimeSpan budget, out Exception? failure)
-    {
-        Exception? caught = null;
-
-        var closer = new Thread(() =>
-        {
-            try
-            {
-                close();
-            }
-            catch (Exception e)
-            {
-                caught = e;
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "kafka-consumer-close",
-        };
-
-        closer.Start();
-        var finished = closer.Join(budget);
-
-        failure = finished ? caught : null;
-        return finished;
-    }
-
-    public override async Task StopAsync(CancellationToken cancellationToken)
-    {
-        await base.StopAsync(cancellationToken);
-
-        var consumer = _consumer;
-        _consumer = null;
-
-        if (consumer is null)
-        {
-            return;
-        }
-
-        if (!TryCloseWithin(
-                () =>
-                {
-                    consumer.Close();
-                    consumer.Dispose();
-                },
-                CloseBudget,
-                out var failure))
-        {
-            logger.LogWarning(
-                "The Kafka consumer did not finish leaving its group within {Budget}; shutting " +
-                "down without it. The group coordinator will time the member out after its " +
-                "session timeout instead",
-                CloseBudget);
-            return;
-        }
-
-        if (failure is not null)
-        {
-            logger.LogWarning(
-                failure, "The Kafka consumer reported an error while leaving its group");
-        }
     }
 }

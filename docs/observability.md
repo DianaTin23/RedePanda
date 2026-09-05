@@ -10,15 +10,8 @@ Hier steht, warum die Kette so aufgebaut ist.
 ## Die Instrumente
 
 Fünf, nicht vier. Vier Counter in `ChatMetrics` und ein observabler UpDownCounter, den
-`ChatBroadcaster` anlegt.
-
-| Instrument in C# | Typ | Name in Prometheus |
-|---|---|---|
-| `redetim.messages.sent` | `Counter<long>` | `redetim_messages_sent_total` |
-| `redetim.messages.received` | `Counter<long>` | `redetim_messages_received_total` |
-| `redetim.kafka.errors` | `Counter<long>` | `redetim_kafka_errors_total` |
-| `redetim.streams.cut` | `Counter<long>` | `redetim_streams_cut_total` |
-| `redetim.active_connections` | `ObservableUpDownCounter<int>` | `redetim_active_connections` |
+`ChatBroadcaster` anlegt. Die Tabelle mit den Prometheus-Namen steht in README Abschnitt 10 —
+dort braucht man sie, beim Schreiben von PromQL.
 
 `redetim_streams_cut_total` ist einen Alarm wert, sobald es mehr als selten vorkommt: Es
 heißt, dass Leser dem Raum nicht folgen können. Wie es zustande kommt, steht in

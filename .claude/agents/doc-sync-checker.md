@@ -66,11 +66,10 @@ von nichts verglichen:
 
 ### 4. Die `--help`-Köpfe der Skripte
 
-`build-images.sh`, `check-digests.sh` und `check-repro.sh` geben feste Zeilenbereiche per
-`sed -n '<von>,<bis>p' "$0"` aus. Der Kopf ist **Code**, kein Kommentar. Wurde im Kopf eine Zeile
-eingefügt oder gelöscht, ohne den Bereich mitzuziehen, schneidet `--help` falsch ab. Prüfe für
-jedes geänderte Skript, ob der `sed`-Bereich noch zum Kopf passt — am schnellsten, indem du
-`./scripts/<skript>.sh --help` ausführst und die Ausgabe ansiehst.
+Der Kommentarblock ab Zeile 2 **ist** die `--help`-Ausgabe: `usage()` in `scripts/lib/common.sh`
+gibt ihn bis zur ersten Nicht-Kommentarzeile aus. Zeilenbereiche sind dabei nicht mehr zu
+pflegen, wohl aber die Trennung: eine Leerzeile oder Anweisung mitten im Kopf schneidet die
+Ausgabe ab. Bei einem geänderten Skript `./scripts/<skript>.sh --help` ausführen und ansehen.
 
 ### 5. Sprache
 

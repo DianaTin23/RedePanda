@@ -297,16 +297,17 @@ braucht TLS, Zugangsdaten oder beides. Ohne diese Klasse wäre ein Umbiegen von
 
 Die Klasse liegt in `Contracts`, das sonst keine Kafka-Abhängigkeit hätte. Grund:
 `ClientConfig` ist die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration. Eine
-Abbildung bedient alle neun Client-Stellen im Repository; neun Kopien davon liefen
-auseinander. `Contracts` besitzt ohnehin schon das andere, worüber sich alle Clients einig sein
-müssen: das Wire-Format.
+Abbildung bedient *jede* Client-Stelle im Repository; Kopien davon liefen auseinander.
+`Contracts` besitzt ohnehin schon das andere, worüber sich alle Clients einig sein müssen: das
+Wire-Format.
 
-Diese Zahl ist es wert, ehrlich gehalten zu werden. Sie stand auf „fünf", während es sieben
-waren. Die zwei nicht mitgezählten waren die beiden Admin-Clients — und einer davon war ohne
-`ApplyTo` ausgeliefert worden und ließ gegen einen abgesicherten Broker jede
-Bereitschaftsprüfung scheitern. Mit dem Presence-Topic kamen zwei weitere hinzu
-(`PresenceProducer`, `PresenceConsumerService`), diesmal von Anfang an mit `ApplyTo` — macht
-neun.
+Hier stand einmal eine feste Zahl, und sie war dreimal falsch: „fünf", während es sieben waren
+— die zwei nicht mitgezählten waren die Admin-Clients, und einer davon war ohne `ApplyTo`
+ausgeliefert worden und ließ gegen einen abgesicherten Broker jede Bereitschaftsprüfung
+scheitern. Dann „neun", während mit dem Presence-Topic längst zehn Builder-Stellen da waren.
+Deshalb steht hier jetzt keine Zahl mehr, sondern die Prüfung: `BrokerReadinessTests` geht
+jeden Client einzeln durch, und `grep -rn "Builder" src/` zählt sie, falls jemand nachsehen
+will.
 
 ### Wo die Klasse absichtlich wirft
 

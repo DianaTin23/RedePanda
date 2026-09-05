@@ -19,29 +19,26 @@ draußen ist statt danach.
 Läuft nur in der Dev-Shell (`nix develop`): das Skript braucht `dotnet`, `helm` und
 `kubeconform`.
 
-## Was es prüft, und warum genau so
+## Was es prüft
 
-1. **`./scripts/check-repro.sh`** — restaurieren alle vier Projekte im locked mode gegen ihre
-   Lock-Dateien.
-2. **`dotnet test -p:ContinuousIntegrationBuild=true`** — die Suite. Das Flag ist nicht Kosmetik:
-   ohne es schreibt `dotnet test` eine abweichende Lock-Datei **still neu**, statt an der Drift
-   zu scheitern.
-3. **`git diff --exit-code -- '*packages.lock.json'`** — hat der Testlauf trotzdem etwas
-   umgeschrieben, ist das hier der Befund.
-4. **Chart, ohne HPA** — `helm lint` plus `helm template | kubeconform -strict`.
-5. **Chart, mit `backend.autoscaling.enabled=true`** — muss **separat** gerendert werden, sonst
-   validiert niemand `backend-hpa.yaml`.
-6. **`replicas`-Kopplung** — das Feld gehört dem HPA oder dem Chart, nie beiden. Mit HPA darf
-   `backend.yaml` es nicht rendern, ohne HPA muss es `replicas: 2` rendern.
-7. **Rendern ohne Release-Datei muss scheitern** — der Tag-Guard. `helm lint` fängt das
-   **nicht**: Helm 4 stuft ein `fail` im Template auf INFO herab, nur `helm template` bricht
-   wirklich ab.
+Die .NET-Hälfte: `./scripts/check-repro.sh`, dann `dotnet test
+-p:ContinuousIntegrationBuild=true`, dann `git diff --exit-code -- '*packages.lock.json'`.
+Danach die Chart-Hälfte: `./scripts/validate-chart.sh`.
+
+Zwei Dinge, die die Skripte selbst nicht sagen können:
+
+- **Das `ContinuousIntegrationBuild=true` ist nicht Kosmetik.** Ohne es schreibt `dotnet test`
+  eine abweichende Lock-Datei **still neu**, statt an der Drift zu scheitern. Der `git
+  diff`-Schritt danach ist der Befund, falls doch etwas umgeschrieben wurde.
+- **Die Chart-Regeln stehen in `scripts/validate-chart.sh`**, nicht hier. Diese Datei
+  beschreibt sie nicht noch einmal; sie ist der Grund, warum die frühere Fassung
+  auseinanderdriften konnte.
 
 ## Danach
 
 Grün heißt: was ohne Cluster prüfbar ist, ist geprüft. Die manuelle Abnahmeliste in **README
 Abschnitt 13** bleibt davon unberührt — sie braucht einen Cluster, und CI hat auch keinen.
 
-Wenn Schritt 3 anschlägt: die neu geschriebene Lock-Datei entweder verwerfen
+Wenn der Lock-Datei-Schritt anschlägt: die neu geschriebene Datei entweder verwerfen
 (`git checkout -- '*packages.lock.json'`) oder, wenn die Versionsänderung beabsichtigt war,
 zusammen mit ihr in denselben Commit legen.

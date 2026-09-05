@@ -214,7 +214,9 @@ auch ohne Helm installieren ließ. Es kostete mehr, als es einbrachte:
   legte sie hier ab.
 - `helm template` rendert `.Release.Revision` immer als `1`, der Topic-Job behielt damit einen
   Namen, und das zweite `kubectl apply` scheiterte an einem unveränderlichen Feld.
-- Nichts bemerkte Drift, und es driftete — um fünf fehlende Secrets und mehrere hundert Zeilen.
+- Nichts bemerkte Drift, und es driftete — um fünf fehlende Secrets (exakt: das Chart rendert
+  fünf, die Datei enthielt keines) und eine Zeilenzahl, die davon abhängt, welche zwei Stände
+  man vergleicht. Sie stand hier zu lange als feste Zahl; siehe README Abschnitt 7.
 
 Helm ist der Installationsweg. Das Release-Artefakt ist `deploy/releases/<version>.yaml`.
 
@@ -265,17 +267,22 @@ unter einem Namen bauen, den das Chart nicht ausrollt.
 
 ## Die `--help`-Köpfe der Skripte
 
-Drei Skripte geben ihren eigenen Kommentarkopf als Hilfetext aus:
+Jedes Skript unter `scripts/` gibt seinen eigenen Kommentarkopf als Hilfetext aus. Der Kopfblock
+ist damit **Code**, kein Kommentar.
 
-| Skript | Zeile | Bereich |
-|---|---|---|
-| `scripts/build-images.sh` | 36 | `sed -n '2,18p' "$0"` |
-| `scripts/check-digests.sh` | 16 | `sed -n '2,9p' "$0"` |
-| `scripts/check-repro.sh` | 27 | `sed -n '2,20p' "$0"` |
+`usage()` in `scripts/lib/common.sh` druckt ab Zeile 2 bis zur ersten Nicht-Kommentarzeile:
 
-Diese Kopfblöcke sind **Code**, kein Kommentar. Eine gelöschte oder eingefügte Zeile verschiebt
-die Ausgabe lautlos, und nichts prüft das. Wer dort etwas ändert, muss die Zeilenbereiche
-mitziehen — oder besser: den Umfang gleich lassen.
+```sh
+sed -e '1d' -e '/^[^#]/,$d' "$0"
+```
+
+Hier stand vorher eine Tabelle mit fest eingetragenen Bereichen — je einer pro Skript — und
+daneben die Mahnung, sie beim Bearbeiten mitzuziehen. Die Bereiche selbst stimmten; was nicht
+stimmte, war alles andere, das sie wiederholte: CLAUDE.md schrieb `2,18p` für alle drei, obwohl
+es `2,18`, `2,9` und `2,20` waren, `gate.sh` und `make-tls.sh` fehlten in jeder Aufzählung, und
+bei `make-tls.sh` gab `--help` längst Quelltext statt Hilfe aus. Genau das ist der Grund für die
+selbstbegrenzende Form: sie kennt keine Bereiche, die veralten können. Was sie noch braucht, ist
+nur, dass der Kopf zusammenhängt — eine Leerzeile oder Anweisung mittendrin schneidet ihn ab.
 
 ## skopeo auf NixOS
 

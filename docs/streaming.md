@@ -21,7 +21,9 @@ Der entscheidende Zusatznutzen ist die Wiederaufnahme: SSE hat sie eingebaut. De
 schickt beim automatischen Reconnect die zuletzt gesehene Event-ID im Header
 `Last-Event-ID` mit. Als ID wird der **Kafka-Offset** verwendet. Damit wird aus dem Nachladen
 eine echte Fortsetzung statt einer zweiten Kopie des Raums — und zwar auch dann, wenn der
-Browser bei einem anderen Pod landet, denn Offsets gelten topicweit.
+Browser bei einem anderen Pod landet: der Offset gehört dem Broker, nicht dem Pod. Eindeutig
+ist er **je Partition**; dass das hier reicht, liegt am Raum als Record-Key (siehe
+[architecture.md](architecture.md#ein-topic-für-alle-räume)).
 
 ## Prozesslokaler Zustand
 
@@ -70,7 +72,7 @@ Den Stream zu beenden ist dagegen reparabel:
 2. `EventSource` verbindet sich von selbst neu, mit `Last-Event-ID`.
 3. Der Replay füllt die Lücke exakt.
 
-Der Abbruch wird gezählt (`redetim_stream_cuts_total`) und geloggt. `TryComplete` steht dabei
+Der Abbruch wird gezählt (`redetim_streams_cut_total`) und geloggt. `TryComplete` steht dabei
 **innerhalb** der Bedingung: Es liefert nur beim ersten Mal `true`, sodass ein bereits
 abgeschnittener und noch nicht entsorgter Abonnent nicht für den Rest seines Lebens einmal pro
 Nachricht loggen und zählen kann.

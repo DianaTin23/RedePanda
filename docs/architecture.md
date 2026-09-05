@@ -1,5 +1,3 @@
-| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. CI rendert beide Varianten und prüft genau das. |
-| Digest-Pins in `values.yaml` und den Dockerfiles | den Tags upstream | `scripts/check-digests.sh` meldet es, wöchentlich aus `digests.yml`. Umgeschrieben wird nichts. |
 # Architektur
 
 RedeTim besteht aus zwei eigenständig geschriebenen und eigenständig ausgelieferten
@@ -135,10 +133,10 @@ Stellen steht im Code je eine Zeile, die darauf hinweist; sie sind die einzige K
 | Ort | hängt an | Was bei Drift passiert |
 |---|---|---|
 | `wwwroot/app.js` (Textlängengrenze) | `ChatMessage.DefaultMaxTextLength` | Der Client lässt mehr zu, als das Backend annimmt; der Nutzer sieht ein 400 statt einer Warnung im Eingabefeld. |
-| `RedeTim-kafka-docker/make-tls.sh` | `docker-compose.yml`, `redpanda.image` in `values.yaml` | Die lokale Broker-Version weicht von der im Cluster ab — Dev/Prod-Parität nur noch auf dem Papier. |
+| `RedeTim-kafka-docker/docker-compose.yml` (und `make-tls.sh`) | `redpanda.image` in `values.yaml` | Die lokale Broker-Version weicht von der im Cluster ab — Dev/Prod-Parität nur noch auf dem Papier. |
 | `ChatMetrics` (Instrumentnamen) | Suffixregeln des Prometheus-Exporters | Namen kommen mit falschem oder doppeltem Suffix in Prometheus an, die PromQL-Beispiele laufen leer. |
 | `Directory.Build.props` | XML erlaubt kein `--` im Kommentar | MSBuild meldet ein leeres `TargetFramework` aus einer völlig anderen Datei. |
-| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. CI rendert beide Varianten und prüft genau das. |
+| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. `scripts/validate-chart.sh` rendert beide Varianten und vergleicht gegen `values.yaml`. |
 | Digest-Pins in `values.yaml` und den Dockerfiles | den Tags upstream | `scripts/check-digests.sh` meldet es, wöchentlich aus `digests.yml`. Umgeschrieben wird nichts. |
 
 Die beiden Skripte `check-digests.sh` und `check-repro.sh` sind der automatisierbare Teil davon

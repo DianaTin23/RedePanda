@@ -219,7 +219,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5080/health/ready   # 
 ```
 
 Diese `200` ist der Punkt der Übung. Bis vor Kurzem war sie eine `503` — und zwar dauerhaft, gegen
-jeden abgesicherten Broker: `BrokerReadiness` baute als einziger von sieben Kafka-Clients im Repo
+jeden abgesicherten Broker: `BrokerReadiness` baute als einziger Kafka-Client im Repo
 seinen Admin-Client ohne die Sicherheitseinstellungen. Producer und Consumer verbanden sich normal,
 der Consumer las den Topic vollständig, und nur die Readiness-Prüfung sprach Plaintext gegen einen
 TLS-Listener. Der Grund dafür wurde auf `Debug` verschluckt, während das Chart auf `Information`
@@ -301,7 +301,7 @@ helm upgrade ... --set imagePullSecrets[0].name=ghcr
 ## 7. Installation mit Helm
 
 ```bash
-REL=$(command ls -t deploy/releases/*.yaml | head -1)
+REL=$(./scripts/select-release.sh)
 VERSION=$(basename "$REL" .yaml)
 
 helm upgrade --install redetim ./deploy/helm/redetim \
@@ -327,20 +327,13 @@ kubectl -n redetim get pods -L app.kubernetes.io/version
 kubectl -n redetim get deploy redetim-backend -o jsonpath='{..image}'
 ```
 
-**Helm ist der Installationsweg**, und zwar der einzige. Es lag früher zusätzlich ein
-gerendertes `deploy/k8s/rendered.yaml` im Repo, das ein `kubectl apply -f` ohne Helm erlaubte;
-es ist entfernt, weil es mehr gekostet als eingebracht hat:
-
-- Ein gerendertes Manifest kann die `fail`-Prüfungen des Charts nicht mitnehmen. Wer Helm
-  übersprang, übersprang damit genau die Kontrollen, die eine Fehlkonfiguration laut machen.
-- TLS lässt sich nicht abschalten, also entstand bei jedem Rendern eine CA samt vier privaten
-  Schlüsseln — und lag anschließend in diesem Repository.
-- `helm template` rendert `.Release.Revision` immer als `1`. Der Topic-Job hieß deshalb jedes Mal
-  gleich, und das zweite `kubectl apply` scheiterte an einem unveränderlichen Feld.
-- Nichts hat die Drift bemerkt, und sie ist eingetreten: mehrere hundert Zeilen und fünf fehlende
-  Secrets Unterschied zu dem, was das Chart tatsächlich erzeugt. Die fünf Secrets sind exakt (das
-  Chart rendert fünf, die Datei enthielt keines); die Zeilenzahl hängt davon ab, welche zwei
-  Stände man vergleicht, und stand hier zu lange als eine einzige feste Zahl.
+**Helm ist der Installationsweg**, und zwar der einzige. Ein gerendertes
+`deploy/k8s/rendered.yaml` lag früher daneben und ist entfernt: es konnte die `fail`-Prüfungen
+des Charts nicht mitnehmen, mintete bei jedem Rendern eine CA samt vier privaten Schlüsseln ins
+Repository, scheiterte beim zweiten `kubectl apply` am immer gleichen Topic-Job-Namen, und hing
+dem Chart zuletzt um fünf fehlende Secrets hinterher, ohne dass es jemand bemerkte. Die
+vollständige Begründung:
+[docs/build.md](docs/build.md#warum-es-kein-gerendertes-manifest-mehr-gibt).
 
 Das Release-Artefakt ist `deploy/releases/<version>.yaml`. Es pinnt den unveränderlichen
 Image-Tag, und genau das ist es, was ein späteres `helm rollback` einen echten Build
@@ -590,7 +583,7 @@ CA aus `/tmp/redetim-ca.crt` in den eigenen Truststore.
    ```
    Es zeigt „verbinde neu…", blendet einen Hinweis über dem Eingabefeld ein und sperrt es, bis der
    Stream wieder steht. Es versucht es dabei selbst erneut — mit wachsendem Abstand (1, 2, 4, 8,
-   dann 15 Sekunden), insgesamt achtmal über gut eine Minute. Bleibt das Backend darüber hinaus weg,
+   dann am 15-Sekunden-Deckel), insgesamt acht Versuche über rund 75 Sekunden. Bleibt das Backend darüber hinaus weg,
    wechselt die Anzeige auf „getrennt" und der Hinweis bekommt einen Knopf „Erneut verbinden".
    Danach `--replicas=2` zurück.
 
@@ -784,7 +777,7 @@ Begründung in [docs/observability.md](docs/observability.md#bewusst-nur-metrike
 | Processes | kein dauerhafter lokaler Zustand; SSE-Verbindungen sind bewusst prozesslokal | der Verlaufspuffer ist nur eine Projektion des Topics, die jeder Pod beim Start neu aufbaut. Ein Leser, der weiter als 256 Nachrichten zurückfällt, bekommt seinen Stream **beendet** statt still gekürzt — der Browser verbindet sich neu und holt die Lücke per `Last-Event-ID` nach (`redetim_streams_cut_total`) |
 | Port Binding | Backend `:8443`, Frontend `:8443` (plus `:8080` nur für die `308`-Weiterleitung), kein externer Webserver nötig. TLS terminiert der Prozess selbst — es gibt keinen vorgelagerten Terminator, den das Deployment mitbringen müsste | das Zertifikat kommt als Secret-Mount von außen; das Image allein kann kein TLS und startet deshalb per Default auf `:8080` |
 | Concurrency | **Beide** Deployments laufen mit 2 Replicas, PodDisruptionBudget, `preStop`-Drain und Rollout ohne Unterbrechung (`maxUnavailable: 0`) — der SSE-Pfad ist damit von Caddy bis Kafka redundant, nicht nur an seinem hinteren Ende. Backend zusätzlich: Consumer-GroupId pro Pod ⇒ echter Fan-out, HPA optional, kein Sticky-Session-Bedarf, weil die SSE-`id` der Kafka-Offset ist. Caddy spricht zum Backend auf `versions 1.1` — über HTTP/2 liefe jeder Stream eines Pods über *eine* TCP-Verbindung und damit auf *einer* Backend-Replica | Offsets sind **pro Partition** eindeutig, nicht brokerweit. Bei `chat.partitions > 1` trägt die Konstruktion nur, weil beide Producer nach Raum keyen und ein Raum damit auf einer Partition bleibt. Jede Replica liest 100 % des Topics: der Fan-out skaliert das Ausliefern, nicht das Lesen. HPA braucht metrics-server und ist per Default aus |
-| Disposability | SIGTERM: Consumer `Close()` (auf 5 s begrenzt, sonst wird der Broker nicht mehr abgewartet), Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten. Frontend analog: Caddy hat `grace_period 5s`, sonst wartete es unbegrenzt auf SSE-Antworten, die per Definition nie fertig werden | das Budget ist 40 s, nicht 30: `ChatProducer.Dispose()` flusht bis zu 5 s **nachdem** `Host.StopAsync` zurückgekehrt ist, und `Close()` darf 5 s brauchen, also `preStop` 5 s + 25 s + 5 s + 5 s < Grace Period 45 s. Der `Close()`-Term ist neu begrenzt: `HostOptions.ShutdownTimeout` bricht ihn nicht ab (der Timeout kündigt ein Token, das dieser Aufruf gar nicht entgegennimmt), also lief er gegen einen unerreichbaren Broker über das ganze Budget hinaus in ein stilles SIGKILL. Die Readiness hängt am Broker: ohne erreichbaren Broker wird der Pod nie `Ready` — richtig so, aber es macht eine Broker-Störung zu einem Rollout, der stehen bleibt |
+| Disposability | SIGTERM: Consumer `Close()` (auf 5 s begrenzt, sonst wird der Broker nicht mehr abgewartet), Producer `Flush()`, offene SSE-Streams enden über `ApplicationStopping` statt bis zum Timeout weiterzuheartbeaten. Frontend analog: Caddy hat `grace_period 5s`, sonst wartete es unbegrenzt auf SSE-Antworten, die per Definition nie fertig werden | das Budget ist ≈ 35 s, nicht 30: `ChatProducer.Dispose()` flusht bis zu 5 s **nachdem** `Host.StopAsync` zurückgekehrt ist, also `preStop` 5 s + 25 s + 5 s < Grace Period 45 s. Der `Close()`-Term von 5 s liegt *innerhalb* der 25 s und zählt nicht doppelt (Aufstellung: [docs/kafka.md](docs/kafka.md#herunterfahren)). Der `Close()`-Term ist neu begrenzt: `HostOptions.ShutdownTimeout` bricht ihn nicht ab (der Timeout kündigt ein Token, das dieser Aufruf gar nicht entgegennimmt), also lief er gegen einen unerreichbaren Broker über das ganze Budget hinaus in ein stilles SIGKILL. Die Readiness hängt am Broker: ohne erreichbaren Broker wird der Pod nie `Ready` — richtig so, aber es macht eine Broker-Störung zu einem Rollout, der stehen bleibt |
 | Dev/Prod Parity | derselbe Broker lokal und im Cluster, **inklusive Digest** und im selben `--mode=dev-container`; identisch gepinntes .NET-SDK in `global.json`, `flake.nix` und beiden Build-Dockerfiles | **die Anwendungs-Images laufen lokal nicht**: Abschnitt 5 startet Backend und Konsolenclient per `dotnet run` aus dem Quelltext, und das Frontend läuft lokal überhaupt nicht — die Browser-Oberfläche gibt es nur über den Cluster-Weg. Redpanda ist ein einzelner Broker ohne Replikation |
 | Logs | strukturiert (JSON) nach stdout, keine Logdateien: Backend über `AddJsonConsole` mit `Timestamp`/`LogLevel`/`Category`, Frontend als Caddy-Access-Log (eine Zeile pro Request, Probes ausgenommen). Auch librdkafkas eigene Ausgabe geht über `SetLogHandler` durch `ILogger`, statt roh auf stderr an `LOG_LEVEL` vorbei | Logs laufen bewusst **nicht** über OTLP. Die beiden JSON-Schemata sind nicht vereinheitlicht — Caddy loggt zap-artig (`ts`/`level`/`msg`/`request`), .NET mit `Timestamp`/`LogLevel`/`Category`. Und die Admin-Prozesse sind gar nicht strukturiert: sie schreiben einfache Zeilen mit `Console.WriteLine` und kennen kein `LOG_LEVEL` |
 | Admin Processes | vier Admin-Prozesse aus **demselben Build unter demselben Tag** wie die Anwendung und mit **derselben ConfigMap** per `envFrom`: `--ensure-topic` (legt den Topic an und zieht die Partitionszahl nach), `--describe-topic`, `--print-config` und der interaktive Chat-Client. Der erste läuft bei jedem Install/Upgrade als Job, die übrigen ad hoc über `adminJob.enabled=true` — inklusive `kubectl attach -ti`. Kein Shell-Skript in einem fremden Image, keine zweite Konfigurationsquelle | „dasselbe Image" wäre zu viel gesagt: es sind zwei Images auf zwei Laufzeit-Basen (`aspnet:10.0` für das Backend, `runtime:10.0` für den Client). Gemeinsam sind Build, Tag und Konfiguration — und darauf kommt es an. Ein Job-Name trägt die Release-Revision, zwei verschiedene Kommandos in derselben Revision brauchen also zwei `helm upgrade` |
@@ -850,66 +843,24 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 ## 13. Tests und Abnahme-Checkliste
 
 ```bash
-# Die neueste Release-Datei, statt eines fest eingetragenen Namens: hier stand einmal ein
-# `-dirty`-Build, und der ist gitignored -- auf einem frischen Clone, also genau dem Clone, den
-# eine Korrektur vor sich hat, schlug damit jeder Befehl dieses Blocks fehl.
-#
-# `command ls` und nicht `ls`: ein `ls`-Alias auf eza (verbreitet, und auf mindestens einer
-# Maschine in diesem Projekt gesetzt) deutet `-t` als Option *mit Argument* und verschluckt das
-# Glob stillschweigend -- REL wäre leer und die Fehlermeldung zeigte woanders hin.
-#
-# Auf einem frischen Clone trägt `-t` allerdings nichts bei: ein Clone schreibt alle Dateien im
-# selben Moment, die mtimes sind gleich, und die Auswahl wird beliebig -- CI hat auf diese Weise
-# zuerst eine zwei Releases alte Datei geprüft. Wer gerade nichts gebaut hat, fragt deshalb
-# besser git, welche Release-Datei zuletzt dazukam (genau das tut auch CI):
-#
-#   REL=$(git log --diff-filter=A --name-only --format= -- 'deploy/releases/*.yaml' \
-#         | grep -v -- '-dirty\.' | grep . | head -1)
-REL=$(command ls -t deploy/releases/*.yaml | head -1)
-
 dotnet test -p:ContinuousIntegrationBuild=true  # 204 Tests, locked mode wie in CI
-helm lint deploy/helm/redetim -f "$REL"
-helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
-  | kubeconform -strict -summary -kubernetes-version 1.32.0
-
-# Der HPA ist per Default aus und wird sonst nie gerendert — also die zweite Kombination
-# ausdrücklich mitprüfen, sonst validiert niemand backend-hpa.yaml:
-helm lint deploy/helm/redetim -f "$REL" --set backend.autoscaling.enabled=true
-helm template redetim deploy/helm/redetim -n redetim -f "$REL" \
-  --set backend.autoscaling.enabled=true \
-  | kubeconform -strict -summary -kubernetes-version 1.32.0
-
-# Mit HPA darf im Deployment kein `replicas:` stehen, ohne HPA muss es dort stehen. Sonst
-# überschreiben sich Helm und der Autoscaler gegenseitig, und die Pod-Zahl pendelt.
-helm template redetim deploy/helm/redetim -f "$REL" \
-  --set backend.autoscaling.enabled=true \
-  --show-only templates/backend.yaml | grep -c '^  replicas:'    # erwartet: 0
-helm template redetim deploy/helm/redetim -f "$REL" \
-  --show-only templates/backend.yaml | grep '^  replicas:'       # erwartet: replicas: 2
-
-# Ohne Release-Datei muss das Chart abbrechen — das ist der Schutz gegen ein
-# unidentifizierbares Image im Cluster, also selbst prüfenswert:
-helm template redetim deploy/helm/redetim   # erwartet: Fehler "no release selected"
-# Achtung: `helm lint` fängt das nicht — Helm 4 stuft ein `fail` im Template auf INFO herab
-# und meldet trotzdem "0 chart(s) failed". Nur `helm template` bricht wirklich ab.
-
-# Reproduzierbarkeit. CI stößt check-repro.sh bei jedem Push an und check-digests.sh
-# wöchentlich; von Hand lohnt es sich vor einem Release:
-./scripts/check-repro.sh          # alle vier Projekte gegen ihre Lock-Dateien
-./scripts/check-digests.sh        # Image-Digests + Broker-Parität lokal/Cluster
+./scripts/validate-chart.sh                     # beide HPA-Varianten, replicas, Negativfall
+./scripts/check-repro.sh                        # alle vier Projekte gegen ihre Lock-Dateien
+./scripts/check-digests.sh                      # Image-Digests + Broker-Parität lokal/Cluster
 ```
 
-`check-repro.sh` prüft alle vier Projekte gegen ihre Lock-Dateien und danach zusätzlich, ob dabei
-doch eine umgeschrieben wurde. Der Locked-Mode hängt in `Directory.Build.props` an
-`ContinuousIntegrationBuild` und ist im Alltag deshalb aus: beim absichtlichen Ändern einer
-Abhängigkeit *soll* die Lock-Datei neu geschrieben werden, und ein Locked-Mode, der genau dabei
-scheitert, wäre nur im Weg.
+Oder alles zusammen, in einem Lauf: `.claude/skills/abnahme/gate.sh` (Abschnitt 16).
 
-Der Punkt ist, dass es überhaupt eine Stelle gibt, an der die Antwort „Fehler" statt „umschreiben"
-lautet. Aktiv war der Locked-Mode nämlich nur in den beiden Container-Builds, und die schließen
-`tests/` per `.dockerignore` aus — ein `dotnet test` schrieb drei der vier Lock-Dateien
-stillschweigend um, statt zu scheitern. Die Datei, die festhalten soll, wogegen getestet wurde,
-hielt damit fest, was zuletzt aufgelöst wurde.
+Was `validate-chart.sh` prüft und warum jede Prüfung dort steht, sagt sein `--help`. Kurz: das
+Chart wird **zweimal** gerendert, weil der HPA per Vorgabe aus ist und `backend-hpa.yaml` sonst
+nie jemand validiert; `replicas` muss ohne HPA dem Wert aus `values.yaml` entsprechen und mit
+HPA fehlen; und Rendern **ohne** Release-Datei muss abbrechen. `helm lint` allein genügt dafür
+nicht — Helm 4 stuft ein `fail` im Template auf INFO herab und meldet trotzdem „0 chart(s)
+failed".
+
+`check-repro.sh` ist die Stelle, an der die Antwort auf eine abweichende Lock-Datei „Fehler"
+lautet statt „umschreiben". Warum der Locked-Mode im Alltag aus ist und was ohne diese Stelle
+passierte, steht in [docs/build.md](docs/build.md#lockfiles-und-wann-sie-tatsächlich-etwas-erzwingen).
 
 Das Release selbst schneidet `--release`, und es verweigert den Dienst, solange der Arbeitsbaum
 nicht sauber ist:
@@ -949,8 +900,8 @@ Push und PR den ganzen Block oben, außer dem, was einen Cluster braucht:
 
 | Workflow | Trigger | Was er prüft |
 |---|---|---|
-| `dotnet.yml` | Push auf `main`, PR | `check-repro.sh`, `dotnet test -p:ContinuousIntegrationBuild=true`, Lock-Dateien unverändert |
-| `chart.yml` | Push auf `main`, PR | beide HPA-Varianten aus `helm lint` und `helm template \| kubeconform`, die `replicas`-Kopplung, der Fall ohne Release-Datei, der abbrechen muss |
+| `dotnet.yml` | Push auf `main` (ohne `deploy/releases/**`), PR, `workflow_dispatch`, `workflow_call` | `check-repro.sh`, `dotnet test -p:ContinuousIntegrationBuild=true`, Lock-Dateien unverändert |
+| `chart.yml` | wie `dotnet.yml` | ruft `./scripts/validate-chart.sh --committed-only` auf: beide HPA-Varianten, die `replicas`-Kopplung, der Fall ohne Release-Datei, der abbrechen muss |
 | `release.yml` | nur `workflow_dispatch` auf `main` | baut, pusht nach `ghcr.io`, committet die Release-Datei zurück |
 | `digests.yml` | wöchentlich, `workflow_dispatch` | `check-digests.sh` |
 
@@ -983,7 +934,8 @@ einem Commit existieren erst nach ihm.
 - [ ] Tab mit aktivem Nickname schließen (bzw. „Raum verlassen") → Nickname ist sofort wieder frei
       nutzbar, ohne auf `PRESENCE_TTL_SECONDS` zu warten
 - [ ] Zwei Browserfenster, gleicher Raum, verschiedene Nicknames → beide sehen binnen
-      `PRESENCE_POLL_MS` (10 s) den jeweils anderen in der „wer ist da"-Anzeige der Kopfzeile
+      `PRESENCE_POLL_MS` (10 s, Konstante in `app.js` — keine Umgebungsvariable) den jeweils
+      anderen in der „wer ist da"-Anzeige der Kopfzeile
 - [ ] Nachricht mit Shift+Enter über mehrere Zeilen verfassen → Enter allein sendet, Shift+Enter
       fügt einen Zeilenumbruch ein, der Umbruch bleibt in der gesendeten Nachricht erhalten
 - [ ] Emoji in die Nachricht eingeben (System-Emoji-Picker oder eingefügt) und senden →
@@ -1053,11 +1005,10 @@ einem Commit existieren erst nach ihm.
 
 ## 14. Bekannte Einschränkungen
 
-- **Der HPA ist per Default aus.** Er misst gegen `metrics.k8s.io`, und das liefert nur ein Cluster
-  mit metrics-server — den weder kind noch Docker Desktop mitbringen. Angeschaltet skaliert er auf
-  CPU, nicht auf `redetim_active_connections`: das Backend hat bewusst keinen `/metrics`-Endpunkt,
-  die interessantere Metrik käme also nur über prometheus-adapter oder KEDA. Ein Ausbaupfad, keine
-  Lücke — aber eben auch keine Vorführung.
+- **Der HPA ist per Default aus.** Er misst gegen `metrics.k8s.io`, das weder kind noch Docker
+  Desktop mitbringen. Angeschaltet skaliert er auf CPU, nicht auf `redetim_active_connections`:
+  das Backend hat bewusst keinen `/metrics`-Endpunkt, die interessantere Metrik käme nur über
+  prometheus-adapter oder KEDA. Ein Ausbaupfad, keine Lücke.
 - **`topologySpreadConstraints` sind auf einem Ein-Node-Cluster beweisbar wirkungslos.** Sie stehen
   als `ScheduleAnyway` im Chart, weil eine harte Constraint die zweite Replica dort für immer
   `Pending` ließe. Auf einem Node ist das dokumentierter Code, kein getestetes Verhalten — und ein
@@ -1093,13 +1044,10 @@ einem Commit existieren erst nach ihm.
   Consumer dauerhaft, bleibt der Pod `Ready` und Chat funktioniert weiter, aber die Sperre wird
   bis zur Erholung wirkungslos (Details: [docs/kafka.md](docs/kafka.md#presence-topic)). Für
   eine Demo ohne Anmeldung ist das die richtige Abwägung, nicht die einer Bank.
-- **Die Selbsttelemetrie des Collectors auf `:8888` bleibt unverschlüsselt.** Anders als der
-  `prometheus`-*Exporter* auf 8889 ist das kein `confighttp`-Server, sondern ein Reader aus dem
-  opentelemetry-configuration-Schema, und das kennt für `pull/prometheus` nur `host` und `port` —
-  es gibt kein Feld für ein Zertifikat. Der Scrape bleibt deshalb HTTP. Über diese Strecke laufen
-  ausschließlich die eigenen Zähler des Collectors, keine Chat-Daten. Die Alternative wäre, den
-  Job zu streichen und damit die Sicht darauf zu verlieren, ob der Collector still Metriken
-  verwirft — der schlechtere Tausch.
+- **Die Selbsttelemetrie des Collectors auf `:8888` bleibt unverschlüsselt** — die einzige solche
+  Strecke. Das Schema kennt für `pull/prometheus` kein Zertifikatsfeld. Über sie laufen nur die
+  eigenen Zähler des Collectors, keine Chat-Daten.
+  [docs/observability.md](docs/observability.md#tls-und-die-eine-ausnahme)
 - **Der mitgelieferte Broker spricht Plaintext.** `redpanda.auth.securityProtocol` steht auf
   `Plaintext`, weil der Broker ein Cluster-interner Service ohne Zertifikat ist. Die Wege für `Ssl`
   und `SaslSsl` sind vorhanden, konfigurierbar (Abschnitt 7) und gegen einen echten SASL/TLS-Broker
@@ -1107,14 +1055,10 @@ einem Commit existieren erst nach ihm.
   abgesicherter Broker steht. Das Chart lehnt die Kombination inzwischen beim Rendern ab, statt sie
   zu deployen.
 - **`OTEL_EXPORTER_OTLP_CERTIFICATE` ist unbenutzbar, die CA kommt über `SSL_CERT_FILE`.** Die
-  Variable ist spezifiziert und die SDK liest sie auch — nur lädt OpenTelemetry .NET die genannte
-  Datei mit `X509Certificate2.CreateFromPemFile(pfad)`, und die einargumentige Form nimmt den
-  privaten Schlüssel laut Microsoft-Dokumentation aus **derselben** Datei. Eine CA-Datei mit
-  privatem Schlüssel darin ist keine, die man mounten will; das Backend startet mit allem anderen
-  gar nicht erst (`The key contents do not contain a PEM`). Der Code steht so auf `main`, das ist
-  also keine Frage der hier gepinnten 1.17. Deshalb hängt ein Init-Container das Release-CA an das
-  System-Bundle und `SSL_CERT_FILE` zeigt darauf: .NET prüft unter Linux über OpenSSL, das die
-  Variable liest. Angehängt und nicht ersetzt — sonst misstraute der Prozess jeder öffentlichen CA.
+  Variable ist spezifiziert, aber OpenTelemetry .NET erwartet den privaten Schlüssel in derselben
+  Datei; das Backend startet damit gar nicht. Ein Init-Container hängt stattdessen die Release-CA
+  an das System-Bundle. Herleitung:
+  [docs/observability.md](docs/observability.md#warum-das-zertifikat-über-den-os-truststore-läuft).
 - **Die CA ist so viel wert wie das Cluster.** Der private Schlüssel liegt als Secret daneben,
   damit ein späteres Upgrade ein Zertifikat nachsignieren kann; wer das Secret lesen darf, kann
   jedes Zertifikat dieses Releases ausstellen. Für eine Demo richtig, für Produktion gehört diese
@@ -1127,7 +1071,7 @@ einem Commit existieren erst nach ihm.
   die Abnahmeliste aus Abschnitt 13 bleibt vollständig manuell. Genau aus dieser Lücke kamen
   die beiden Fehler, die dieses Repo zuletzt hatte — ein gerendertes Manifest, das dem Chart
   um mehrere hundert Zeilen und fünf Secrets hinterherhing, und ein Kafka-Client, der als
-  einziger von neun ohne Sicherheitseinstellungen gebaut wurde. Nur der zweite wäre heute
+  einziger ohne Sicherheitseinstellungen gebaut wurde. Nur der zweite wäre heute
   aufgefallen (`BrokerReadinessTests`).
 - **Die Release-Datei ist ein Kind-Commit.** Der `release`-Job committet sie *nach* dem Commit,
   den sie beschreibt: `main` trägt nie eine Release-Datei für die eigene Spitze, sondern für
@@ -1156,58 +1100,39 @@ einem Commit existieren erst nach ihm.
 
 ### Was auf einem echten Cluster verifiziert wurde — und was nicht
 
-Der ursprüngliche Stand dieses Abschnitts hielt fest, dass kein Cluster verfügbar war. Das gilt
-nicht mehr: kind läuft mit rootless Podman (die `cpu`/`io`/`memory`/`pids`-Delegation genügt),
-und die Punkte unten sind dort nachgefahren. Verifiziert wurden Build, Tests, alle drei
-Images, der komplette Chat gegen ein echtes Redpanda, der Admin-Prozess (`--ensure-topic`) gegen
-denselben Broker — aus dem Quellcode wie aus dem fertigen Image, im Neuanlage-, im
-Bereits-vorhanden- und im Broker-nicht-erreichbar-Fall —, der komplette Metrikpfad gegen einen
-echten OTel-Collector sowie `helm lint`, `helm template` und `kubeconform --strict` für alle
-Wertekombinationen inklusive externem Broker und SASL.
+kind läuft mit rootless Podman, die Punkte unten sind dort nachgefahren. **Verifiziert:** Build,
+Tests, alle drei Images, der komplette Chat gegen ein echtes Redpanda, `--ensure-topic` gegen
+denselben Broker (aus Quelltext und aus dem Image, im Neuanlage-, Bereits-vorhanden- und
+Broker-nicht-erreichbar-Fall), der Metrikpfad gegen einen echten Collector, und `helm lint` +
+`helm template` + `kubeconform --strict` für alle Wertekombinationen inklusive externem Broker
+und SASL.
 
-Zur TLS-Umstellung im Einzelnen verifiziert: Caddy liefert das gemountete Zertifikat aus und
-`curl --cacert` prüft es erfolgreich gegen die Release-CA; `:8080` antwortet mit `308` auf die
-richtige Adresse; Kestrel startet mit dem PEM-Paar aus
-`ASPNETCORE_Kestrel__Certificates__Default__*` und sein Zertifikat verifiziert sowohl unter dem
-Service-Namen als auch unter `127.0.0.1`; die adaptierte Caddy-Konfiguration enthält die CA als
-`ca.pem_files` des Upstream-Transports, prüft also und überspringt nicht; `otelcol validate`
-akzeptiert die vier `tls:`-Blöcke; und `helm template` + `kubeconform --strict` gehen für alle
-Wertekombinationen durch.
+Installation und anschließendes Upgrade auf einem echten Cluster: alle Pods erreichen `Ready`,
+der Topic-Job legt `redetim-chat` an, beide Prometheus-Targets stehen auf `up` — darunter der
+HTTPS-Scrape auf `:8889` —, der OTLP-Push über TLS liefert 260 Zeitreihen unter
+`job="redetim-backend"`, und ein `POST /api/messages` trägt bis auf das Topic (`202`, Key
+`general`, Offset 0). Alles mit `curl --cacert` gegen die Release-CA, nicht mit `-k`. Das Upgrade
+behält dieselbe CA, statt sie stillschweigend zu rotieren.
 
-Inzwischen auf einem echten Cluster nachgefahren (kind mit rootless Podman, Installation und
-anschließendes Upgrade): alle Pods erreichen `Ready`, der Topic-Job läuft durch und legt
-`redetim-chat` an, beide Prometheus-Targets stehen auf `up` — darunter der **HTTPS-Scrape** auf
-`:8889` —, der **OTLP-Push über TLS** liefert 260 Zeitreihen unter `job="redetim-backend"`, und
-der **Handshake zwischen Caddy und Kestrel** trägt einen `POST /api/messages` bis auf das Topic
-(`202`, Nachricht mit Key `general` auf Offset 0). Alles davon mit `curl --cacert` gegen die
-Release-CA, also verifiziert und nicht mit `-k` übersprungen. Das Upgrade auf Revision 2
-verwendet dieselbe CA weiter, statt sie stillschweigend zu rotieren.
+Drei Dinge zeigte erst der echte Cluster, alle behoben: der Podman-Pfad von `--load kind` legte
+die Images unter `localhost/...` ab, wo das Chart sie nie findet; `OTEL_EXPORTER_OTLP_CERTIFICATE`
+ist in OpenTelemetry .NET unbrauchbar (Notiz oben), das Backend startete damit gar nicht; und der
+Topic-Job konnte als `post-install`-Hook prinzipiell nicht laufen, weil `--wait` auf ein Backend
+wartete, das ohne Topic nie `Ready` wird.
 
-Drei Dinge sind dabei aufgefallen und behoben worden, die alle erst ein echter Cluster zeigt: der
-Podman-Pfad von `--load kind` legte die Images unter `localhost/...` ab, wo der Chart sie nie
-findet; `OTEL_EXPORTER_OTLP_CERTIFICATE` ist in OpenTelemetry .NET unbrauchbar (siehe die Notiz
-oben), das Backend startete damit überhaupt nicht; und der Topic-Job konnte als `post-install`-Hook
-prinzipiell nicht laufen, weil `--wait` auf ein Backend wartete, das ohne Topic nie `Ready` wird.
+**Nicht verifiziert** bleibt, was erst ein Scheduler mit mehreren Knoten zeigt: der `preStop`-Hook
+des Frontends, `honor_labels`-Verhalten, Pod-Neustart-Resilienz, und dass `helm uninstall` das PVC
+stehen lässt. Die Abnahmeliste in Abschnitt 13 ist der Plan dafür. Ebenso von Hand nachzuvollziehen
+sind die Demo-Punkte 7 bis 9 aus Abschnitt 8: dass zwei Replicas einander vertreten, folgt aus dem
+Offset-basierten Wiedereinstieg und ist auf Test- und Wire-Ebene abgesichert, aber nicht vorgeführt.
 
-Nicht verifiziert bleibt, was erst ein Scheduler mit mehreren Knoten zeigt: dass der
-`preStop`-Hook des Frontends greift, `honor_labels`-Verhalten, Pod-Neustart-Resilienz und dass
-`helm uninstall` das PVC stehen lässt. Die Abnahmeliste in Abschnitt 13 ist der Plan dafür.
+Zwei Punkte, die früher hier standen, sind erledigt: **SASL/TLS ist vorgeführt** (Abschnitt 5;
+dabei kam der Readiness-Fehler heraus). Und ein PodDisruptionBudget „bremst" ein `kubectl drain`
+auf einem Ein-Knoten-Cluster nicht — es **blockiert**: mit zwei Replicas und `maxUnavailable: 0`
+gibt es keinen Zug, den der Scheduler machen könnte. Erwartetes Verhalten, aber nichts, was man
+als Robustheit vorführt.
 
-Zwei Punkte, die früher hier standen, gehören inzwischen woandershin. **SASL/TLS ist vorgeführt** —
-gegen einen echten Broker mit SCRAM-SHA-512 und TLS, siehe Abschnitt 5; dabei kam der Fehler heraus,
-den dieser Abschnitt vorher als „ungetestet" beschrieben hätte. Und die Behauptung, ein
-PodDisruptionBudget würde ein `kubectl drain` „bremsen", stand hier in der falschen Richtung: auf
-einem Ein-Knoten-Cluster bremst es nicht, es **blockiert** — mit zwei Replicas und
-`maxUnavailable: 0` gibt es keinen Zug, den der Scheduler machen könnte, und der Drain läuft in
-kein Timeout, sondern wartet. Das ist auf einem Knoten das erwartete Verhalten und kein Fehler; es
-ist nur nichts, was man als Robustheit vorführt.
-
-Für die Nebenläufigkeit gilt dasselbe: dass zwei Replicas einander vertreten, folgt aus dem
-Offset-basierten Wiedereinstieg und ist auf Test- und Wire-Ebene abgesichert — die Demo-Punkte 7 bis
-9 aus Abschnitt 8 und die neuen Punkte der Abnahmeliste sind aber noch von Hand nachzuvollziehen.
-
-Vier weitere Punkte, die eine Durchsicht gegen die zwölf Faktoren gefunden hat und die bewusst
-stehen bleiben, statt still zu sein:
+Vier Punkte aus einer Durchsicht gegen die zwölf Faktoren bleiben bewusst stehen:
 
 - **Logzeilen lassen sich nicht zusammenführen.** `IncludeScopes` steht auf `false`, und die
   JSON-Zeilen tragen weder `TraceId` noch `SpanId` — obwohl das OTel-SDK im selben Prozess läuft.
@@ -1318,16 +1243,16 @@ Die Dev-Shell liefert dafür `jq` und `nodejs` mit.
 | Wann | Skript | Was es meldet |
 |---|---|---|
 | nach jedem `dotnet`-Aufruf | `.claude/hooks/lockfile-guard.sh` | `packages.lock.json` wurde still neu geschrieben (Abschnitt 4, „Zentrale Build-Konfiguration") |
-| nach jeder Änderung unter `deploy/helm/` | `.claude/hooks/chart-guard.sh` | Chart rendert nicht — in einer der beiden HPA-Varianten, in der `replicas`-Kopplung, oder es rendert **ohne** Release-Datei, obwohl es scheitern müsste |
+| nach jeder Änderung unter `deploy/helm/` | `.claude/hooks/chart-guard.sh` | ruft `./scripts/validate-chart.sh --quick` auf und gibt dessen Befund zurück |
 
-Beide sind rein prüfend und ändern nichts. `chart-guard.sh` bleibt bewusst offline:
-`kubeconform` holt seine Schemata über das Netz und gehört deshalb ins Gate und in CI, nicht an
-jede Bearbeitung.
+Beide sind rein prüfend und ändern nichts. `chart-guard.sh` trägt die Regeln nicht selbst — es
+ruft dasselbe Skript wie CI und `/abnahme`, nur mit `--quick`: `kubeconform` holt seine Schemata
+über das Netz und gehört deshalb ins Gate und in CI, nicht an jede Bearbeitung.
 
 Abschalten, falls sie einmal im Weg sind: `/hooks` im laufenden Claude Code, oder
 `"disableAllHooks": true` in `.claude/settings.local.json`.
 
-### Slash-Kommandos — nur auf Zuruf
+### Skills — nur auf Zuruf
 
 ```
 /abnahme      # das lokale Gate, spiegelt dotnet.yml und chart.yml
@@ -1342,9 +1267,8 @@ Das Gate ist auch ohne Claude Code brauchbar:
 ```
 
 Es prüft `check-repro.sh`, die Suite im locked mode, dass der Testlauf keine Lock-Datei
-umgeschrieben hat, beide HPA-Varianten durch `helm lint` und `helm template | kubeconform`, die
-`replicas`-Kopplung und den Negativfall ohne Release-Datei. Grün heißt: alles Prüfbare ohne
-Cluster ist geprüft — die Abnahmeliste in Abschnitt 13 bleibt davon unberührt.
+umgeschrieben hat, und ruft dann `./scripts/validate-chart.sh` auf. Grün heißt: alles Prüfbare
+ohne Cluster ist geprüft — die Abnahmeliste in Abschnitt 13 bleibt davon unberührt.
 
 ### Subagents — vor einem PR
 
@@ -1354,8 +1278,7 @@ Cluster ist geprüft — die Abnahmeliste in Abschnitt 13 bleibt davon unberühr
   Metriknamen ohne Suffix.
 - `doc-sync-checker` prüft die Kopplungen, die kein Build sieht: Bereich → Dokument in `docs/`,
   die Abschnittsnummern dieser README, die Textlängengrenze in `app.js` gegen
-  `ChatMessage.DefaultMaxTextLength`, die Broker-Image-Parität und die `sed`-Bereiche der
-  `--help`-Köpfe.
+  `ChatMessage.DefaultMaxTextLength`, die Broker-Image-Parität und die `--help`-Köpfe der Skripte.
 
 ### MCP-Server
 
@@ -1378,7 +1301,8 @@ src/RedeTim.ChatClient/   Konsolenclient und Admin-Prozess (`--ensure-topic`, si
 tests/                      xUnit
 deploy/helm/redetim/      Helm-Chart
 deploy/releases/            generierte Release-Dateien (Image-Tags + Commit pro Build)
-scripts/                    build-images.sh, check-digests.sh, demo.sh
+scripts/                    build-images.sh, validate-chart.sh, select-release.sh, check-repro.sh,
+                            check-digests.sh, demo.sh, lib/common.sh
 RedeTim-kafka-docker/     Redpanda für lokale Entwicklung ohne Kubernetes
-.claude/                    Hooks, Subagents, Slash-Kommandos (Abschnitt 16)
+.claude/                    Hooks, Subagents, Skills (Abschnitt 16)
 ```

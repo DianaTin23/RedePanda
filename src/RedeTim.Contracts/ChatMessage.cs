@@ -130,7 +130,7 @@ public sealed record ChatMessage(string Room, string Nickname, string Text, Date
 
         foreach (var rune in normalized.EnumerateRunes())
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(rune) != UnicodeCategory.Format)
+            if (Rune.GetUnicodeCategory(rune) != UnicodeCategory.Format)
             {
                 builder.Append(rune);
             }

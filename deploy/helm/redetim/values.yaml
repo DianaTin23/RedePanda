@@ -98,19 +98,6 @@ topicJob:
   # Sekunden, die --ensure-topic auf Broker-Metadaten wartet.
   brokerWaitSeconds: 180
 
-adminJob:
-  enabled: false
-  # Argumente an den Chat-Client; --help listet sie auf.
-  args: ["--print-config"]
-  # stdin/tty fuer `kubectl attach -ti`.
-  interactive: false
-  brokerWaitSeconds: 60
-  # Aufbewahrung des Pods *nach* dem Ende.
-  ttlSecondsAfterFinished: 3600
-  # Laufzeit *bis* zum Ende.
-  activeDeadlineSeconds: 7200
-  extraEnv: []
-
 redpanda:
   # Auf false wird kein Broker deployt; die Anwendung zeigt dann auf external.bootstrapServers.
   enabled: true

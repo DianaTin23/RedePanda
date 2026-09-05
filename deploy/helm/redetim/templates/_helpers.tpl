@@ -158,33 +158,3 @@ cluster, which is what a demo runs on. Call as: (dict "ctx" . "component" "backe
       {{- include "redetim.selectorLabels" (dict "ctx" .ctx "component" .component) | nindent 6 }}
 {{- end -}}
 
-{{/*
-The tail both ChatClient jobs share: a writable /tmp on a read-only root filesystem, the broker
-CA when one is configured, and the same small resource envelope. topic-job and admin-job stay
-two files -- they differ in backoffLimit, deadlines, args and interactivity -- but everything
-below the container's command is identical, and was drifting apart as two copies.
-*/}}
-{{- define "redetim.chatClientJobVolumeMounts" -}}
-- name: tmp
-  mountPath: /tmp
-{{- if .Values.redpanda.auth.caSecret }}
-- name: broker-ca
-  mountPath: /etc/redetim/ca
-  readOnly: true
-{{- end }}
-{{- end -}}
-
-{{- define "redetim.chatClientJobVolumes" -}}
-- name: tmp
-  emptyDir: {}
-{{- if .Values.redpanda.auth.caSecret }}
-- name: broker-ca
-  secret:
-    secretName: {{ .Values.redpanda.auth.caSecret | quote }}
-{{- end }}
-{{- end -}}
-
-{{- define "redetim.chatClientJobResources" -}}
-requests: { cpu: 10m, memory: 32Mi }
-limits: { memory: 128Mi }
-{{- end -}}

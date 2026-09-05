@@ -36,8 +36,21 @@ spec:
           securityContext:
             {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
-            {{- include "redetim.chatClientJobVolumeMounts" . | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.redpanda.auth.caSecret }}
+            - name: broker-ca
+              mountPath: /etc/redetim/ca
+              readOnly: true
+            {{- end }}
           resources:
-            {{- include "redetim.chatClientJobResources" . | nindent 12 }}
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
       volumes:
-        {{- include "redetim.chatClientJobVolumes" . | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.redpanda.auth.caSecret }}
+        - name: broker-ca
+          secret:
+            secretName: {{ .Values.redpanda.auth.caSecret | quote }}
+        {{- end }}

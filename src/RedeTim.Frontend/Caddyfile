@@ -14,7 +14,7 @@
 }
 
 :8443 {
-	tls {$TLS_CERT_FILE:/etc/redetim/tls/tls.crt} {$TLS_KEY_FILE:/etc/redetim/tls/tls.key}
+	tls /etc/redetim/tls/tls.crt /etc/redetim/tls/tls.key
 
 	log {
 		output stdout
@@ -28,7 +28,7 @@
 				versions 1.1
 
 				tls
-				tls_trust_pool file {$TLS_CA_FILE:/etc/redetim/tls/ca.crt}
+				tls_trust_pool file /etc/redetim/tls/ca.crt
 			}
 		}
 	}

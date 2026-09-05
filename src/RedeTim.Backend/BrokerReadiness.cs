@@ -3,10 +3,6 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>
-/// Backs <c>/health/ready</c> by asking the broker for metadata, and by waiting for the chat
-/// history to be read off the topic.
-/// </summary>
 public sealed class BrokerReadiness : IDisposable
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(5);
@@ -38,11 +34,9 @@ public sealed class BrokerReadiness : IDisposable
             .Build();
     }
 
-    /// <summary>The admin client's configuration, separate so it can be asserted on without a broker.</summary>
     internal static AdminClientConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <summary>The admin client's configuration, reading security settings through <paramref name="read"/>.</summary>
     internal static AdminClientConfig BuildConfig(BackendOptions options, Func<string, string?> read)
     {
         var config = new AdminClientConfig
@@ -54,15 +48,11 @@ public sealed class BrokerReadiness : IDisposable
         return config;
     }
 
-    /// <summary>Called by <see cref="ChatConsumerService"/> once it has caught up with the topic.</summary>
     public void MarkHistoryLoaded() => _historyLoaded = true;
 
-    /// <summary>
-    /// Called by <see cref="PresenceConsumerService"/> once it has caught up with the presence
-    /// topic — or, deliberately, if it gives up on a broken presence topic instead. Presence is
-    /// a nicety on top of chat, not chat itself: a pod that cannot serve presence should still
-    /// serve chat, so this must never gate readiness the way <see cref="MarkHistoryLoaded"/> does.
-    /// </summary>
+    // Gates readiness during the initial replay, like MarkHistoryLoaded -- but unlike it, the
+    // fatal path calls this too, so a broken presence consumer opens the gate instead of holding
+    // the pod unready. Presence degrades open. See docs/kafka.md#presence-topic.
     public void MarkPresenceLoaded() => _presenceLoaded = true;
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken)

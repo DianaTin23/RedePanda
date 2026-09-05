@@ -1,7 +1,5 @@
 using System.Globalization;
 using Confluent.Kafka;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
 using RedeTim.Backend;
 using RedeTim.Contracts;
 
@@ -23,7 +21,6 @@ if (options.LogLevel > LogLevel.Debug)
 }
 
 builder.Services.AddSingleton(options);
-builder.Services.AddSingleton<ChatMetrics>();
 builder.Services.AddSingleton<ChatBroadcaster>();
 builder.Services.AddSingleton<ChatProducer>();
 builder.Services.AddSingleton<BrokerReadiness>();
@@ -31,35 +28,22 @@ builder.Services.AddHostedService<ChatConsumerService>();
 
 builder.Services.AddSingleton<PresenceStore>();
 
-// A single registration, not AddSingleton<PresenceProducer>() plus a delegate wrapping it in
-// IPresenceProducer: two registrations for the same disposable instance make the container
-// track and dispose it twice, and the second Dispose() throws because librdkafka's handle is
-// already gone by then.
+// One registration, not two: the container would track the same disposable instance twice and
+// the second Dispose() throws, librdkafka's handle being gone by then.
 builder.Services.AddSingleton<IPresenceProducer>(sp => ActivatorUtilities.CreateInstance<PresenceProducer>(sp));
 
 builder.Services.AddHostedService<PresenceConsumerService>();
 
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
 
-builder.Services.AddOpenTelemetry()
-    .WithMetrics(m => m
-        .AddAspNetCoreInstrumentation()
-        .AddRuntimeInstrumentation()
-        .AddMeter(ChatMetrics.MeterName)
-        .AddMeter("Microsoft.AspNetCore.Server.Kestrel")
-        .AddOtlpExporter());
-
 var app = builder.Build();
 
-foreach (var prefix in new[] { "", "/api" })
-{
-    app.MapGet($"{prefix}/health/live", () => Results.Ok("live"));
+app.MapGet("/health/live", () => Results.Ok("live"));
 
-    app.MapGet($"{prefix}/health/ready", async (BrokerReadiness readiness, CancellationToken ct) =>
-        await readiness.IsReadyAsync(ct)
-            ? Results.Ok("ready")
-            : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
-}
+app.MapGet("/health/ready", async (BrokerReadiness readiness, CancellationToken ct) =>
+    await readiness.IsReadyAsync(ct)
+        ? Results.Ok("ready")
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 
 app.MapPost("/api/messages", async (
     SendMessageRequest request,
@@ -83,7 +67,7 @@ app.MapPost("/api/messages", async (
     catch (ProduceException<string, string> e)
     {
         logger.LogError("Produce failed: {Reason}", e.Error.Reason);
-        return Results.StatusCode(ChatProducer.StatusCodeFor(e.Error));
+        return Results.StatusCode(KafkaJsonProducer.StatusCodeFor(e.Error));
     }
 
     return Results.Accepted();
@@ -114,7 +98,7 @@ app.MapPost("/api/join", async (
     catch (ProduceException<string, string> e)
     {
         logger.LogError("Presence produce failed: {Reason}", e.Error.Reason);
-        return Results.StatusCode(PresenceProducer.StatusCodeFor(e.Error));
+        return Results.StatusCode(KafkaJsonProducer.StatusCodeFor(e.Error));
     }
 
     return Results.Ok();
@@ -178,5 +162,5 @@ app.MapGet("/api/stream", IResult (
 
 app.Run();
 
-/// <summary>Exposed so the test project can reference the entry-point assembly.</summary>
+// Exposed so the test project can reference the entry-point assembly.
 public partial class Program;

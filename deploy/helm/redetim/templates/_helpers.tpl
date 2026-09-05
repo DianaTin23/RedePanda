@@ -1,27 +1,22 @@
 {{- define "redetim.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+Collapses to the bare release name whenever it already contains the chart name -- which the
+usual release name `redetim` does. That is what keeps the service names in the README short.
+*/}}
 {{- define "redetim.fullname" -}}
-{{- if .Values.fullnameOverride -}}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
-{{- else -}}
-{{- $name := default .Chart.Name .Values.nameOverride -}}
-{{- if contains $name .Release.Name -}}
+{{- if contains .Chart.Name .Release.Name -}}
 {{- .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
-{{- end -}}
-{{- end -}}
-
-{{- define "redetim.brokerService" -}}
-{{- .Values.redpanda.serviceName -}}
 {{- end -}}
 
 {{- define "redetim.bootstrapServers" -}}
 {{- if .Values.redpanda.enabled -}}
-{{- printf "%s:9092" (include "redetim.brokerService" .) -}}
+{{- printf "%s:9092" .Values.redpanda.serviceName -}}
 {{- else if .Values.redpanda.external.bootstrapServers -}}
 {{- .Values.redpanda.external.bootstrapServers -}}
 {{- else -}}
@@ -46,13 +41,6 @@ true
 {{- end -}}
 {{- end -}}
 
-{{- define "redetim.brokerTls" -}}
-{{- $protocol := include "redetim.securityProtocol" . -}}
-{{- if or (eq $protocol "Ssl") (eq $protocol "SaslSsl") -}}
-true
-{{- end -}}
-{{- end -}}
-
 {{- define "redetim.saslEnv" -}}
 {{- with .ctx -}}
 {{- if include "redetim.saslEnabled" . }}
@@ -68,10 +56,6 @@ true
       key: password
 {{- end -}}
 {{- end -}}
-{{- end -}}
-
-{{- define "redetim.collectorService" -}}
-{{- printf "%s-otel-collector" (include "redetim.fullname" .) -}}
 {{- end -}}
 
 {{- define "redetim.tlsMountPath" -}}
@@ -125,3 +109,48 @@ app.kubernetes.io/name: {{ include "redetim.name" .ctx }}
 app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end -}}
+
+{{/*
+The container-level hardening every workload in this chart gets. Only the broker opts out of
+readOnlyRootFilesystem: `rpk redpanda start` rewrites /etc/redpanda/redpanda.yaml on each start.
+Call as: (dict "readOnlyRootFilesystem" false) -- omit the key for the default of true.
+*/}}
+{{- define "redetim.containerSecurityContext" -}}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: {{ if kindIs "invalid" .readOnlyRootFilesystem }}true{{ else }}{{ .readOnlyRootFilesystem }}{{ end }}
+capabilities:
+  drop: [ALL]
+{{- end -}}
+
+{{/*
+The pod-level hardening. uid/gid differ per image; fsGroup is only set where a volume has to be
+group-writable. Call as: (dict "uid" 1654 "gid" 1654 "fsGroup" 1654).
+*/}}
+{{- define "redetim.podSecurityContext" -}}
+runAsNonRoot: true
+runAsUser: {{ .uid }}
+runAsGroup: {{ .gid }}
+{{- with .fsGroup }}
+fsGroup: {{ . }}
+{{- end }}
+{{- with .fsGroupChangePolicy }}
+fsGroupChangePolicy: {{ . }}
+{{- end }}
+seccompProfile:
+  type: RuntimeDefault
+{{- end -}}
+
+{{/*
+Spread replicas over nodes where the cluster has more than one. ScheduleAnyway, not
+DoNotSchedule: a hard constraint would leave the second replica Pending forever on a one-node
+cluster, which is what a demo runs on. Call as: (dict "ctx" . "component" "backend").
+*/}}
+{{- define "redetim.topologySpread" -}}
+- maxSkew: 1
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: ScheduleAnyway
+  labelSelector:
+    matchLabels:
+      {{- include "redetim.selectorLabels" (dict "ctx" .ctx "component" .component) | nindent 6 }}
+{{- end -}}
+

@@ -90,11 +90,6 @@ liefert, und eine leere Menge heißt, dass noch nichts zugewiesen ist.
 Ein Pod, der erst das halbe Topic gelesen hat, würde einem Browser ein halbes Gespräch zeigen.
 Deshalb bleibt er bis dahin aus den Service-Endpoints.
 
-Nachgeladene Nachrichten zählt `redetim_messages_received_total` **nicht** mit. Sie wurden
-gezählt, als sie zum ersten Mal ankamen. Zählte man sie erneut, spränge der Zähler bei jedem
-Pod-Neustart um die gesamte Retention — er soll den laufenden Chat abbilden, nicht das eigene
-Nachladen.
-
 ## Producer
 
 `EnableIdempotence = true` ist das, was einen Retry *sicher und in der richtigen Reihenfolge*
@@ -128,7 +123,10 @@ nicht beantwortet wurde — das ist **504**. Alles, was der Broker aktiv abgeleh
 
 Fünf Kafka-Clients laufen im Backend: Chat-Producer, Chat-Consumer, der Admin-Client der
 Bereitschaftsprüfung, und ihre Presence-Gegenstücke `PresenceProducer` und
-`PresenceConsumerService`. Alle fünf setzen einen `LogHandler`. Ohne den schreibt librdkafka
+`PresenceConsumerService`. Producer und Consumer teilen sich ihre gleichen Hälften — Handle,
+Konfiguration, Error- und LogHandler, Dispose beziehungsweise Consume-Schleife und Shutdown —
+über `KafkaJsonProducer` und `KafkaConsumerService`; was sie unterscheidet, steht weiter unten
+und steht bewusst bei ihnen. Alle fünf setzen einen `LogHandler`. Ohne den schreibt librdkafka
 seine Diagnose direkt nach stderr — außerhalb von `LOG_LEVEL` und außerhalb des JSON, das die
 Plattform einsammelt.
 
@@ -144,11 +142,8 @@ dem Moment, in dem jemand hineinsieht.
 Die zurückgehaltene Anzahl reist auf der nächsten durchgelassenen Zeile mit. Ein gedrosseltes
 Log bleibt so ehrlich: es faltet Wiederholung, es versteckt sie nicht.
 
-**Metriken werden bewusst nicht mitgedrosselt.** Ein Zähler, der Ereignisse auslässt, ist kein
-Zähler mehr. `redetim_kafka_errors_total` soll die echte Rate zeigen.
-
-Zustellfehler erreichen den Error-Callback nicht — librdkafkas `error_cb` meldet nur Ereignisse
-auf Client-Ebene. Deshalb zählt `ProduceAsync` sie selbst, im `catch`.
+Zustellfehler erreichen den Error-Callback ohnehin nicht — librdkafkas `error_cb` meldet nur
+Ereignisse auf Client-Ebene. Sie kommen stattdessen als `ProduceException` beim Aufrufer an.
 
 Die Umsetzung der Syslog-Level: librdkafkas Verbindungsgeplauder liegt auf `notice` und `info`,
 erst ab `warning` beschreibt es etwas, worauf jemand reagieren kann.
@@ -216,6 +211,10 @@ Chat, keine Voraussetzung dafür. Scheitert der Presence-Consumer fatal, protoko
 beenden. Der Pod bleibt bereit und bedient Chat normal weiter; die Namenssperre ist bis zur
 Erholung des Presence-Topics einfach wirkungslos — jeder Name gilt dann als frei. Ein
 Presence-Ausfall darf den funktionierenden Chat nicht mitreißen.
+
+Beides — der Fatalfall und der Startpunkt — ist als `OnFatal` beziehungsweise `StartOffsets`
+in den beiden Unterklassen überschrieben, nicht in der gemeinsamen Basisklasse. Genau daran
+hängt, dass eine Zusammenlegung die Asymmetrie nicht still einebnet.
 
 `PresenceConsumerService` liest außerdem immer vollständig von `Offset.Beginning`, ohne das
 `CHAT_REPLAY_RECORDS`-Fenster des Chat-Consumers: Weil das Topic komprimiert ist, ist seine
@@ -297,16 +296,20 @@ braucht TLS, Zugangsdaten oder beides. Ohne diese Klasse wäre ein Umbiegen von
 
 Die Klasse liegt in `Contracts`, das sonst keine Kafka-Abhängigkeit hätte. Grund:
 `ClientConfig` ist die gemeinsame Basis von Producer-, Consumer- und Admin-Konfiguration. Eine
-Abbildung bedient alle neun Client-Stellen im Repository; neun Kopien davon liefen
-auseinander. `Contracts` besitzt ohnehin schon das andere, worüber sich alle Clients einig sein
-müssen: das Wire-Format.
+Abbildung bedient *jede* Client-Stelle im Repository; Kopien davon liefen auseinander.
+`Contracts` besitzt ohnehin schon das andere, worüber sich alle Clients einig sein müssen: das
+Wire-Format.
 
-Diese Zahl ist es wert, ehrlich gehalten zu werden. Sie stand auf „fünf", während es sieben
-waren. Die zwei nicht mitgezählten waren die beiden Admin-Clients — und einer davon war ohne
-`ApplyTo` ausgeliefert worden und ließ gegen einen abgesicherten Broker jede
-Bereitschaftsprüfung scheitern. Mit dem Presence-Topic kamen zwei weitere hinzu
-(`PresenceProducer`, `PresenceConsumerService`), diesmal von Anfang an mit `ApplyTo` — macht
-neun.
+Hier stand einmal eine feste Zahl, und sie war dreimal falsch: „fünf", während es sieben waren
+— die zwei nicht mitgezählten waren die Admin-Clients, und einer davon war ohne `ApplyTo`
+ausgeliefert worden und ließ gegen einen abgesicherten Broker jede Bereitschaftsprüfung
+scheitern. Dann „neun", während mit dem Presence-Topic längst zehn Builder-Stellen da waren.
+Deshalb steht hier jetzt keine Zahl mehr, sondern die Prüfung: `BrokerReadinessTests` geht
+jeden Client einzeln durch, und ein Reflection-Test darin
+(`EveryClientConfigBuilderInTheBackendIsListedInAllClients`) sucht selbst jede statische
+Methode im Backend, die eine `ClientConfig` herausgibt, und vergleicht sie gegen eine
+ausgeschriebene Liste. Ein neuer Client zwingt damit zu einer Entscheidung, statt bloß auf ein
+`grep` zu hoffen — das zählte ohnehin `StringBuilder` und `WebApplication.CreateBuilder` mit.
 
 ### Wo die Klasse absichtlich wirft
 

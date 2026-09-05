@@ -5,23 +5,21 @@
 #
 # Exit status: 0 when every pin still matches the tag it names, 1 when at least one has
 # drifted, 2 on a usage or tooling error. Nothing is ever rewritten -- the script prints the
-# replacement line and leaves the edit to a human, because this repository has no CI to catch
-# a bad automated rewrite of a Dockerfile or of values.yaml.
+# replacement line and leaves the edit to a human -- an automated rewrite of a Dockerfile or of
+# values.yaml is exactly what nobody would review. CI runs this weekly (digests.yml).
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+REPO_ROOT="$(repo_root)"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+        -h|--help) usage ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
-if ! command -v skopeo >/dev/null 2>&1; then
-    echo "skopeo not found on PATH. It is in the Nix dev shell: nix develop" >&2
-    exit 2
-fi
+require_tool skopeo
 
 if [[ -z "${CONTAINERS_REGISTRIES_CONF:-}" ]]; then
     probe_output="$(skopeo inspect --raw docker://127.0.0.1:1/probe:latest 2>&1 || true)"

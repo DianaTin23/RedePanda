@@ -12,12 +12,8 @@ public class ChatStreamTests
 
     private static ChatBroadcaster CreateBroadcaster()
     {
-        var meterFactory = new TestMeterFactory();
         return new ChatBroadcaster(
-            TestOptions.Create(),
-            meterFactory,
-            new ChatMetrics(meterFactory),
-            NullLogger<ChatBroadcaster>.Instance);
+            TestOptions.Create(), NullLogger<ChatBroadcaster>.Instance);
     }
 
     private static ChatMessage Message(string room, string text) =>
@@ -38,32 +34,6 @@ public class ChatStreamTests
             presence,
             shutdown: CancellationToken.None,
             ct: ct);
-
-    private sealed class FakePresenceProducer : IPresenceProducer
-    {
-        public List<(string Room, string Nickname)> Renewals { get; } = [];
-        public List<(string Room, string Nickname)> Releases { get; } = [];
-
-        public Task RenewAsync(string room, string nickname, CancellationToken cancellationToken)
-        {
-            lock (Renewals)
-            {
-                Renewals.Add((room, nickname));
-            }
-
-            return Task.CompletedTask;
-        }
-
-        public Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken)
-        {
-            lock (Releases)
-            {
-                Releases.Add((room, nickname));
-            }
-
-            return Task.CompletedTask;
-        }
-    }
 
     private static async Task<bool> MoveNextWithin(
         IAsyncEnumerator<SseItem<string>> stream, TimeSpan timeout, string because)
@@ -135,7 +105,7 @@ public class ChatStreamTests
 
         Assert.Equal("message", stream.Current.EventType);
 
-        var received = ChatMessageSerializer.Deserialize(stream.Current.Data);
+        var received = WireFormat.Deserialize<ChatMessage>(stream.Current.Data);
         Assert.NotNull(received);
         Assert.Equal("hallo", received.Text);
         Assert.Equal("general", received.Room);
@@ -159,14 +129,14 @@ public class ChatStreamTests
         Assert.Equal(ChatStream.HeartbeatEventType, stream.Current.EventType);
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The first history item never arrived."));
-        Assert.Equal("erste", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("erste", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The second history item never arrived."));
-        Assert.Equal("zweite", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("zweite", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         broadcaster.Publish(Message("general", "live"), offset: 2);
         Assert.True(await MoveNextWithin(stream, Promptly, "The live message never arrived."));
-        Assert.Equal("live", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("live", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         await cts.CancelAsync();
     }
@@ -208,7 +178,7 @@ public class ChatStreamTests
         Assert.True(await MoveNextWithin(stream, Promptly, "The priming item never arrived."));
 
         Assert.True(await MoveNextWithin(stream, Promptly, "The missed message never arrived."));
-        Assert.Equal("verpasst", ChatMessageSerializer.Deserialize(stream.Current.Data)?.Text);
+        Assert.Equal("verpasst", WireFormat.Deserialize<ChatMessage>(stream.Current.Data)?.Text);
 
         var moved = stream.MoveNextAsync().AsTask();
         var winner = await Task.WhenAny(
@@ -393,10 +363,8 @@ public class ChatStreamTests
             Assert.True(await MoveNextWithin(stream, Promptly, "A published message never arrived."));
         }
 
-        // A busy room satisfies subscription.Reader.ReadAsync well before any heartbeat timeout,
-        // so renewal must be gated on elapsed time, not on the heartbeat branch specifically --
-        // otherwise it would never renew at all. About 1s of traffic at a 200ms interval should
-        // renew a handful of times, nowhere near the number of published messages.
+        // A busy room never reaches the heartbeat branch, so renewal must be gated on elapsed
+        // time instead -- otherwise it would never renew at all.
         Assert.InRange(producer.Renewals.Count, 2, 10);
         Assert.True(
             producer.Renewals.Count < offset,

@@ -3,119 +3,56 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>Renews or releases one (room, nickname) reservation on the presence topic.</summary>
 internal interface IPresenceProducer
 {
-    /// <summary>Marks the reservation as still alive, resetting its TTL clock on every pod.</summary>
     Task RenewAsync(string room, string nickname, CancellationToken cancellationToken);
 
-    /// <summary>Frees the reservation immediately via a Kafka tombstone, instead of waiting out the TTL.</summary>
     Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken);
 }
 
-/// <summary>Publishes presence heartbeats and tombstones to the presence topic.</summary>
 public sealed class PresenceProducer : IPresenceProducer, IDisposable
 {
-    private readonly IProducer<string, string> _producer;
+    private readonly KafkaJsonProducer _producer;
     private readonly BackendOptions _options;
-    private readonly ChatMetrics _metrics;
-    private readonly ILogger<PresenceProducer> _logger;
-    private readonly LogThrottle _errorLog = new(KafkaLogging.ErrorInterval);
 
-    public PresenceProducer(BackendOptions options, ChatMetrics metrics, ILogger<PresenceProducer> logger)
+    public PresenceProducer(BackendOptions options, ILogger<PresenceProducer> logger)
     {
         _options = options;
-        _metrics = metrics;
-        _logger = logger;
-
-        _producer = new ProducerBuilder<string, string>(BuildConfig(options))
-            .SetErrorHandler((_, error) =>
-            {
-                _metrics.RecordKafkaError();
-                if (_errorLog.ShouldLog(out var suppressed))
-                {
-                    _logger.LogWarning(
-                        "Presence producer error: {Reason}{Suppressed}",
-                        error.Reason,
-                        LogThrottle.Describe(suppressed));
-                }
-            })
-            .SetLogHandler((_, message) =>
-                _logger.Log(
-                    KafkaLogging.ToLogLevel(message.Level),
-                    "librdkafka {Facility}: {Message}",
-                    message.Facility,
-                    message.Message))
-            .Build();
+        _producer = new KafkaJsonProducer(
+            BuildConfig(options), logger, "Presence producer");
     }
 
-    /// <summary>The producer's configuration, separate so it can be asserted on without a broker.</summary>
     internal static ProducerConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <summary>The producer's configuration, reading security settings through <paramref name="read"/>.</summary>
-    internal static ProducerConfig BuildConfig(BackendOptions options, Func<string, string?> read)
-    {
-        var config = new ProducerConfig
-        {
-            BootstrapServers = options.BootstrapServers,
-            EnableIdempotence = true,
-            Acks = Acks.All,
-            MessageTimeoutMs = options.ProduceTimeoutMs,
-            RequestTimeoutMs = options.ProduceTimeoutMs / 2,
-        };
+    internal static ProducerConfig BuildConfig(BackendOptions options, Func<string, string?> read) =>
+        KafkaJsonProducer.BuildConfig(options, read);
 
-        KafkaSecurity.ApplyTo(config, read);
-        return config;
-    }
+    // The key is (room, nickname), not the room: the topic is log-compacted and holds the
+    // current state per reservation. See docs/kafka.md#presence-topic.
+    public Task RenewAsync(string room, string nickname, CancellationToken cancellationToken) =>
+        Produce(
+            room,
+            nickname,
+            WireFormat.Serialize(
+                new PresenceRecord(room, nickname, _options.PodName, DateTimeOffset.UtcNow)),
+            cancellationToken);
 
-    /// <summary>How a failed produce is reported to the browser.</summary>
-    internal static int StatusCodeFor(Error error) => error.Code switch
-    {
-        ErrorCode.Local_MsgTimedOut or ErrorCode.Local_TimedOut =>
-            StatusCodes.Status504GatewayTimeout,
-        _ => StatusCodes.Status502BadGateway,
-    };
+    // A null value is the tombstone compaction collapses the key to.
+    public Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken) =>
+        Produce(room, nickname, null!, cancellationToken);
 
-    public async Task RenewAsync(string room, string nickname, CancellationToken cancellationToken)
+    private Task Produce(
+        string room, string nickname, string value, CancellationToken cancellationToken)
     {
-        var record = new PresenceRecord(room, nickname, _options.PodName, DateTimeOffset.UtcNow);
-        var message = new Message<string, string>
+        var record = new Message<string, string>
         {
             Key = PresenceKey.Encode(room, nickname),
-            Value = PresenceEventSerializer.Serialize(record),
+            Value = value,
         };
 
-        await ProduceAsync(message, cancellationToken);
+        return _producer.ProduceAsync(_options.PresenceTopic, record, cancellationToken);
     }
 
-    public async Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken)
-    {
-        var message = new Message<string, string>
-        {
-            Key = PresenceKey.Encode(room, nickname),
-            Value = null!,
-        };
-
-        await ProduceAsync(message, cancellationToken);
-    }
-
-    private async Task ProduceAsync(Message<string, string> message, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _producer.ProduceAsync(_options.PresenceTopic, message, cancellationToken);
-        }
-        catch (ProduceException<string, string>)
-        {
-            _metrics.RecordKafkaError();
-            throw;
-        }
-    }
-
-    public void Dispose()
-    {
-        _producer.Flush(TimeSpan.FromSeconds(5));
-        _producer.Dispose();
-    }
+    public void Dispose() => _producer.Dispose();
 }

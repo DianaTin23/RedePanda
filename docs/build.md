@@ -1,8 +1,9 @@
 # Build, Images, Reproduzierbarkeit
 
 Ein Build soll zweimal dasselbe ergeben, und ein Release soll benennbar sein. Beides ist hier
-ohne CI umgesetzt, was den Aufwand von der Automatik in die Konstruktion verschiebt: Was nicht
-geprüft werden kann, wird stattdessen unmöglich gemacht.
+zuerst in der Konstruktion umgesetzt und nicht in der Automatik: Was nicht geprüft werden kann,
+wird stattdessen unmöglich gemacht. CI (`.github/workflows/`) prüft seitdem zusätzlich —
+es ersetzt die Konstruktion nicht, es merkt nur, wenn sie verletzt wurde.
 
 Die Befehle stehen in README Abschnitt 4 und 6. Hier steht, warum sie so aussehen.
 
@@ -66,8 +67,8 @@ ausführen.
 aller Lockfiles vor und nach dem Lauf: Ein Restore im locked mode schreibt die Datei trotzdem
 neu, wenn er zu dem Schluss kommt, dass er darf.
 
-Das Skript läuft nicht von selbst. README Abschnitt 13 listet es, Abschnitt 14 nennt das
-fehlende CI als bekannte Einschränkung.
+CI ruft das Skript bei jedem Push und PR auf; README Abschnitt 12 listet es außerdem für den
+Lauf von Hand vor einem Release.
 
 ### Der doppelte Bindestrich
 
@@ -91,9 +92,10 @@ jeder Architektur auf. Fragte man skopeo stattdessen nach einem plattformspezifi
 entstünde ein Pin, der nur auf amd64 funktioniert.
 
 `scripts/check-digests.sh` meldet, wenn ein Tag upstream weitergewandert ist. Es schreibt
-**nichts** um: Es druckt die Ersatzzeile und überlässt die Änderung einem Menschen, weil es hier
-kein CI gibt, das eine fehlerhafte automatische Umschreibung eines Dockerfiles oder von
-`values.yaml` auffinge.
+**nichts** um: Es druckt die Ersatzzeile und überlässt die Änderung einem Menschen. Eine
+automatische Umschreibung eines Dockerfiles oder von `values.yaml` wäre genau die Änderung, die
+niemand mehr liest. Der wöchentliche CI-Lauf (`digests.yml`) meldet also nur — entscheiden muss
+weiterhin jemand.
 
 Die Dateiliste im Skript ist ausgeschrieben und nicht geglobbt. Ein neuer Pin in einer Datei,
 die niemand dort eingetragen hat, bleibt damit ungeprüft — das ist sichtbar. Die Alternative
@@ -208,53 +210,60 @@ auch ohne Helm installieren ließ. Es kostete mehr, als es einbrachte:
 
 - Eine gerenderte Datei kann die `fail`-Prüfungen des Charts zur Renderzeit nicht mitnehmen —
   wer Helm übersprang, übersprang jede Kontrolle, die eine Fehlkonfiguration laut macht.
-- TLS hat keinen Ausschalter, jedes Rendern mintete also eine CA und vier private Schlüssel und
+- TLS hat keinen Ausschalter, jedes Rendern mintet also eine CA und zwei private Schlüssel und
   legte sie hier ab.
 - `helm template` rendert `.Release.Revision` immer als `1`, der Topic-Job behielt damit einen
   Namen, und das zweite `kubectl apply` scheiterte an einem unveränderlichen Feld.
-- Nichts bemerkte Drift, und es driftete — um fünf fehlende Secrets und mehrere hundert Zeilen.
+- Nichts bemerkte Drift, und es driftete — um jedes fehlende Secret (exakt: das Chart rendert
+  inzwischen drei, die Datei enthielt keines) und eine Zeilenzahl, die davon abhängt,
+  welche zwei Stände man vergleicht. Sie stand hier zu lange als feste Zahl; siehe README Abschnitt 7.
 
 Helm ist der Installationsweg. Das Release-Artefakt ist `deploy/releases/<version>.yaml`.
 
 Ein wichtiger Nachsatz: Die Aufgabenstellung verlangt Manifeste, und **Templates *sind*
 Manifeste**.
 
-### Laden in einen lokalen Cluster
-
-`kind load docker-image` liest den *Docker*-Speicher, den podman nicht füllt. Der Weg über ein
-Archiv ist die unterstützte Route für ein mit podman gebautes Image.
-
-Das Umtaggen davor ist nicht kosmetisch. Podman legt ein lokal gebautes Image unter
-`localhost/<name>` ab, und `podman save` schreibt diesen Namen ins Archiv — der Node hielte also
-`localhost/redetim-backend:<tag>`. Das Chart fragt nach dem blanken
-`redetim-backend:<tag>`, was containerd zu `docker.io/library/redetim-backend:<tag>`
-normalisiert: ein Name, den das Archiv nie trug. Der kubelet tut daraufhin das Einzige, was ihm
-bleibt, und versucht von Docker Hub zu ziehen — `ImagePullBackOff` für ein Image, das
-nachweislich schon auf dem Node liegt.
-
-Unter dem vollqualifizierten Namen zu speichern bringt beide zur Deckung. `docker save` hängt
-kein Präfix an, der andere Zweig braucht davon nichts.
-
-Der minikube-Zweig hat dasselbe Problem und dieselbe Behebung, ist hier aber **nicht** auf einem
-echten Cluster erprobt worden — es gibt kein minikube auf den Entwicklungsmaschinen.
+### Docker oder Podman
 
 Wird `podman` und `docker` beides gefunden, gewinnt podman: Auf den Maschinen dieses Projekts
 ist `docker` ohnehin oft ein podman-Shim, und ausdrücklich zu sein erspart Überraschungen
 darüber, in welchem Speicher das Image landet.
 
+`ENGINE=docker|podman` schaltet diese Erkennung ab. CI braucht das: Ein GitHub-Runner hat beide,
+und `docker/login-action` legt die Zugangsdaten nach `~/.docker/config.json`, während podman
+zuerst in `$XDG_RUNTIME_DIR/containers/auth.json` schaut. Trifft der Rückfallpfad nicht, wird
+aus einem Anmeldeproblem ein blankes `unauthorized` mitten im Push.
+
+### Push nach ghcr.io
+
+`--push` impliziert `--release` — ein Image in einer Registry, das keinen Commit benennt, ist
+genau das, was die Tag-Wächter des Charts aus einem Cluster heraushalten sollen. Einen Tag von
+Hand zu setzen gibt es deshalb nicht mehr: Der Ausweg `IMAGE_TAG` schrieb keine Release-Datei,
+benannte keinen Commit und wurde von `--push` ohnehin verweigert. Wer ohne Git-Checkout bauen
+will, findet hier bewusst keinen Weg — der Tag *ist* der Commit.
+
+Die Image-Namen stehen nicht mehr doppelt da. `build-images.sh` liest `*.image.repository` aus
+`values.yaml`, statt dieselben drei Namen ein zweites Mal zu führen: Das Skript kann damit nichts
+unter einem Namen bauen, den das Chart nicht ausrollt.
+
 ## Die `--help`-Köpfe der Skripte
 
-Drei Skripte geben ihren eigenen Kommentarkopf als Hilfetext aus:
+Jedes Skript unter `scripts/` gibt seinen eigenen Kommentarkopf als Hilfetext aus. Der Kopfblock
+ist damit **Code**, kein Kommentar.
 
-| Skript | Zeile | Bereich |
-|---|---|---|
-| `scripts/build-images.sh` | 30 | `sed -n '2,14p' "$0"` |
-| `scripts/check-digests.sh` | 16 | `sed -n '2,9p' "$0"` |
-| `scripts/check-repro.sh` | 27 | `sed -n '2,20p' "$0"` |
+`usage()` in `scripts/lib/common.sh` druckt ab Zeile 2 bis zur ersten Nicht-Kommentarzeile:
 
-Diese Kopfblöcke sind **Code**, kein Kommentar. Eine gelöschte oder eingefügte Zeile verschiebt
-die Ausgabe lautlos, und nichts prüft das. Wer dort etwas ändert, muss die Zeilenbereiche
-mitziehen — oder besser: den Umfang gleich lassen.
+```sh
+sed -e '1d' -e '/^[^#]/,$d' "$0"
+```
+
+Hier stand vorher eine Tabelle mit fest eingetragenen Bereichen — je einer pro Skript — und
+daneben die Mahnung, sie beim Bearbeiten mitzuziehen. Die Bereiche selbst stimmten; was nicht
+stimmte, war alles andere, das sie wiederholte: CLAUDE.md schrieb `2,18p` für alle drei, obwohl
+es `2,18`, `2,9` und `2,20` waren, `make-tls.sh` fehlte in jeder Aufzählung, und
+sein `--help` gab längst Quelltext statt Hilfe aus. Genau das ist der Grund für die
+selbstbegrenzende Form: sie kennt keine Bereiche, die veralten können. Was sie noch braucht, ist
+nur, dass der Kopf zusammenhängt — eine Leerzeile oder Anweisung mittendrin schneidet ihn ab.
 
 ## skopeo auf NixOS
 

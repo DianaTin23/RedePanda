@@ -1,0 +1,62 @@
+# The Helm half of what this repository used to ask a human to run by hand. README section 12
+# is the acceptance list; this workflow is the part of it that a runner can check without a
+# cluster -- rendering and schema validation, not `helm install`.
+name: chart
+
+on:
+  push:
+    branches: [main]
+    # release.yml commits the release file back to main. Pushes made with GITHUB_TOKEN do not
+    # trigger workflows, so this is belt-and-braces -- but it is where somebody will look.
+    paths-ignore: ['deploy/releases/**']
+  pull_request:
+  workflow_dispatch:
+  # Called by release.yml, where a green run is a precondition of cutting a release.
+  workflow_call:
+
+concurrency:
+  # github.workflow is the *caller's* workflow name inside a reusable workflow. A run started
+  # from release.yml therefore lands in its own group instead of queueing behind a push run
+  # that happens to be on main at the same moment.
+  group: chart-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history on purpose: scripts/select-release.sh picks the release file by *when it
+          # was committed*, which needs more than one commit to be visible.
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v5
+        with:
+          # Pinned, not 'latest': the chart's render-time `fail` is downgraded to INFO by
+          # `helm lint` in Helm 4, and README section 4 develops against exactly this version.
+          version: v4.2.3
+
+      # kubeconform fetches its JSON schemas over the network. Cache them, or an upstream
+      # hiccup turns chart validation red for a reason that has nothing to do with the chart.
+      - name: Cache kubeconform schemas
+        uses: actions/cache@v6
+        with:
+          path: /tmp/kubeconform
+          key: kubeconform-schemas-1.32.0
+
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      # Every chart rule lives in this one script, which CI is the only caller of.
+      - name: Validate the chart
+        env:
+          # Must match the actions/cache path above.
+          KUBECONFORM_CACHE: /tmp/kubeconform
+        run: ./scripts/validate-chart.sh --committed-only

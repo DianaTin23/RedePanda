@@ -135,6 +135,21 @@ public class ChatMessageValidationTests
         Assert.Contains("reserved", error);
     }
 
+    // The reservation is an exact match, not a substring: these merely contain it.
+    [Theory]
+    [InlineData("claudia")]
+    [InlineData("claude2")]
+    [InlineData("the-claude")]
+    [InlineData("alice")]
+    public void ANicknameThatMerelyContainsTheReservedOneIsAccepted(string nickname)
+    {
+        var ok = TryCreate("general", nickname, "hallo", out var message, out var error);
+
+        Assert.True(ok);
+        Assert.Null(error);
+        Assert.Equal(nickname, message!.Nickname);
+    }
+
     [Fact]
     public void TryNormalizeRoomAndNicknameTrimsAndValidatesWithoutRequiringText()
     {

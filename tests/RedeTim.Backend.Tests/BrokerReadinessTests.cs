@@ -1,3 +1,4 @@
+using System.Reflection;
 using Confluent.Kafka;
 using RedeTim.Contracts;
 
@@ -24,6 +25,42 @@ public class BrokerReadinessTests
         { "presence producer", (o, read) => PresenceProducer.BuildConfig(o, read) },
         { "presence consumer", (o, read) => PresenceConsumerService.BuildConfig(o, read) },
     };
+
+    // AllClients is hand-maintained, so it can only prove things about the clients somebody
+    // remembered to list. This is the part that notices a *new* one: any static method in the
+    // backend that hands out a ClientConfig is a Kafka client being configured, and it has to
+    // be represented above, or the KafkaSecurity.ApplyTo invariant is enforced by nothing.
+    [Fact]
+    public void EveryClientConfigBuilderInTheBackendIsListedInAllClients()
+    {
+        var builders = typeof(ChatProducer).Assembly
+            .GetTypes()
+            .SelectMany(type => type.GetMethods(
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly))
+            .Where(method =>
+                typeof(ClientConfig).IsAssignableFrom(method.ReturnType) &&
+                method.GetParameters().Length == 2)
+            .Select(method => $"{method.DeclaringType!.Name}.{method.Name}")
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        // Listed explicitly so a new builder cannot appear without somebody deciding, here,
+        // whether it also needs a row in AllClients above. KafkaJsonProducer is the shared
+        // configuration the two producers delegate to, not a sixth client.
+        string[] expected =
+        [
+            "BrokerReadiness.BuildConfig",
+            "ChatConsumerService.BuildConfig",
+            "ChatProducer.BuildConfig",
+            "KafkaJsonProducer.BuildConfig",
+            "PresenceConsumerService.BuildConfig",
+            "PresenceProducer.BuildConfig",
+        ];
+
+        Assert.Equal(expected, builders);
+    }
 
     [Theory]
     [MemberData(nameof(AllClients))]

@@ -1,6 +1,5 @@
 namespace RedeTim.Backend;
 
-/// <summary>Every setting the application itself owns, read straight from the environment.</summary>
 public sealed record BackendOptions
 {
     public required string BootstrapServers { get; init; }
@@ -8,47 +7,35 @@ public sealed record BackendOptions
     public required int MaxMessageLength { get; init; }
     public required string PodName { get; init; }
 
-    /// <summary>librdkafka's <c>message.timeout.ms</c> for the request-path producer.</summary>
     public required int ProduceTimeoutMs { get; init; }
 
     public const int DefaultProduceTimeoutMs = 10_000;
 
-    /// <summary>Messages kept per room, or <c>0</c> for everything the topic still holds.</summary>
     public required int HistorySize { get; init; }
 
     public const int DefaultHistorySize = 200;
 
-    /// <summary>Rooms a replica keeps a history for at once, or <c>0</c> for as many as arrive.</summary>
     public required int MaxRooms { get; init; }
 
     public const int DefaultMaxRooms = 200;
 
-    /// <summary>Records a starting pod reads back per partition, or <c>0</c> for the whole topic.</summary>
     public required int ReplayRecords { get; init; }
 
     public const int DefaultReplayRecords = 2_000;
 
-    /// <summary>The log-compacted topic holding the current (room, nickname) reservations.</summary>
     public required string PresenceTopic { get; init; }
 
-    /// <summary>
-    /// Seconds without a renewal before a reservation is treated as free. The fallback for a
-    /// crash or dropped connection that never produced a clean release; three times the SSE
-    /// heartbeat interval, so one missed beat never evicts a still-connected user.
-    /// </summary>
     public required int PresenceTtlSeconds { get; init; }
 
+    // Three times the SSE heartbeat interval, so one missed beat never evicts a connected user.
     public const int DefaultPresenceTtlSeconds = 45;
 
-    /// <summary>Minimum level for everything this process logs.</summary>
     public required LogLevel LogLevel { get; init; }
 
     public const LogLevel DefaultLogLevel = Microsoft.Extensions.Logging.LogLevel.Information;
 
-    /// <summary>Consumer group id, unique per pod so every pod receives every message.</summary>
     public string ConsumerGroupId => $"redetim-backend-{PodName}";
 
-    /// <summary>Consumer group id for the presence topic, unique per pod for the same reason.</summary>
     public string PresenceConsumerGroupId => $"redetim-presence-{PodName}";
 
     public static BackendOptions FromEnvironment()
@@ -74,7 +61,6 @@ public sealed record BackendOptions
         };
     }
 
-    /// <summary>The pod's identity, and with it the consumer group id.</summary>
     internal static string ResolvePodName(
         string? podName, string? kubernetesServiceHost, string machineName, int processId)
     {
@@ -100,7 +86,6 @@ public sealed record BackendOptions
         return string.IsNullOrWhiteSpace(value) ? fallback : value;
     }
 
-    /// <summary>Reads a log level, rejecting values that are not defined members of the enum.</summary>
     internal static LogLevel ReadLogLevel(string key, LogLevel fallback, string? raw = null)
     {
         raw ??= Environment.GetEnvironmentVariable(key);

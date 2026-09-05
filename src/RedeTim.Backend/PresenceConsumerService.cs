@@ -3,44 +3,27 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>
-/// Reads the presence topic and projects it into the pod's local <see cref="PresenceStore"/>.
-///
-/// Deliberately less strict than <see cref="ChatConsumerService"/>: presence is a nicety on top
-/// of chat (blocking a duplicate nickname), not chat itself. Where a broken chat consumer takes
-/// the whole pod down ("a pod that cannot consume is broken, not merely limited" — docs/kafka.md),
-/// a broken presence consumer instead degrades open: the nickname lock stops being enforceable
-/// until the topic recovers, but chat keeps working and the pod stays ready. See docs/kafka.md
-/// for the reasoning.
-/// </summary>
-public sealed class PresenceConsumerService(
-    BackendOptions options,
-    PresenceStore store,
-    BrokerReadiness readiness,
-    ILogger<PresenceConsumerService> logger) : BackgroundService
+public sealed class PresenceConsumerService : KafkaConsumerService
 {
-    private IConsumer<string, string>? _consumer;
+    private readonly PresenceStore _store;
+    private readonly BrokerReadiness _readiness;
 
-    private readonly LogThrottle _errorLog = new(KafkaLogging.ErrorInterval);
-
-    private readonly HashSet<TopicPartition> _caughtUp = [];
-
-    private bool _presenceLoaded;
-
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    public PresenceConsumerService(
+        BackendOptions options,
+        PresenceStore store,
+        BrokerReadiness readiness,
+        ILogger<PresenceConsumerService> logger)
+        : base(
+            "presence consumer", options.PresenceTopic, options.PresenceConsumerGroupId,
+            BuildConfig(options), logger)
     {
-        return Task.Factory.StartNew(
-            () => ConsumeLoop(stoppingToken),
-            stoppingToken,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
+        _store = store;
+        _readiness = readiness;
     }
 
-    /// <summary>The consumer's configuration, separate so it can be asserted on without a broker.</summary>
     internal static ConsumerConfig BuildConfig(BackendOptions options) =>
         BuildConfig(options, Environment.GetEnvironmentVariable);
 
-    /// <summary>The consumer's configuration, reading security settings through <paramref name="read"/>.</summary>
     internal static ConsumerConfig BuildConfig(BackendOptions options, Func<string, string?> read)
     {
         var config = new ConsumerConfig
@@ -56,152 +39,51 @@ public sealed class PresenceConsumerService(
         return config;
     }
 
-    private void ConsumeLoop(CancellationToken stoppingToken)
+    // No replay window: the topic is log-compacted, so reading it whole *is* the current state.
+    // The base class already starts at Offset.Beginning.
+
+    protected override void Handle(ConsumeResult<string, string> result)
     {
-        try
-        {
-            _consumer = new ConsumerBuilder<string, string>(BuildConfig(options))
-                .SetPartitionsAssignedHandler(
-                    (_, partitions) => partitions.Select(p => new TopicPartitionOffset(p, Offset.Beginning)))
-                .SetErrorHandler((_, error) =>
-                {
-                    if (_errorLog.ShouldLog(out var suppressed))
-                    {
-                        logger.LogWarning(
-                            "Presence consumer error: {Reason}{Suppressed}",
-                            error.Reason,
-                            LogThrottle.Describe(suppressed));
-                    }
-                })
-                .SetLogHandler((_, message) =>
-                    logger.Log(
-                        KafkaLogging.ToLogLevel(message.Level),
-                        "librdkafka {Facility}: {Message}",
-                        message.Facility,
-                        message.Message))
-                .Build();
+        var message = result.Message;
 
-            _consumer.Subscribe(options.PresenceTopic);
-            logger.LogInformation(
-                "Consuming presence topic {Topic} as group {GroupId}",
-                options.PresenceTopic,
-                options.PresenceConsumerGroupId);
-
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                try
-                {
-                    var result = _consumer.Consume(stoppingToken);
-
-                    if (result is not null && result.IsPartitionEOF)
-                    {
-                        NoteCaughtUp(result.TopicPartition);
-                        continue;
-                    }
-
-                    if (result?.Message is not { } message)
-                    {
-                        continue;
-                    }
-
-                    Apply(message);
-                }
-                catch (ConsumeException e)
-                {
-                    logger.LogWarning("Presence consume failed: {Reason}", e.Error.Reason);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Normal shutdown.
-        }
-        catch (Exception e)
-        {
-            logger.LogCritical(
-                e,
-                "The presence consumer stopped fatally; this pod can no longer enforce the " +
-                "nickname lock, but chat is unaffected. Degrading readiness open instead of " +
-                "restarting the pod");
-            readiness.MarkPresenceLoaded();
-        }
-    }
-
-    private void Apply(Message<string, string> message)
-    {
         if (message.Value is null)
         {
             if (PresenceKey.TryDecode(message.Key, out var room, out var nickname))
             {
-                store.Remove(room, nickname);
+                _store.Remove(room, nickname);
             }
 
             return;
         }
 
-        var record = PresenceEventSerializer.Deserialize(message.Value);
+        var record = WireFormat.Deserialize<PresenceRecord>(message.Value);
         if (record is null)
         {
-            logger.LogWarning("Skipped an unreadable presence record");
+            Logger.LogWarning("Skipped an unreadable presence record");
             return;
         }
 
-        store.Apply(record.Room, record.Nickname, record.RenewedAt);
+        _store.Apply(record.Room, record.Nickname, record.RenewedAt);
     }
 
-    private void NoteCaughtUp(TopicPartition partition)
+    protected override void OnReplayed()
     {
-        if (_presenceLoaded)
-        {
-            return;
-        }
-
-        _caughtUp.Add(partition);
-
-        var assignment = _consumer!.Assignment;
-        if (assignment.Count == 0 || !assignment.All(_caughtUp.Contains))
-        {
-            return;
-        }
-
-        _presenceLoaded = true;
-        readiness.MarkPresenceLoaded();
-        logger.LogInformation(
+        _readiness.MarkPresenceLoaded();
+        Logger.LogInformation(
             "Replayed presence topic {Topic} to the end; the pod can enforce the nickname lock",
-            options.PresenceTopic);
+            Topic);
     }
 
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    // Deliberately the opposite of the chat consumer: presence is a soft UX gate, not the
+    // service. Losing it costs the nickname lock, not the chat, so readiness degrades open
+    // instead of restarting the pod. See docs/kafka.md and README section 13.
+    protected override void OnFatal(Exception exception)
     {
-        await base.StopAsync(cancellationToken);
-
-        var consumer = _consumer;
-        _consumer = null;
-
-        if (consumer is null)
-        {
-            return;
-        }
-
-        if (!ChatConsumerService.TryCloseWithin(
-                () =>
-                {
-                    consumer.Close();
-                    consumer.Dispose();
-                },
-                ChatConsumerService.CloseBudget,
-                out var failure))
-        {
-            logger.LogWarning(
-                "The presence consumer did not finish leaving its group within {Budget}; " +
-                "shutting down without it",
-                ChatConsumerService.CloseBudget);
-            return;
-        }
-
-        if (failure is not null)
-        {
-            logger.LogWarning(failure, "The presence consumer reported an error while leaving its group");
-        }
+        Logger.LogCritical(
+            exception,
+            "The presence consumer stopped fatally; this pod can no longer enforce the " +
+            "nickname lock, but chat is unaffected. Degrading readiness open instead of " +
+            "restarting the pod");
+        _readiness.MarkPresenceLoaded();
     }
 }

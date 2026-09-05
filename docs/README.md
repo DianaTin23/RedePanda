@@ -15,11 +15,10 @@ Für einen ersten Überblick reichen die ersten beiden Dokumente.
 
 | Dokument | Inhalt |
 |---|---|
-| [architecture.md](architecture.md) | Welche Dienste es gibt, wie sie zusammenhängen, welche Kopplungen niemand automatisch prüft |
+| [architecture.md](architecture.md) | Welche Dienste es gibt, wie sie zusammenhängen, welche Kopplungen niemand automatisch prüft, wie geloggt wird |
 | [kafka.md](kafka.md) | Producer, Consumer, Offsets, eine Consumer-Group je Pod, Broker-Absicherung |
 | [streaming.md](streaming.md) | Der SSE-Weg vom Topic in den Browser: Verlauf, Backpressure, Wiederaufnahme |
 | [frontend.md](frontend.md) | Caddy als Reverse Proxy, `app.js` ohne Build-Tooling, Theme-Modell |
-| [observability.md](observability.md) | OTel-SDK, Collector, Prometheus, die Namensregeln für Metriken |
 | [deployment.md](deployment.md) | Helm-Chart, TLS, Probes, Shutdown, HPA |
 | [build.md](build.md) | Zentrale Build-Konfiguration, Images, Digest-Pins, Reproduzierbarkeit |
 

@@ -1,9 +1,6 @@
 namespace RedeTim.Backend;
 
-/// <summary>
-/// The messages this pod has read off the topic, kept per room. Not thread-safe;
-/// <see cref="ChatBroadcaster"/> owns the only instance and guards every call.
-/// </summary>
+// Not thread-safe: ChatBroadcaster owns the only instance and guards every call.
 internal sealed class ChatHistory(int limit, int roomLimit)
 {
     private readonly Dictionary<string, Room> _rooms = new(StringComparer.Ordinal);
@@ -50,10 +47,7 @@ internal sealed class ChatHistory(int limit, int roomLimit)
         _rooms.Remove(oldestName);
     }
 
-    /// <summary>
-    /// Everything remembered for <paramref name="room"/> after <paramref name="afterOffset"/>,
-    /// oldest first. Pass <c>-1</c> for a fresh connection.
-    /// </summary>
+    // afterOffset is exclusive; pass -1 for a fresh connection.
     public IReadOnlyList<ChatRecord> Snapshot(string room, long afterOffset)
     {
         if (!_rooms.TryGetValue(room, out var entry))

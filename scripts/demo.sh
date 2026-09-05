@@ -1,5 +1,25 @@
 #!/usr/bin/env bash
+# Opens the port-forwards for the demo and writes the release CA next to them.
+#
+#   ./scripts/demo.sh
+#
+# Frontend (8443 and the 8080 redirect), plus the release CA so every curl below can verify
+# against it instead of falling back to -k. The demo walkthrough that uses these ports is
+# README section 8.
+#
+# NAMESPACE, RELEASE and CA_FILE override the defaults (redetim, redetim, $TMPDIR/<release>-ca.crt)
+# for a release installed under another name.
+#
+# Runs until Ctrl+C; the trap closes every forward it opened.
 set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
+case "${1-}" in
+    -h|--help) usage ;;
+    "") ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+esac
 
 NAMESPACE="${NAMESPACE:-redetim}"
 RELEASE="${RELEASE:-redetim}"
@@ -31,18 +51,12 @@ forward "svc/${RELEASE}-frontend" 8443:8443 "frontend"
 
 forward "svc/${RELEASE}-frontend" 8080:8080 "redirect" "http"
 
-forward "svc/${RELEASE}-prometheus" 9090:9090 "prometheus"
-
-forward "deploy/${RELEASE}-otel-collector" 8889:8889 "collector"
-
 echo
 echo "Two browser windows on https://localhost:8443, same room  -> both see the message."
 echo "Two browser windows, different rooms                      -> no mixing."
-echo "Prometheus query: redetim_messages_sent_total"
 echo
 echo "From the shell, verified against the release CA:"
 echo "  curl --cacert ${CA_FILE} https://localhost:8443/healthz"
-echo "  curl --cacert ${CA_FILE} https://localhost:8889/metrics | grep redetim_"
 echo "  curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\\n' http://localhost:8080/"
 echo
 echo "Press Ctrl+C to stop."

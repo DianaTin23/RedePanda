@@ -14,12 +14,6 @@
 {{- $components := list
       (dict "name" "frontend" "service" (printf "%s-frontend" $fullname))
       (dict "name" "backend" "service" (printf "%s-backend" $fullname)) }}
-{{- if .Values.otelCollector.enabled }}
-{{- $components = append $components (dict "name" "otel-collector" "service" (include "redetim.collectorService" .)) }}
-{{- end }}
-{{- if .Values.prometheus.enabled }}
-{{- $components = append $components (dict "name" "prometheus" "service" (printf "%s-prometheus" $fullname)) }}
-{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:

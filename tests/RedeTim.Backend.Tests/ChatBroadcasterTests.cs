@@ -8,12 +8,8 @@ public class ChatBroadcasterTests
 {
     private static ChatBroadcaster CreateBroadcaster(int historySize = 0)
     {
-        var meterFactory = new TestMeterFactory();
         return new ChatBroadcaster(
-            TestOptions.Create(historySize),
-            meterFactory,
-            new ChatMetrics(meterFactory),
-            NullLogger<ChatBroadcaster>.Instance);
+            TestOptions.Create(historySize), NullLogger<ChatBroadcaster>.Instance);
     }
 
     private static ChatMessage Message(string room, string text) =>

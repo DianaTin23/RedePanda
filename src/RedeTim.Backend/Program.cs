@@ -78,7 +78,7 @@ app.MapPost("/api/messages", async (
     catch (ProduceException<string, string> e)
     {
         logger.LogError("Produce failed: {Reason}", e.Error.Reason);
-        return Results.StatusCode(ChatProducer.StatusCodeFor(e.Error));
+        return Results.StatusCode(KafkaJsonProducer.StatusCodeFor(e.Error));
     }
 
     return Results.Accepted();
@@ -109,7 +109,7 @@ app.MapPost("/api/join", async (
     catch (ProduceException<string, string> e)
     {
         logger.LogError("Presence produce failed: {Reason}", e.Error.Reason);
-        return Results.StatusCode(PresenceProducer.StatusCodeFor(e.Error));
+        return Results.StatusCode(KafkaJsonProducer.StatusCodeFor(e.Error));
     }
 
     return Results.Ok();

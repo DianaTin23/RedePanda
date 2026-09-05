@@ -42,7 +42,7 @@ public class ChatProducerTests
     [InlineData(ErrorCode.Local_AllBrokersDown, StatusCodes.Status502BadGateway)]
     public void ATimeoutIsReportedAsAGatewayTimeout(ErrorCode code, int expected)
     {
-        Assert.Equal(expected, ChatProducer.StatusCodeFor(new Error(code)));
+        Assert.Equal(expected, KafkaJsonProducer.StatusCodeFor(new Error(code)));
     }
 
     [Fact]

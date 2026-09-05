@@ -1,39 +1,13 @@
 using System.Diagnostics;
 using Confluent.Kafka;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace RedeTim.Backend.Tests;
 
 public class PresenceProducerTests
 {
-    [Fact]
-    public void TheConfiguredTimeoutBoundsTheMessage()
-    {
-        var config = PresenceProducer.BuildConfig(TestOptions.Create() with { ProduceTimeoutMs = 8000 });
-
-        Assert.Equal(8000, config.MessageTimeoutMs);
-    }
-
-    [Fact]
-    public void ARetriedRecordMayNotOvertakeALaterOne()
-    {
-        var config = PresenceProducer.BuildConfig(TestOptions.Create());
-
-        Assert.True(config.EnableIdempotence);
-        Assert.Equal(Acks.All, config.Acks);
-    }
-
-    [Theory]
-    [InlineData(ErrorCode.Local_MsgTimedOut, StatusCodes.Status504GatewayTimeout)]
-    [InlineData(ErrorCode.Local_TimedOut, StatusCodes.Status504GatewayTimeout)]
-    [InlineData(ErrorCode.MsgSizeTooLarge, StatusCodes.Status502BadGateway)]
-    [InlineData(ErrorCode.Local_AllBrokersDown, StatusCodes.Status502BadGateway)]
-    public void ATimeoutIsReportedAsAGatewayTimeout(ErrorCode code, int expected)
-    {
-        Assert.Equal(expected, PresenceProducer.StatusCodeFor(new Error(code)));
-    }
-
+    // Config and StatusCodeFor are shared with ChatProducer and tested there; what is specific
+    // to this producer is that a renewal actually reaches the wire under the same timeout.
     [Fact]
     public async Task RenewingAgainstAnUnreachableBrokerGivesUpAfterTheTimeout()
     {

@@ -856,6 +856,14 @@ Projekt und nicht Open Source im engeren Sinne (BSL 1.1, Apache-2.0 nach vier Ja
 # `command ls` und nicht `ls`: ein `ls`-Alias auf eza (verbreitet, und auf mindestens einer
 # Maschine in diesem Projekt gesetzt) deutet `-t` als Option *mit Argument* und verschluckt das
 # Glob stillschweigend -- REL wäre leer und die Fehlermeldung zeigte woanders hin.
+#
+# Auf einem frischen Clone trägt `-t` allerdings nichts bei: ein Clone schreibt alle Dateien im
+# selben Moment, die mtimes sind gleich, und die Auswahl wird beliebig -- CI hat auf diese Weise
+# zuerst eine zwei Releases alte Datei geprüft. Wer gerade nichts gebaut hat, fragt deshalb
+# besser git, welche Release-Datei zuletzt dazukam (genau das tut auch CI):
+#
+#   REL=$(git log --diff-filter=A --name-only --format= -- 'deploy/releases/*.yaml' \
+#         | grep -v -- '-dirty\.' | grep . | head -1)
 REL=$(command ls -t deploy/releases/*.yaml | head -1)
 
 dotnet test -p:ContinuousIntegrationBuild=true  # 204 Tests, locked mode wie in CI

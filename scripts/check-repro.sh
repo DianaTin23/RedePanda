@@ -25,12 +25,14 @@ done
 
 require_tool dotnet
 
-PROJECTS=(
-    "src/RedeTim.Contracts/RedeTim.Contracts.csproj"
-    "src/RedeTim.Backend/RedeTim.Backend.csproj"
-    "src/RedeTim.ChatClient/RedeTim.ChatClient.csproj"
-    "tests/RedeTim.Backend.Tests/RedeTim.Backend.Tests.csproj"
-)
+# Read from the solution rather than repeated here: a project added to RedeTim.sln but not
+# to a second list in this file would have gone unchecked, which is exactly the drift this
+# script exists to catch. Still one restore per project, so the report names which one.
+mapfile -t PROJECTS < <(cd "${REPO_ROOT}" && dotnet sln list | grep "[.]csproj")
+if [[ "${#PROJECTS[@]}" -eq 0 ]]; then
+    echo "Could not read the project list from RedeTim.sln" >&2
+    exit 2
+fi
 
 before="$(cd "${REPO_ROOT}" && find . -name packages.lock.json -not -path './**/bin/*' -not -path './**/obj/*' -print0 \
     | sort -z | xargs -0 sha256sum | sha256sum)"

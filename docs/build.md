@@ -258,8 +258,10 @@ aus einem Anmeldeproblem ein blankes `unauthorized` mitten im Push.
 ### Push nach ghcr.io
 
 `--push` impliziert `--release` — ein Image in einer Registry, das keinen Commit benennt, ist
-genau das, was die Tag-Wächter des Charts aus einem Cluster heraushalten sollen. Aus demselben
-Grund verweigert `--push` ein gesetztes `IMAGE_TAG`, und zwar **vor** dem Bauen.
+genau das, was die Tag-Wächter des Charts aus einem Cluster heraushalten sollen. Einen Tag von
+Hand zu setzen gibt es deshalb nicht mehr: Der Ausweg `IMAGE_TAG` schrieb keine Release-Datei,
+benannte keinen Commit und wurde von `--push` ohnehin verweigert. Wer ohne Git-Checkout bauen
+will, findet hier bewusst keinen Weg — der Tag *ist* der Commit.
 
 Die Image-Namen stehen nicht mehr doppelt da. `build-images.sh` liest `*.image.repository` aus
 `values.yaml`, statt dieselben drei Namen ein zweites Mal zu führen: Das Skript kann damit nichts

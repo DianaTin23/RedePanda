@@ -1,0 +1,83 @@
+# Cutting a release: build the three images under the derived tag, push them to ghcr.io and
+# commit the release file that names them back to main.
+#
+# This is deliberately NOT triggered by a push. A release here is an identifiable act -- that is
+# why build-images.sh refuses an unclean tree -- so cutting one stays a decision somebody makes,
+# not a side effect of merging a typo fix. It is the only reason this workflow exists, which is
+# why the dispatch takes no `release: true` flag any more.
+name: release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The verification workflows, called rather than copied: a release still cannot happen unless
+  # both are green on this exact commit. Splitting them into their own files did not weaken that.
+  dotnet:
+    uses: ./.github/workflows/dotnet.yml
+  chart:
+    uses: ./.github/workflows/chart.yml
+
+  release:
+    needs: [dotnet, chart]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # commits the release file back to main
+      packages: write   # pushes to ghcr.io
+    concurrency:
+      # Queue, never cancel: a cancelled release leaves images pushed with no release file
+      # naming them.
+      group: release-main
+      cancel-in-progress: false
+    env:
+      # build-images.sh prefers podman, and ubuntu-latest has both. docker/login-action writes
+      # ~/.docker/config.json, which podman only reads as a fallback -- when that fallback misses
+      # the push fails as an opaque 'unauthorized'. Be explicit instead.
+      ENGINE: docker
+    steps:
+      - uses: actions/checkout@v7
+
+      # build-images.sh --push refuses an unclean tree, but four minutes into an image build.
+      # Fail as ourselves, immediately.
+      - name: Working tree must be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short >&2
+            echo "Refusing to cut a release from an unclean checkout." >&2
+            exit 1
+          fi
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        run: ./scripts/build-images.sh --push
+
+      # Unconditional: if the commit-back below fails because main moved, the release file is
+      # still recoverable from here rather than lost.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-file
+          path: deploy/releases/*.yaml
+          if-no-files-found: warn
+
+      - name: Commit the release file
+        run: |
+          set -euo pipefail
+          REL="$(git status --porcelain deploy/releases | awk '{print $2}')"
+          test -n "${REL}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${REL}"
+          git commit -m "release: $(basename "${REL}" .yaml)"
+          # No --force. If main moved while this ran, the push fails and the artifact above
+          # still holds the file.
+          git push origin HEAD:main

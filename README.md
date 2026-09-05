@@ -95,7 +95,8 @@ nix develop        # oder: direnv allow
 ```
 
 Diese Shell liefert .NET 10, `rpk`, `kubectl`, `helm`, `kubeconform`, `skopeo` und
-`docker-compose`.
+`docker-compose`. Dazu `jq` und `nodejs` — die braucht nicht das Projekt, sondern die
+Claude-Code-Automatisierung in `.claude/` (Abschnitt 16).
 
 ### Zentrale Build-Konfiguration
 
@@ -822,9 +823,9 @@ Daraus folgt der Rest:
 Eine Registry und ein CI, das den Build anstößt, fehlten hier lange. Beides gibt es jetzt:
 `scripts/build-images.sh --push` schiebt die drei Images (Backend,
 Frontend und Konsolenclient — es waren einmal zwei, bevor der Admin-Prozess ein eigenes Image
-bekam) nach `ghcr.io/dianatin23/`, und der `release`-Job in `.github/workflows/ci.yml` stößt
-genau das an. Was noch fehlt: ein Digest-Pin auch für diese drei Images. Der Tag ist
-unveränderlich, weil ihn niemand zweimal vergibt — nicht, weil die Registry es erzwänge.
+bekam) nach `ghcr.io/dianatin23/`, und `.github/workflows/release.yml` stößt genau das an. Was
+noch fehlt: ein Digest-Pin auch für diese drei Images. Der Tag ist unveränderlich, weil ihn
+niemand zweimal vergibt — nicht, weil die Registry es erzwänge.
 
 ---
 
@@ -943,16 +944,24 @@ Readiness-Gate): die Tests laufen ohne Broker, der Consumer wird in der Fixture 
 
 ### Was CI davon selbst anstößt
 
-`.github/workflows/ci.yml` fährt bei jedem Push und PR den ganzen Block oben, außer dem, was
-einen Cluster braucht: `check-repro.sh`, `dotnet test -p:ContinuousIntegrationBuild=true`, beide
-HPA-Varianten aus `helm lint` und `helm template | kubeconform`, die `replicas`-Kopplung und den
-Fall ohne Release-Datei, der abbrechen muss. `digests.yml` ruft `check-digests.sh` wöchentlich
-auf; ein rotes Ergebnis dort heißt „Digest gewandert **oder** Manifest nicht lesbar" — also erst
-den Log lesen, dann glauben.
+Jede Sache hat ihren eigenen Workflow unter `.github/workflows/`; zusammen fahren sie bei jedem
+Push und PR den ganzen Block oben, außer dem, was einen Cluster braucht:
 
-Der `release`-Job läuft dabei nicht mit. Er hängt an `workflow_dispatch` mit `release: true` auf
-`main`, baut, pusht nach `ghcr.io` und committet die Release-Datei zurück — als **Kind** des
-Commits, den sie beschreibt: die Images zu einem Commit existieren erst nach ihm.
+| Workflow | Trigger | Was er prüft |
+|---|---|---|
+| `dotnet.yml` | Push auf `main`, PR | `check-repro.sh`, `dotnet test -p:ContinuousIntegrationBuild=true`, Lock-Dateien unverändert |
+| `chart.yml` | Push auf `main`, PR | beide HPA-Varianten aus `helm lint` und `helm template \| kubeconform`, die `replicas`-Kopplung, der Fall ohne Release-Datei, der abbrechen muss |
+| `release.yml` | nur `workflow_dispatch` auf `main` | baut, pusht nach `ghcr.io`, committet die Release-Datei zurück |
+| `digests.yml` | wöchentlich, `workflow_dispatch` | `check-digests.sh` |
+
+Ein rotes Ergebnis in `digests.yml` heißt „Digest gewandert **oder** Manifest nicht lesbar" —
+also erst den Log lesen, dann glauben.
+
+`release.yml` läuft bei einem Push nicht mit; ausgelöst wird er von Hand. Bevor er baut, ruft er
+`dotnet.yml` und `chart.yml` per `workflow_call` auf und hängt per `needs` daran — die
+Verifikation ist Vorbedingung, auch wenn sie inzwischen in eigenen Dateien steht. Die
+Release-Datei committet er zurück als **Kind** des Commits, den sie beschreibt: die Images zu
+einem Commit existieren erst nach ihm.
 
 ### Manuell durchzugehen
 
@@ -1114,12 +1123,12 @@ Commits, den sie beschreibt: die Images zu einem Commit existieren erst nach ihm
   `helm template` mintet mangels `lookup` jedes Mal eine frische CA und vier private Schlüssel,
   und die stünden dann hier. Genau deshalb gibt es `deploy/k8s/rendered.yaml` nicht mehr
   (Abschnitt 7). Rendern zum Ansehen ist in Ordnung; installiert wird über Helm.
-- **CI hat keinen Cluster.** `ci.yml` prüft Tests, Lock-Dateien und das Chart; die Abnahmeliste
-  aus Abschnitt 13 bleibt vollständig manuell. Genau aus dieser Lücke kamen die beiden Fehler,
-  die dieses Repo zuletzt hatte — ein gerendertes Manifest, das dem Chart um mehrere hundert
-  Zeilen und fünf Secrets hinterherhing, und ein Kafka-Client, der als einziger von neun ohne
-  Sicherheitseinstellungen gebaut wurde. Nur der zweite wäre heute aufgefallen
-  (`BrokerReadinessTests`).
+- **CI hat keinen Cluster.** `dotnet.yml` prüft Tests und Lock-Dateien, `chart.yml` das Chart;
+  die Abnahmeliste aus Abschnitt 13 bleibt vollständig manuell. Genau aus dieser Lücke kamen
+  die beiden Fehler, die dieses Repo zuletzt hatte — ein gerendertes Manifest, das dem Chart
+  um mehrere hundert Zeilen und fünf Secrets hinterherhing, und ein Kafka-Client, der als
+  einziger von neun ohne Sicherheitseinstellungen gebaut wurde. Nur der zweite wäre heute
+  aufgefallen (`BrokerReadinessTests`).
 - **Die Release-Datei ist ein Kind-Commit.** Der `release`-Job committet sie *nach* dem Commit,
   den sie beschreibt: `main` trägt nie eine Release-Datei für die eigene Spitze, sondern für
   deren Eltern. Anders geht es nicht — der Dateiname enthält den Commit, den es zum Zeitpunkt
@@ -1295,6 +1304,70 @@ Drei Dinge müssen in der Ausgabe stehen:
 
 ---
 
+## 16. Claude-Code-Automatisierung
+
+`.claude/` und `.mcp.json` sind eingecheckt und gelten damit für jeden, der das Repo auscheckt.
+Nichts davon wird zum Bauen, Testen oder Deployen gebraucht — es macht nur die Regeln
+durchsetzbar, die sonst niemand prüft. Persönliche Abweichungen gehören in
+`.claude/settings.local.json` (nicht eingecheckt).
+
+Die Dev-Shell liefert dafür `jq` und `nodejs` mit.
+
+### Hooks — laufen von selbst
+
+| Wann | Skript | Was es meldet |
+|---|---|---|
+| nach jedem `dotnet`-Aufruf | `.claude/hooks/lockfile-guard.sh` | `packages.lock.json` wurde still neu geschrieben (Abschnitt 4, „Zentrale Build-Konfiguration") |
+| nach jeder Änderung unter `deploy/helm/` | `.claude/hooks/chart-guard.sh` | Chart rendert nicht — in einer der beiden HPA-Varianten, in der `replicas`-Kopplung, oder es rendert **ohne** Release-Datei, obwohl es scheitern müsste |
+
+Beide sind rein prüfend und ändern nichts. `chart-guard.sh` bleibt bewusst offline:
+`kubeconform` holt seine Schemata über das Netz und gehört deshalb ins Gate und in CI, nicht an
+jede Bearbeitung.
+
+Abschalten, falls sie einmal im Weg sind: `/hooks` im laufenden Claude Code, oder
+`"disableAllHooks": true` in `.claude/settings.local.json`.
+
+### Slash-Kommandos — nur auf Zuruf
+
+```
+/abnahme      # das lokale Gate, spiegelt dotnet.yml und chart.yml
+/release      # Vorbedingungen pruefen, dann den workflow_dispatch auf main ausloesen
+```
+
+Das Gate ist auch ohne Claude Code brauchbar:
+
+```bash
+.claude/skills/abnahme/gate.sh              # alles
+.claude/skills/abnahme/gate.sh --chart-only # ohne die .NET-Haelfte
+```
+
+Es prüft `check-repro.sh`, die Suite im locked mode, dass der Testlauf keine Lock-Datei
+umgeschrieben hat, beide HPA-Varianten durch `helm lint` und `helm template | kubeconform`, die
+`replicas`-Kopplung und den Negativfall ohne Release-Datei. Grün heißt: alles Prüfbare ohne
+Cluster ist geprüft — die Abnahmeliste in Abschnitt 13 bleibt davon unberührt.
+
+### Subagents — vor einem PR
+
+- `kafka-invariant-reviewer` prüft einen Diff gegen die tragenden Invarianten:
+  `KafkaSecurity.ApplyTo` an jedem Kafka-Client, Consumer-Group je Pod, SSE-`id` = Offset, Raum
+  als Record-Key, `ChatMessageSerializer` als einzige Serialisierungsstelle, kein `/metrics`,
+  Metriknamen ohne Suffix.
+- `doc-sync-checker` prüft die Kopplungen, die kein Build sieht: Bereich → Dokument in `docs/`,
+  die Abschnittsnummern dieser README, die Textlängengrenze in `app.js` gegen
+  `ChatMessage.DefaultMaxTextLength`, die Broker-Image-Parität und die `sed`-Bereiche der
+  `--help`-Köpfe.
+
+### MCP-Server
+
+`.mcp.json` bietet zwei an, beide beim ersten Start zu bestätigen:
+
+| Server | Transport | Wofür |
+|---|---|---|
+| `github` | HTTP, OAuth | Workflow-Läufe, PRs, Issues — vor allem der Release-`workflow_dispatch` und die Logs eines roten Laufs |
+| `kubernetes` | `npx mcp-server-kubernetes` | Cluster-Zustand während der Abnahmeliste. `ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS=true` ist gesetzt: lesen ja, löschen nein |
+
+---
+
 ## Projektstruktur
 
 ```text
@@ -1307,4 +1380,5 @@ deploy/helm/redetim/      Helm-Chart
 deploy/releases/            generierte Release-Dateien (Image-Tags + Commit pro Build)
 scripts/                    build-images.sh, check-digests.sh, demo.sh
 RedeTim-kafka-docker/     Redpanda für lokale Entwicklung ohne Kubernetes
+.claude/                    Hooks, Subagents, Slash-Kommandos (Abschnitt 16)
 ```

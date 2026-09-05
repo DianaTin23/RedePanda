@@ -58,7 +58,7 @@ presence:
   ttlSeconds: 45
 
 backend:
-  # Aus ghcr.io, gepusht vom release-Job in .github/workflows/ci.yml. Tag kommt aus der
+  # Aus ghcr.io, gepusht von .github/workflows/release.yml. Tag kommt aus der
   # Release-Datei; scripts/build-images.sh liest den Namen hier, statt ihn zu wiederholen.
   image:
     repository: ghcr.io/dianatin23/redetim-backend

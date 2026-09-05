@@ -16,7 +16,7 @@
 # lock file; see the comment there. This script sets ContinuousIntegrationBuild=true, which is what
 # switches locked mode on.
 #
-# CI runs this on every push and pull request (.github/workflows/ci.yml). README section 13
+# CI runs this on every push and pull request (.github/workflows/dotnet.yml). README section 13
 # lists it as well; run it by hand before cutting a release from a machine.
 set -euo pipefail
 

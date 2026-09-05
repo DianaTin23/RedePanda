@@ -2,7 +2,7 @@
 
 Ein Build soll zweimal dasselbe ergeben, und ein Release soll benennbar sein. Beides ist hier
 zuerst in der Konstruktion umgesetzt und nicht in der Automatik: Was nicht geprüft werden kann,
-wird stattdessen unmöglich gemacht. CI (`.github/workflows/ci.yml`) prüft seitdem zusätzlich —
+wird stattdessen unmöglich gemacht. CI (`.github/workflows/`) prüft seitdem zusätzlich —
 es ersetzt die Konstruktion nicht, es merkt nur, wenn sie verletzt wurde.
 
 Die Befehle stehen in README Abschnitt 4 und 6. Hier steht, warum sie so aussehen.

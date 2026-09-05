@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Sprache
 
-README.md, `docs/` und die Kommentare in `values.yaml`/`.csproj` sind auf **Deutsch**; die
-`--help`-Köpfe der Skripte, `flake.nix` und die Code-Kommentare in C# sind auf **Englisch**.
-Beim Bearbeiten die Sprache der jeweiligen Datei beibehalten.
+README.md, `docs/`, die Kommentare in `values.yaml`/`.csproj` und die Prosa unter `.claude/`
+(`agents/*.md`, `skills/*/SKILL.md`) sind auf **Deutsch**; die `--help`-Köpfe der Skripte,
+`flake.nix`, die Shell-Skripte unter `.claude/` und die Code-Kommentare in C# sind auf
+**Englisch**. Beim Bearbeiten die Sprache der jeweiligen Datei beibehalten.
 
 ## Wo die Begründungen stehen
 
@@ -30,7 +31,8 @@ Code und Doku heraus referenziert** — beim Umsortieren die Verweise mitziehen.
 ## Befehle
 
 ```bash
-nix develop                    # Dev-Shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo
+nix develop                    # Dev-Shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo,
+                               #            jq + nodejs (nur fuer .claude/, siehe unten)
 
 dotnet build                   # TreatWarningsAsErrors=true, keine Ausnahmen im Repo
 dotnet test                    # gesamte Suite (RedeTim.Backend.Tests, xunit v3)
@@ -59,12 +61,43 @@ Variante gegen einen TLS/SASL-Broker: README Abschnitt 5. Images bauen und in ki
 laden: `./scripts/build-images.sh [--load kind] [--release] [--push]`, README Abschnitt 6. Demo
 mit Port-Forwards: `./scripts/demo.sh`.
 
-**CI** (`.github/workflows/`): `ci.yml` prüft bei jedem Push und PR die Tests im locked mode,
-die Lock-Dateien und das Chart (beide HPA-Varianten plus der Fall ohne Release-Datei, der
-scheitern muss). Der `release`-Job läuft **nur** per `workflow_dispatch` mit `release: true` auf
-`main`: er baut, pusht nach `ghcr.io/dianatin23/redetim-*` und committet die Release-Datei
-zurück. `digests.yml` ruft `check-digests.sh` wöchentlich auf. Einen Cluster hat CI nicht — die
-manuelle Abnahmeliste in README Abschnitt 13 bleibt manuell.
+**CI** (`.github/workflows/`): ein Workflow je Sache, kein Sammelbecken.
+
+- `dotnet.yml` — bei jedem Push und PR: `check-repro.sh`, Tests im locked mode, Lock-Dateien
+  unverändert.
+- `chart.yml` — bei jedem Push und PR: beide HPA-Varianten aus `helm lint` und
+  `helm template | kubeconform`, die `replicas`-Kopplung, plus der Fall ohne Release-Datei, der
+  scheitern muss.
+- `release.yml` — **nur** per `workflow_dispatch` auf `main`. Ruft `dotnet.yml` und `chart.yml`
+  per `workflow_call` auf und hängt per `needs` daran; danach baut es, pusht nach
+  `ghcr.io/dianatin23/redetim-*` und committet die Release-Datei zurück.
+- `digests.yml` — ruft `check-digests.sh` wöchentlich auf.
+
+Einen Cluster hat CI nicht — die manuelle Abnahmeliste in README Abschnitt 13 bleibt manuell.
+
+## Was `.claude/` automatisiert
+
+Eingecheckt, gilt also für jeden, der das Repo auscheckt. Vollständig in README Abschnitt 16.
+
+**Zwei Hooks laufen von selbst** (`.claude/settings.json`, Skripte in `.claude/hooks/`):
+
+- nach jedem `dotnet`-Aufruf meldet `lockfile-guard.sh` still neu geschriebene
+  `packages.lock.json`;
+- nach jeder Änderung unter `deploy/helm/` rendert `chart-guard.sh` das Chart in beiden
+  HPA-Varianten, prüft die `replicas`-Kopplung und dass das Rendern **ohne** Release-Datei
+  scheitert.
+
+Beide melden sich per Exit-Code 2 zurück. Wer ihre Bedingungen ändert, muss die Skripte
+mitziehen — sie sind die zweite Kopie der Regeln aus `dotnet.yml` und `chart.yml`.
+
+**Zwei Slash-Kommandos**, nur auf Zuruf: `/abnahme` (das lokale Gate, spiegelt `dotnet.yml`
+und `chart.yml`) und `/release` (Vorbedingungen plus `workflow_dispatch` auf `release.yml`).
+
+**Zwei Subagents** zum Draufsetzen vor einem PR: `kafka-invariant-reviewer` prüft die
+Invarianten unten am Diff, `doc-sync-checker` die Doku-Kopplungen und Abschnittsnummern.
+
+`.mcp.json` bietet GitHub (HTTP) und einen Kubernetes-Server (`npx`, nur lesende Tools) an;
+beide müssen beim ersten Start bestätigt werden.
 
 ## Architektur
 

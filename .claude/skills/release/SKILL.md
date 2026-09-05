@@ -55,7 +55,7 @@ Was der Job dann tut:
 
 ```bash
 git pull                                    # holt den Release-Commit
-REL=$(command ls -t deploy/releases/*.yaml | head -1)
+REL=$(./scripts/select-release.sh)
 helm upgrade --install redetim deploy/helm/redetim -n redetim -f "$REL"
 ```
 
@@ -66,7 +66,7 @@ sonst entsteht ein zweiter Tag für denselben Stand.
 ## Was hier nicht passiert
 
 - **Kein lokaler Push.** `./scripts/build-images.sh --push` von Hand umgeht die grüne
-  Vorbedingung und pusht unter denselben Namen. Lokal ist `--load kind` gedacht, README
+  Vorbedingung und pusht unter denselben Namen. Lokal baut man ohne Schalter, README
   Abschnitt 6.
 - **Kein `rendered.yaml` im Repo.** Helm ist der einzige Installationsweg; ein gerendertes
   Manifest mintete bei jedem Lauf eine CA samt vier privaten Schlüsseln.

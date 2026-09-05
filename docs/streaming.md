@@ -21,7 +21,9 @@ Der entscheidende Zusatznutzen ist die Wiederaufnahme: SSE hat sie eingebaut. De
 schickt beim automatischen Reconnect die zuletzt gesehene Event-ID im Header
 `Last-Event-ID` mit. Als ID wird der **Kafka-Offset** verwendet. Damit wird aus dem Nachladen
 eine echte Fortsetzung statt einer zweiten Kopie des Raums — und zwar auch dann, wenn der
-Browser bei einem anderen Pod landet, denn Offsets gelten topicweit.
+Browser bei einem anderen Pod landet: der Offset gehört dem Broker, nicht dem Pod. Eindeutig
+ist er **je Partition**; dass das hier reicht, liegt am Raum als Record-Key (siehe
+[architecture.md](architecture.md#ein-topic-für-alle-räume)).
 
 ## Prozesslokaler Zustand
 
@@ -61,8 +63,8 @@ wirklich aufgehört hat zu lesen, nicht viel Speicher blockieren kann.
 zurück, statt zu blockieren, und `Publish` behandelt das als Ende dieses Abonnements.
 
 `DropOldest` wäre die naheliegende Wahl gewesen und war schlechter, als sie aussah. Es hätte
-für einen bloß langsamen Leser still eine Nachricht verworfen — ohne Log, ohne Metrik, und
-ohne dass der Browser je erfahren hätte, dass er ein Loch hat.
+für einen bloß langsamen Leser still eine Nachricht verworfen — ohne Log und ohne dass der
+Browser je erfahren hätte, dass er ein Loch hat.
 
 Den Stream zu beenden ist dagegen reparabel:
 
@@ -70,7 +72,7 @@ Den Stream zu beenden ist dagegen reparabel:
 2. `EventSource` verbindet sich von selbst neu, mit `Last-Event-ID`.
 3. Der Replay füllt die Lücke exakt.
 
-Der Abbruch wird gezählt (`redetim_stream_cuts_total`) und geloggt. `TryComplete` steht dabei
+Der Abbruch wird gezählt (`redetim_streams_cut_total`) und geloggt. `TryComplete` steht dabei
 **innerhalb** der Bedingung: Es liefert nur beim ersten Mal `true`, sodass ein bereits
 abgeschnittener und noch nicht entsorgter Abonnent nicht für den Rest seines Lebens einmal pro
 Nachricht loggen und zählen kann.
@@ -201,17 +203,3 @@ Der Header `X-Accel-Buffering: no` wird zusätzlich gesetzt. `ServerSentEvents` 
 `Content-Type`, `Cache-Control`, `Pragma` und `Content-Encoding` selbst und schaltet die
 Antwortpufferung ab. `X-Accel-Buffering` ist ein nginx-spezifischer Hinweis, den es nicht
 kennt. Er wirkt nur, wenn ein puffernder Proxy davorsteht — Caddy streamt SSE ungepuffert.
-
-## Die Verbindungsmetrik
-
-`redetim.active_connections` ist ein *observable* UpDownCounter, kein von Hand hoch- und
-heruntergezählter. Ein manueller Zähler driftet dauerhaft, sobald ein Verbindungsabbruch am
-`finally`-Block vorbeirutscht. Der Callback liest bei jedem Export die tatsächliche Größe und
-meldet ab Prozessstart `0` statt „keine Daten".
-
-Das Instrument ist absichtlich ein Instanzfeld eines DI-Singletons. Ein statisches observables
-Instrument, das nie jemand referenziert, wird nie konstruiert — die Metrik erschiene dann
-stillschweigend überhaupt nicht.
-
-Der Abonnent wird entfernt, wenn das Framework den Enumerator entsorgt. Das ist auch der
-Moment, in dem die Verbindung aus der Metrik fällt.

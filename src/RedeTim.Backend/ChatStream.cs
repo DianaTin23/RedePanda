@@ -6,16 +6,12 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend;
 
-/// <summary>Turns one room's slice of the <see cref="ChatBroadcaster"/> into an SSE item sequence.</summary>
 internal static class ChatStream
 {
-    /// <summary>How long a room may stay quiet before a heartbeat is emitted.</summary>
     internal static readonly TimeSpan DefaultHeartbeatInterval = TimeSpan.FromSeconds(15);
 
-    /// <summary>Event type of a heartbeat, so <c>EventSource.onmessage</c> never sees one.</summary>
     internal const string HeartbeatEventType = "ping";
 
-    /// <summary>Yields one item per chat message, and a heartbeat whenever the room stays quiet.</summary>
     internal static async IAsyncEnumerable<SseItem<string>> Create(
         ChatBroadcaster broadcaster,
         string room,
@@ -61,7 +57,6 @@ internal static class ChatStream
                     }
                     catch (OperationCanceledException) when (!token.IsCancellationRequested)
                     {
-                        // Heartbeat interval elapsed; fall through and emit a ping.
                     }
                     catch (OperationCanceledException)
                     {
@@ -73,9 +68,8 @@ internal static class ChatStream
                     }
                 }
 
-                // Checked on every iteration, not just the heartbeat branch: a busy room's reads
-                // keep satisfying subscription.Reader.ReadAsync before the heartbeat ever times
-                // out, and would otherwise never renew presence at all.
+                // Every iteration, not just the heartbeat branch: a busy room keeps satisfying
+                // ReadAsync before the heartbeat times out, and would never renew presence.
                 if (presence is not null && DateTimeOffset.UtcNow - lastRenewal >= heartbeatInterval)
                 {
                     lastRenewal = DateTimeOffset.UtcNow;
@@ -100,7 +94,7 @@ internal static class ChatStream
     }
 
     private static SseItem<string> Data(ChatRecord record) =>
-        new(ChatMessageSerializer.Serialize(record.Message))
+        new(WireFormat.Serialize(record.Message))
         {
             EventId = record.Offset.ToString(CultureInfo.InvariantCulture),
         };

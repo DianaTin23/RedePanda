@@ -1,60 +1,16 @@
 using System.Net;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using RedeTim.Contracts;
 
 namespace RedeTim.Backend.Tests;
 
-public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.BrokerlessBackend>
+public class ChatStreamEndpointTests : IClassFixture<BrokerlessBackend>
 {
     private static readonly TimeSpan Promptly = TimeSpan.FromSeconds(5);
 
     private readonly BrokerlessBackend _factory;
 
     public ChatStreamEndpointTests(BrokerlessBackend factory) => _factory = factory;
-
-    public sealed class BrokerlessBackend : WebApplicationFactory<Program>
-    {
-        public FakePresenceProducer Producer { get; } = new();
-
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.ConfigureServices(services =>
-            {
-                foreach (var type in new[] { typeof(ChatConsumerService), typeof(PresenceConsumerService) })
-                {
-                    var descriptor = services.SingleOrDefault(d => d.ImplementationType == type);
-                    if (descriptor is not null)
-                    {
-                        services.Remove(descriptor);
-                    }
-                }
-
-                services.RemoveAll<IPresenceProducer>();
-                services.AddSingleton<IPresenceProducer>(Producer);
-            });
-        }
-    }
-
-    public sealed class FakePresenceProducer : IPresenceProducer
-    {
-        public List<(string Room, string Nickname)> Renewals { get; } = [];
-
-        public Task RenewAsync(string room, string nickname, CancellationToken cancellationToken)
-        {
-            lock (Renewals)
-            {
-                Renewals.Add((room, nickname));
-            }
-
-            return Task.CompletedTask;
-        }
-
-        public Task ReleaseAsync(string room, string nickname, CancellationToken cancellationToken) =>
-            Task.CompletedTask;
-    }
 
     [Fact]
     public async Task MissingRoomIsRejected()
@@ -181,7 +137,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
 
         Assert.StartsWith("data: ", frame);
 
-        var received = ChatMessageSerializer.Deserialize(frame["data: ".Length..]);
+        var received = WireFormat.Deserialize<ChatMessage>(frame["data: ".Length..]);
         Assert.NotNull(received);
         Assert.Equal("hallo", received.Text);
         Assert.Equal("general", received.Room);
@@ -208,7 +164,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
         Assert.Contains("id: 11", frame);
 
         var data = Assert.Single(frame, line => line.StartsWith("data: ", StringComparison.Ordinal));
-        Assert.Equal("vorher gesagt", ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
+        Assert.Equal("vorher gesagt", WireFormat.Deserialize<ChatMessage>(data["data: ".Length..])?.Text);
     }
 
     [Fact]
@@ -243,7 +199,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
         Assert.Contains("id: 21", frame);
 
         var data = Assert.Single(frame, line => line.StartsWith("data: ", StringComparison.Ordinal));
-        Assert.Equal("verpasst", ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
+        Assert.Equal("verpasst", WireFormat.Deserialize<ChatMessage>(data["data: ".Length..])?.Text);
     }
 
     [Fact]
@@ -274,7 +230,7 @@ public class ChatStreamEndpointTests : IClassFixture<ChatStreamEndpointTests.Bro
             ids.Add(long.Parse(id["id: ".Length..]));
 
             var data = Assert.Single(frame, line => line.StartsWith("data: ", StringComparison.Ordinal));
-            Assert.Equal(expected, ChatMessageSerializer.Deserialize(data["data: ".Length..])?.Text);
+            Assert.Equal(expected, WireFormat.Deserialize<ChatMessage>(data["data: ".Length..])?.Text);
         }
 
         Assert.Equal([30L, 31L, 32L], ids);

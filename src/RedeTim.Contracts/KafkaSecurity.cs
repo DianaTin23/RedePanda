@@ -2,7 +2,6 @@ using Confluent.Kafka;
 
 namespace RedeTim.Contracts;
 
-/// <summary>How every client in this repository authenticates and encrypts its connection to the broker.</summary>
 public static class KafkaSecurity
 {
     public const string ProtocolVariable = "REDPANDA_SECURITY_PROTOCOL";
@@ -11,11 +10,9 @@ public static class KafkaSecurity
     public const string PasswordVariable = "REDPANDA_SASL_PASSWORD";
     public const string CaLocationVariable = "REDPANDA_SSL_CA_LOCATION";
 
-    /// <summary>Reads the settings from the process environment.</summary>
     public static void ApplyTo(ClientConfig config) =>
         ApplyTo(config, Environment.GetEnvironmentVariable);
 
-    /// <summary>Applies the settings read through <paramref name="read"/> to <paramref name="config"/>.</summary>
     public static void ApplyTo(ClientConfig config, Func<string, string?> read)
     {
         var caLocation = Value(read, CaLocationVariable);

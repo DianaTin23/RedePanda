@@ -5,11 +5,11 @@ using RedeTim.Contracts;
 
 namespace RedeTim.Backend.Tests;
 
-public class PresenceEndpointTests : IClassFixture<ChatStreamEndpointTests.BrokerlessBackend>
+public class PresenceEndpointTests : IClassFixture<BrokerlessBackend>
 {
-    private readonly ChatStreamEndpointTests.BrokerlessBackend _factory;
+    private readonly BrokerlessBackend _factory;
 
-    public PresenceEndpointTests(ChatStreamEndpointTests.BrokerlessBackend factory) => _factory = factory;
+    public PresenceEndpointTests(BrokerlessBackend factory) => _factory = factory;
 
     private sealed record PresenceResponse(string[] Nicknames);
 

@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# Mints a local CA and a broker certificate into ./tls/, for the TLS/SASL variant of the
+# local broker (README section 5, "Gegen einen abgesicherten Broker").
+#
+#   ./make-tls.sh           # no-op if ./tls/broker.crt already exists
+#   ./make-tls.sh --force   # regenerate, overwriting what is there
+#
+# Needs docker or podman: the certificates are produced by the broker image itself, so that
+# they match the version the compose file runs.
+#
+# Exit status: 0 on success or when the material already exists, 2 on a usage or tooling error.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,7 +21,7 @@ FORCE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force) FORCE=1; shift ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        -h|--help) sed -e '1d' -e '/^[^#]/,$d' "$0"; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done

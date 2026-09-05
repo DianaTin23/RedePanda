@@ -20,11 +20,7 @@ spec:
       {{- end }}
       restartPolicy: Never
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1654
-        runAsGroup: 1654
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "redetim.podSecurityContext" (dict "uid" 1654 "gid" 1654) | nindent 8 }}
       containers:
         - name: create-topic
           image: {{ include "redetim.image" (dict "ctx" . "component" "chatClient") | quote }}
@@ -38,10 +34,7 @@ spec:
             - name: TOPIC_WAIT_SECONDS
               value: {{ .Values.topicJob.brokerWaitSeconds | quote }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- include "redetim.containerSecurityContext" dict | nindent 12 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp

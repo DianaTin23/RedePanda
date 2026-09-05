@@ -3,43 +3,36 @@
 #
 #   ./scripts/check-repro.sh
 #
+# Locked mode is off by default because a deliberate dependency change *should* rewrite the lock
+# file; this script turns it on. Why that matters: docs/build.md.
+#
+# CI runs this on every push and pull request (.github/workflows/dotnet.yml). README section 12
+# lists it as well; run it by hand before cutting a release from a machine.
+#
 # Exit status: 0 when every project restores against its committed lock file, 1 when one of them
 # has drifted, 2 on a usage or tooling error.
-#
-# Why this is a script rather than a habit: `dotnet build`, `dotnet test` and `dotnet run` all
-# *rewrite* a lock file when the resolved graph no longer matches it. They do not complain, and the
-# rewrite is easy to commit without noticing -- so the file that is supposed to be the record of
-# what was tested quietly becomes a record of whatever resolved most recently. Locked mode turns
-# that same mismatch into a failure, which is the whole value of having the file.
-#
-# It is not on by default in Directory.Build.props because a dependency change *should* rewrite the
-# lock file; see the comment there. This script sets ContinuousIntegrationBuild=true, which is what
-# switches locked mode on.
-#
-# CI runs this on every push and pull request (.github/workflows/dotnet.yml). README section 13
-# lists it as well; run it by hand before cutting a release from a machine.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+REPO_ROOT="$(repo_root)"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) usage ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
-if ! command -v dotnet >/dev/null 2>&1; then
-    echo "dotnet not found on PATH. It is in the Nix dev shell: nix develop" >&2
+require_tool dotnet
+
+# Read from the solution rather than repeated here: a project added to RedeTim.sln but not
+# to a second list in this file would have gone unchecked, which is exactly the drift this
+# script exists to catch. Still one restore per project, so the report names which one.
+mapfile -t PROJECTS < <(cd "${REPO_ROOT}" && dotnet sln list | grep "[.]csproj")
+if [[ "${#PROJECTS[@]}" -eq 0 ]]; then
+    echo "Could not read the project list from RedeTim.sln" >&2
     exit 2
 fi
-
-PROJECTS=(
-    "src/RedeTim.Contracts/RedeTim.Contracts.csproj"
-    "src/RedeTim.Backend/RedeTim.Backend.csproj"
-    "src/RedeTim.ChatClient/RedeTim.ChatClient.csproj"
-    "tests/RedeTim.Backend.Tests/RedeTim.Backend.Tests.csproj"
-)
 
 before="$(cd "${REPO_ROOT}" && find . -name packages.lock.json -not -path './**/bin/*' -not -path './**/obj/*' -print0 \
     | sort -z | xargs -0 sha256sum | sha256sum)"

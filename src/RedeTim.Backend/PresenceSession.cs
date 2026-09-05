@@ -2,10 +2,7 @@ using Confluent.Kafka;
 
 namespace RedeTim.Backend;
 
-/// <summary>
-/// The presence lifecycle of one SSE connection. A Kafka hiccup here must never tear down the
-/// chat stream itself, so every failure is swallowed and logged rather than thrown.
-/// </summary>
+// A Kafka failure here must never tear down the SSE stream, so everything is swallowed and logged.
 internal sealed class PresenceSession(
     IPresenceProducer producer, string room, string nickname, ILogger logger)
 {

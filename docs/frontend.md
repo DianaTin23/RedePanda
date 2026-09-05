@@ -102,7 +102,7 @@ eine Umgebungsvariable mit dem Demo-Port als Vorgabe statt `{server_port}`.
 
 ## `app.js`
 
-528 Zeilen ohne Framework. Die nicht offensichtlichen Teile:
+ohne Framework. Die nicht offensichtlichen Teile:
 
 ### Zwei Reconnect-Pfade, nicht einer
 

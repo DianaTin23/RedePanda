@@ -6,7 +6,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Version pinned in Directory.Packages.props. -->
         <PackageReference Include="Confluent.Kafka" />
     </ItemGroup>
 

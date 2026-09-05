@@ -1,11 +1,8 @@
-| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. CI rendert beide Varianten und prüft genau das. |
-| Digest-Pins in `values.yaml` und den Dockerfiles | den Tags upstream | `scripts/check-digests.sh` meldet es, wöchentlich aus `digests.yml`. Umgeschrieben wird nichts. |
 # Architektur
 
 RedeTim besteht aus zwei eigenständig geschriebenen und eigenständig ausgelieferten
 Anwendungen, die **ausschließlich über Redpanda** miteinander reden. Das Frontend kennt Kafka
-nicht, das Backend kennt Prometheus nicht. Beides ist Absicht, und beides ist in der Demo
-nachweisbar.
+nicht — das ist Absicht, und es ist in der Demo nachweisbar.
 
 Die Strecken- und Protokolltabelle steht in README Abschnitt 3. Hier steht, warum der Schnitt
 so verläuft.
@@ -14,35 +11,21 @@ so verläuft.
 
 ```text
 Browser ──HTTPS──▶ Caddy (Frontend-Pod) ──proxy /api──▶ Backend-Pod ──Kafka──▶ Redpanda
-   ▲                 :8443                 HTTPS :8443     │  │                (StatefulSet)
-   └────────── SSE-Stream (/api/stream) ◀──────────────────┘  │
-                                                              │ OTLP/gRPC über TLS :4317 (push)
-                                                              ▼
-                                                     OTel-Collector-Pod
-                                                              │ HTTPS :8889 /metrics
-                                                              ▼ (scrape)
-                                                       Prometheus-Pod :9090 (HTTPS)
+   ▲                 :8443                 HTTPS :8443     │                  (StatefulSet)
+   └────────── SSE-Stream (/api/stream) ◀──────────────────┘
 ```
 
-Zwei Trennungen tragen den Entwurf, und beide sind so gebaut, dass man sie *zeigen* kann statt
-sie nur zu behaupten:
+Eine Trennung trägt den Entwurf, und sie ist so gebaut, dass man sie *zeigen* kann statt sie
+nur zu behaupten:
 
 **Das Frontend spricht kein Kafka.** Es besteht aus vier statischen Dateien, die Caddy
 ausliefert, und redet nur mit `/api/...`. Im Netzwerk-Tab des Browsers taucht nichts anderes
 auf. Kein npm, kein CDN, keine Webfonts — das funktioniert damit auch in einem Cluster ohne
 Internetzugang. Mehr dazu in [frontend.md](frontend.md).
 
-**Das Backend spricht kein Prometheus.** Es pusht über OTLP und hat gar keinen
-`/metrics`-Endpunkt; ein `curl` darauf gibt 404. Es kennt nur einen OTLP-Endpunkt aus einer
-Umgebungsvariable. Mehr dazu in [observability.md](observability.md).
-
-Der Metrikpfad zeigt bewusst *vom Backend weg*. Das ist dieselbe 12-Factor-Argumentation wie
-beim Broker: eine angehängte Ressource, austauschbar ohne Codeänderung.
-
 Jede HTTP-Strecke im Release ist TLS, und jeder Client prüft sein Gegenüber gegen die CA, die
 das Chart bei der ersten Installation selbst ausstellt. `insecure_skip_verify` steht nirgends.
-Die zwei bewussten Ausnahmen stehen in README Abschnitt 14 und in
-[observability.md](observability.md#tls-und-die-eine-ausnahme).
+Die eine bewusste Ausnahme steht in README Abschnitt 13.
 
 ## Warum SSE und kein SignalR
 
@@ -95,11 +78,13 @@ Grenzen: Raum 64 Zeichen, Nickname 32, Text `MAX_MESSAGE_LENGTH` (Vorgabe 500).
 Die Längenprüfung läuft **nach** dem Trimmen, damit man das Limit nicht mit angehängten
 Leerzeichen auslösen kann.
 
-### `ChatMessageSerializer`
+### `WireFormat`
 
-Die einzige Stelle, an der das Payload-Format definiert ist. Weder Backend noch Konsolenclient
-dürfen `JsonSerializer` mit eigenen Optionen aufrufen — serialisierten sie unterschiedlich,
-verstünden sie einander still nicht mehr.
+Die einzige Stelle, an der das Payload-Format definiert ist — für die Chat-Nachricht wie für
+den Präsenz-Record. Weder Backend noch Konsolenclient dürfen `JsonSerializer` mit eigenen
+Optionen aufrufen — serialisierten sie unterschiedlich, verstünden sie einander still nicht
+mehr. Genau das war hier schon der Fall: die Präsenz hatte eine zweite, zeichengleiche Kopie
+derselben Optionen, und nichts hätte gemeldet, wenn eine der beiden abgewichen wäre.
 
 `Deserialize` gibt bei allem Unlesbaren `null` zurück. Ein fremder oder beschädigter Record
 darf die Consume-Schleife nicht beenden.
@@ -128,29 +113,52 @@ keine Client-Eingabe.
 
 ## Manuelle Kopplungen
 
-CI prüft Tests, Lock-Dateien und das Chart (README Abschnitt 13), die folgenden Kopplungen aber
+CI prüft Tests, Lock-Dateien und das Chart (README Abschnitt 12), die folgenden Kopplungen aber
 nicht — sie hängen an Werten in anderen Dateien, ohne dass irgendetwas sie vergleicht. An diesen
 Stellen steht im Code je eine Zeile, die darauf hinweist; sie sind die einzige Kontrolle.
 
 | Ort | hängt an | Was bei Drift passiert |
 |---|---|---|
 | `wwwroot/app.js` (Textlängengrenze) | `ChatMessage.DefaultMaxTextLength` | Der Client lässt mehr zu, als das Backend annimmt; der Nutzer sieht ein 400 statt einer Warnung im Eingabefeld. |
-| `RedeTim-kafka-docker/make-tls.sh` | `docker-compose.yml`, `redpanda.image` in `values.yaml` | Die lokale Broker-Version weicht von der im Cluster ab — Dev/Prod-Parität nur noch auf dem Papier. |
-| `ChatMetrics` (Instrumentnamen) | Suffixregeln des Prometheus-Exporters | Namen kommen mit falschem oder doppeltem Suffix in Prometheus an, die PromQL-Beispiele laufen leer. |
+| `RedeTim-kafka-docker/docker-compose.yml` (und `make-tls.sh`) | `redpanda.image` in `values.yaml` | Die lokale Broker-Version weicht von der im Cluster ab — Dev/Prod-Parität nur noch auf dem Papier. |
 | `Directory.Build.props` | XML erlaubt kein `--` im Kommentar | MSBuild meldet ein leeres `TargetFramework` aus einer völlig anderen Datei. |
-| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. CI rendert beide Varianten und prüft genau das. |
+| `backend.yaml` (`replicas`) | ob ein HPA das Feld besitzt | Helm und Autoscaler überschreiben sich gegenseitig, die Pod-Zahl pendelt. `scripts/validate-chart.sh` rendert beide Varianten und vergleicht gegen `values.yaml`. |
 | Digest-Pins in `values.yaml` und den Dockerfiles | den Tags upstream | `scripts/check-digests.sh` meldet es, wöchentlich aus `digests.yml`. Umgeschrieben wird nichts. |
 
 Die beiden Skripte `check-digests.sh` und `check-repro.sh` sind der automatisierbare Teil davon
 und laufen inzwischen von selbst: `check-repro.sh` bei jedem Push und PR, `check-digests.sh`
 wöchentlich. Die Zeilen der Tabelle darüber bleiben unbewacht — deshalb stehen sie hier.
 
+## Logging
+
+Das Backend schreibt strukturiertes JSON nach stdout, keine Logdateien. Die Plattform sammelt
+sie ein, wie es 12-Factor vorsieht.
+
+Der JSON-Formatter bekommt einen Zeitstempel gesetzt. Ohne den trägt das JSON **überhaupt
+keine** Ereigniszeit — ein Ereignisstrom, dessen Ereignisse sich weder ordnen noch mit etwas
+anderem korrelieren lassen, ist deutlich weniger ein Log, als er aussieht.
+
+Das Format ist rundreisefähig und ausdrücklich UTC, damit niemand stromabwärts einen Offset
+raten muss. Ohne abschließendes Leerzeichen: Das ist eine Konvention des
+Klartext-Konsolenformatters, der die Zeitangabe von der Meldung trennen muss, und in JSON
+verfälschte es nur den Feldwert.
+
+ASP.NET-Framework-Logs werden ab `Information` auf `Warning` gefiltert. Das Framework schreibt
+etwa sechs Zeilen je Anfrage, und die meisten Anfragen hier sind Bereitschaftsproben — die
+eigenen Ereignisse der Anwendung waren damit eine Minderheit im eigenen Log. Es ist das
+Gegenstück zu `log_skip` auf `/healthz` im Caddyfile.
+
+Unterdrückt wird nur, solange niemand tatsächlich debuggt. Wer `LOG_LEVEL=Debug` setzt, will
+alles; die Framework-Hälfte still zurückzuhalten wäre ein eigenes Rätsel.
+
+Wie librdkafkas eigene Ausgabe in denselben Strom kommt und warum sie gedrosselt wird, steht in
+[kafka.md](kafka.md#fehler-und-protokollierung).
+
 ## Prozesse
 
-Es gibt vier Admin-Prozesse, alle als Kubernetes-Job:
+Es gibt einen Admin-Prozess, als Kubernetes-Job:
 
 - Topic anlegen (`RedeTim.ChatClient --ensure-topic`)
-- die drei weiteren Aufgaben im `admin-job`
 
 Der Topic-Job ist **kein** Helm-Hook. Ein `post-install`-Hook wartete auf ein Backend, das
 ohne Topic nie `Ready` wird — ein Deadlock. Details in [deployment.md](deployment.md).

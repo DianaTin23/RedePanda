@@ -29,7 +29,7 @@ public sealed class PresenceProducer : IPresenceProducer, IDisposable
         KafkaJsonProducer.BuildConfig(options, read);
 
     // The key is (room, nickname), not the room: the topic is log-compacted and holds the
-    // current state per reservation. See docs/kafka.md#presence-topic.
+    // current state per reservation.
     public Task RenewAsync(string room, string nickname, CancellationToken cancellationToken) =>
         Produce(
             room,

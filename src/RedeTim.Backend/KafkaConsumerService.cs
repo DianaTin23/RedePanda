@@ -6,9 +6,9 @@ namespace RedeTim.Backend;
 // tracking when every assigned partition has reached its end, and the bounded close on shutdown.
 //
 // What the two do *not* share is deliberate and documented, so it stays with the subclasses:
-// where they start reading (docs/kafka.md#wiederaufnahme), and what a fatal error means. The
-// chat consumer takes the pod down with it; the presence consumer degrades open and keeps
-// serving. See docs/kafka.md and README section 13.
+// where they start reading, and what a fatal error means. The chat consumer takes the pod down
+// with it; the presence consumer degrades open and keeps serving, because losing presence
+// costs the nickname lock, not the chat.
 public abstract class KafkaConsumerService : BackgroundService
 {
     private readonly string _role;

@@ -1,6 +1,6 @@
-# The Helm half of what this repository used to ask a human to run by hand. README section 12
-# is the acceptance list; this workflow is the part of it that a runner can check without a
-# cluster -- rendering and schema validation, not `helm install`.
+# The Helm half of what this repository used to ask a human to run by hand: what a runner can
+# check without a cluster -- rendering and schema validation, not `helm install`. The rules
+# themselves live in scripts/validate-chart.sh, which this workflow calls.
 name: chart
 
 on:
@@ -37,7 +37,7 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           # Pinned, not 'latest': the chart's render-time `fail` is downgraded to INFO by
-          # `helm lint` in Helm 4, and README section 4 develops against exactly this version.
+          # `helm lint` in Helm 4, and the chart is developed against exactly this version.
           version: v4.2.3
 
       # kubeconform fetches its JSON schemas over the network. Cache them, or an upstream

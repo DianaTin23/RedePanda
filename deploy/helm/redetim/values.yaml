@@ -1,78 +1,87 @@
-# Vorgabewerte des redetim-Charts.
-# Begruendungen zu allen Schaltern: docs/deployment.md
+# Default values for the redetim chart.
 
-# Wird von deploy/releases/<version>.yaml gefuellt. Ohne Release-Datei bricht das Chart ab.
+# Filled by deploy/releases/<version>.yaml. Without a release file the chart aborts.
 release:
   version: ""
   gitSha: ""
   builtAt: ""
   dirty: false
 
-# IfNotPresent, nicht Never: Never scheitert auf Docker Desktop mit ErrImageNeverPull.
+# Not Never: Never fails on Docker Desktop with ErrImageNeverPull.
 imagePullPolicy: IfNotPresent
 
-# Nur noetig, solange die GHCR-Pakete privat sind. Rezept: README Abschnitt 6.
+# Only needed while the GHCR packages are private:
+#   kubectl create secret docker-registry ghcr -n redetim --docker-server=ghcr.io \
+#     --docker-username=<user> --docker-password=<PAT with read:packages>
+#   helm upgrade ... --set imagePullSecrets[0].name=ghcr
 imagePullSecrets: []
 
-# Das Chart stellt bei der ersten Installation eine eigene CA aus. Kein Ausschalter.
+ingress:
+  # false: no Ingress objects and no controller -- only `kubectl port-forward` is left.
+  enabled: true
+  # In the Ingress cert and the host rule. The port is not matched, so 8443 and 8080 both work.
+  host: localhost
+  # Must match traefik.ingressClass.name below.
+  className: traefik
+
+# The chart issues its own CA on first install. No off switch.
 tls:
   caValidityDays: 3650
-  # 825 Tage: Hoechstlaufzeit, die Safari und Chrome fuer ein Leaf-Zertifikat akzeptieren.
+  # 825 days: the longest leaf lifetime Safari and Chrome accept.
   certValidityDays: 825
-  # Der Port, den der *Browser* erreicht; nur fuer die Weiterleitung von :8080.
+  # The port the *browser* reaches; only used for the redirect from :8080.
   publicHttpsPort: 8443
 
 chat:
   topic: redetim-chat
   partitions: 1
   replicationFactor: 1
-  # Zeichen je Nachricht. Haengt an ChatMessage.DefaultMaxTextLength.
+  # Coupled to ChatMessage.DefaultMaxTextLength.
   maxMessageLength: 500
-  # librdkafkas message.timeout.ms; dessen Vorgabe 300000 haelt einen POST fuenf Minuten offen.
+  # librdkafka message.timeout.ms; its 300000 default holds a POST open for five minutes.
   produceTimeoutMs: 10000
-  # Nachrichten je Raum im Verlaufspuffer. 0 = alles, was im Topic liegt.
+  # Messages per room in the history buffer. 0 = everything in the topic.
   historySize: 200
-  # Gleichzeitig gehaltene Raeume je Replica. 0 = so viele, wie kommen.
+  # Rooms held at once per replica. 0 = unbounded.
   maxRooms: 200
-  # Wie weit ein startender Pod zurueckliest, **je Partition**. 0 = das ganze Topic.
+  # How far a starting pod reads back, **per partition**. 0 = the whole topic.
   replayRecords: 2000
 
-# Log-komprimiert: haelt nur den aktuellen Stand (Key = Raum+Nickname), nicht die Historie.
+# Log-compacted: current state only (key = room+nickname), not the history.
 presence:
   topic: redetim-presence
   partitions: 1
   replicationFactor: 1
-  # Sekunden ohne Erneuerung, bevor eine Reservierung als frei gilt. Deutlich groesser als das
-  # SSE-Heartbeat-Intervall (15s).
+  # Seconds without renewal before a reservation is free. Well above the 15s heartbeat.
   ttlSeconds: 45
 
 backend:
-  # Tag kommt aus der Release-Datei; scripts/build-images.sh liest den Namen hier.
+  # Tag comes from the release file; scripts/build-images.sh reads the name here.
   image:
     repository: ghcr.io/dianatin23/redetim-backend
     tag: ""
 
-  # env:-Format. Steht hinter der ConfigMap und ueberschreibt sie.
+  # env: format. Applied after the ConfigMap and overrides it.
   extraEnv: []
 
   replicas: 2
-  # .NET-Schreibweise (Trace|Debug|Information|Warning|Error|Critical|None).
+  # .NET spelling (Trace|Debug|Information|Warning|Error|Critical|None).
   logLevel: Information
 
-  # 5s preStop + 25s Shutdown-Timeout der Anwendung, mit Puffer vor SIGKILL.
+  # 5s preStop + 25s app shutdown, with slack before SIGKILL.
   terminationGracePeriodSeconds: 45
 
-  # Der CPU-Request ist zugleich der Nenner der HPA-Zielauslastung. Bewusst kein CPU-Limit.
+  # The CPU request is also the denominator of the HPA target. No CPU limit on purpose.
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { memory: 512Mi }
 
   autoscaling:
     enabled: false
-    # Nie unter die Basislinie, fuer die PDB und Rollout-Strategie geschrieben sind.
+    # Never below the baseline the PDB and rollout strategy assume.
     minReplicas: 2
     maxReplicas: 4
-    # Prozent des CPU-*Requests*, nicht des Limits und nicht des Nodes.
+    # Percent of the CPU *request*, not of the limit and not of the node.
     targetCPUUtilizationPercentage: 70
     scaleDownStabilizationSeconds: 60
 
@@ -82,51 +91,92 @@ frontend:
     tag: ""
   replicas: 2
   terminationGracePeriodSeconds: 30
-  # Caddys Schreibweise (DEBUG|INFO|WARN|ERROR), nicht die von .NET.
+  # Caddy spelling (DEBUG|INFO|WARN|ERROR), not .NET's.
   logLevel: INFO
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }
 
-# Eigenes Image, aber aus demselben Build und unter demselben Tag wie Backend und Frontend.
+# Own image, same build and same tag as backend and frontend.
 chatClient:
   image:
     repository: ghcr.io/dianatin23/redetim-chatclient
     tag: ""
 
 topicJob:
-  # Sekunden, die --ensure-topic auf Broker-Metadaten wartet.
+  # Seconds --ensure-topic waits for broker metadata.
   brokerWaitSeconds: 180
 
 redpanda:
-  # Auf false wird kein Broker deployt; die Anwendung zeigt dann auf external.bootstrapServers.
+  # false: no broker is deployed; the app points at external.bootstrapServers.
   enabled: true
 
   external:
-    # Pflicht, sobald enabled: false -- sonst bricht das Chart beim Rendern ab.
+    # Required once enabled: false -- otherwise the chart aborts at render time.
     bootstrapServers: ""
 
   auth:
-    # Plaintext, Ssl, SaslPlaintext oder SaslSsl. Die Schreibweise SASL_SSL wird ebenfalls akzeptiert.
+    # Plaintext, Ssl, SaslPlaintext or SaslSsl. SASL_SSL is accepted as well.
     securityProtocol: Plaintext
-    # Pflicht bei einem SASL-Protokoll: Plain, ScramSha256, ScramSha512 (auch SCRAM-SHA-512).
+    # Required with a SASL protocol: Plain, ScramSha256, ScramSha512 (SCRAM-SHA-512 too).
     saslMechanism: ""
-    # Name eines *bestehenden* Secrets mit den Schluesseln username und password. Nie ein Wert hier.
+    # Name of an *existing* secret with keys username and password. Never a value here.
     existingSecret: ""
-    # Optional, nur bei TLS: Secret mit dem Schluessel ca.crt fuer eine private CA.
+    # Optional, TLS only: secret with key ca.crt for a private CA.
     caSecret: ""
 
-  # docker.io statt docker.redpanda.com: Letzteres drosselt anonyme Manifest-Zugriffe zu hart.
-  # Muss mit RedeTim-kafka-docker/docker-compose.yml uebereinstimmen (scripts/check-digests.sh).
+  # docker.io, not docker.redpanda.com: the latter throttles anonymous manifest reads too hard.
+  # KEEP IN SYNC with RedeTim-kafka-docker/docker-compose.yml (scripts/check-digests.sh).
   image: docker.io/redpandadata/redpanda:v26.2.1@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
 
   serviceName: redpanda
   storage: 1Gi
   storageClassName: ""
 
-  # Seastar bemisst sich in einem Container sonst am ganzen Node.
+  # Otherwise Seastar sizes itself against the whole node.
   smp: 1
   memory: 1G
   resources:
     requests: { cpu: 200m, memory: 1Gi }
     limits: { memory: 2Gi }
+
+# Traefik subchart values. Only what is needed -- the rest stays at its defaults.
+traefik:
+  service:
+    spec:
+      # LoadBalancer, the subchart default, would stay <pending> forever in kind; hostPort is the way out.
+      type: ClusterIP
+
+  ingressClass:
+    enabled: true
+    # Pinned: unnamed, the class follows the *subchart* release name and ingress.className must track it.
+    name: traefik
+    isDefaultClass: true
+
+  ports:
+    web:
+      # In the node container; kind-config.yaml forwards the same number. Above 1024 for rootless podman.
+      hostPort: 8080
+      exposedPort: 8080
+      http:
+        redirections:
+          entryPoint:
+            # Redirects to the target's *exposedPort*, so websecure exposes 8443 below.
+            # 301 on GET, 308 otherwise -- that keeps method and body.
+            to: websecure
+            scheme: https
+            permanent: true
+    websecure:
+      hostPort: 8443
+      exposedPort: 8443
+      transport:
+        respondingTimeouts:
+          # The 60s default is a deadline on the whole *connection*; /api/stream stays open for
+          # hours. 0 = none; the price is that a wedged client holds its connection until TCP
+          # notices, instead of being cut after a minute.
+          readTimeout: "0s"
+
+  # The dashboard would be a second way in that nobody demos and nobody secures.
+  ingressRoute:
+    dashboard:
+      enabled: false

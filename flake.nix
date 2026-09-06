@@ -36,6 +36,9 @@
             pkgs.docker-compose
             pkgs.kubectl
             pkgs.kubernetes-helm
+            # Creates the local cluster from kind-config.yaml. The port mappings in there can
+            # only be set at creation time, which is why the cluster is not just any cluster.
+            pkgs.kind
             # Validates rendered manifests against the Kubernetes schemas without a cluster.
             # `kubectl apply --dry-run=client` cannot do this: it still needs an API server to
             # resolve resource kinds, so it fails with "connection refused" when none is running.
@@ -49,11 +52,12 @@
           DOTNET_NOLOGO = 1;
 
           shellHook = ''
-            echo "RedeTim dev shell — .NET $(dotnet --version); rpk, kubectl, helm on PATH"
+            echo "RedeTim dev shell — .NET $(dotnet --version); rpk, kubectl, helm, kind on PATH"
             echo "  broker:  cd RedeTim-kafka-docker && docker compose --env-file env.local up -d"
             echo "  topics:  rpk topic list -X brokers=localhost:19092"
             echo "  chat:    REDPANDA_BOOTSTRAP_SERVERS=localhost:19092 \\"
             echo "           dotnet run --project src/RedeTim.ChatClient -- --nick alice"
+            echo "  cluster: kind create cluster --config kind-config.yaml"
             echo "  build:   ./scripts/build-images.sh"
             echo "  chart:   helm template redetim deploy/helm/redetim -f deploy/releases/<version>.yaml"
           '';

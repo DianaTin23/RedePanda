@@ -14,6 +14,14 @@
 {{- $components := list
       (dict "name" "frontend" "service" (printf "%s-frontend" $fullname))
       (dict "name" "backend" "service" (printf "%s-backend" $fullname)) }}
+{{- /*
+The ingress leaf is what the *browser* checks, so it is the one certificate here whose name is
+not a service name. It carries the public host and nothing else -- the cluster-internal spellings
+below would be noise on a certificate that is only ever presented to the outside.
+*/}}
+{{- if .Values.ingress.enabled }}
+{{- $components = append $components (dict "name" "ingress" "service" .Values.ingress.host "altNames" (list .Values.ingress.host "localhost")) }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -35,7 +43,7 @@ data:
 {{- $crt = index (default dict $existing.data) "tls.crt" | toString }}
 {{- $key = index (default dict $existing.data) "tls.key" | toString }}
 {{- else }}
-{{- $altNames := list $c.service (printf "%s.%s" $c.service $ns) (printf "%s.%s.svc" $c.service $ns) (printf "%s.%s.svc.cluster.local" $c.service $ns) "localhost" }}
+{{- $altNames := $c.altNames | default (list $c.service (printf "%s.%s" $c.service $ns) (printf "%s.%s.svc" $c.service $ns) (printf "%s.%s.svc.cluster.local" $c.service $ns) "localhost") }}
 {{- $cert := genSignedCert $c.service (list "127.0.0.1") $altNames (int $.Values.tls.certValidityDays) $ca }}
 {{- $crt = $cert.Cert | b64enc }}
 {{- $key = $cert.Key | b64enc }}

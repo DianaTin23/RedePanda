@@ -1,10 +1,10 @@
 <Project>
 
-    <!-- Framework- und Spracheinstellungen fuer alle Projekte. TargetFramework hier anheben,
-         nicht in den einzelnen .csproj.
+    <!-- Framework and language settings for all projects. Raise TargetFramework here, not in
+         the individual .csproj.
 
-         Hinweis fuer Bearbeiter: XML verbietet einen doppelten Bindestrich innerhalb eines
-         Kommentars. MSBuild meldet dann ein leeres TargetFramework aus einer anderen Datei. -->
+         Note: XML forbids a double hyphen inside a comment. MSBuild then reports an empty
+         TargetFramework coming from a different file. -->
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
@@ -16,9 +16,8 @@
         <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     </PropertyGroup>
 
-    <!-- Locked mode nur bei ContinuousIntegrationBuild: eine absichtliche Abhaengigkeitsaenderung
-         *soll* das Lockfile neu schreiben. scripts/check-repro.sh setzt das Flag.
-         Siehe docs/build.md. -->
+    <!-- Locked mode only under ContinuousIntegrationBuild: a deliberate dependency change
+         *should* rewrite the lockfile. scripts/check-repro.sh sets the flag. -->
     <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'">
         <RestoreLockedMode>true</RestoreLockedMode>
     </PropertyGroup>

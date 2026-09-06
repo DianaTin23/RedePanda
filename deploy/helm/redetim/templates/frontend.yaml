@@ -99,6 +99,13 @@ metadata:
   labels:
     {{- include "redetim.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
+  {{- if .Values.ingress.enabled }}
+  # These belong on the *Service*, not the Ingress: there they are silently ignored and Traefik
+  # would talk plaintext to Caddy's TLS port.
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: https
+    traefik.ingress.kubernetes.io/service.serverstransport: "{{ .Release.Namespace }}-{{ include "redetim.fullname" . }}-frontend@kubernetescrd"
+  {{- end }}
 spec:
   type: ClusterIP
   selector:

@@ -6,7 +6,6 @@ namespace RedeTim.Backend;
 // The half of a producer that does not depend on what is being published: the librdkafka handle,
 // the throttled error log, and the flush-then-dispose. What the two producers genuinely differ
 // in -- the record key, and whether a null value is meaningful -- stays with them.
-// See docs/kafka.md#producer.
 internal sealed class KafkaJsonProducer : IDisposable
 {
     private readonly IProducer<string, string> _producer;

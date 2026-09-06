@@ -76,7 +76,7 @@ public sealed class PresenceConsumerService : KafkaConsumerService
 
     // Deliberately the opposite of the chat consumer: presence is a soft UX gate, not the
     // service. Losing it costs the nickname lock, not the chat, so readiness degrades open
-    // instead of restarting the pod. See docs/kafka.md and README section 13.
+    // instead of restarting the pod. The lock stays ineffective until the consumer recovers.
     protected override void OnFatal(Exception exception)
     {
         Logger.LogCritical(

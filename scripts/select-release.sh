@@ -30,7 +30,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-release="$(git log --diff-filter=A --name-only --format= -- 'deploy/releases/*.yaml' \
+# --no-renames: a commit that adds one release file and drops the old ones is otherwise read
+# as a rename, and a renamed file is not an addition -- the new release would go unseen.
+release="$(git log --no-renames --diff-filter=A --name-only --format= -- 'deploy/releases/*.yaml' \
     | grep -v -- '-dirty\.' | grep . | head -1)"
 
 if [[ -z "${release}" || ! -f "${release}" ]] && [[ "${committed_only}" -eq 0 ]]; then

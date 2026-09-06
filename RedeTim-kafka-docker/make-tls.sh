@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Mints a local CA and a broker certificate into ./tls/, for the TLS/SASL variant of the
-# local broker (README section 5, "Gegen einen abgesicherten Broker").
+# local broker: the second listener on :19093 that docker-compose.yml only brings up once
+# ./tls/ holds key material.
 #
 #   ./make-tls.sh           # no-op if ./tls/broker.crt already exists
 #   ./make-tls.sh --force   # regenerate, overwriting what is there

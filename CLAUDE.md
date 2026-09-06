@@ -1,149 +1,126 @@
 # CLAUDE.md
 
-Leitfaden für Claude Code (claude.ai/code) in diesem Repository.
+Guide for Claude Code (claude.ai/code) in this repository.
 
-Diese Datei ist ein **Index, keine Quelle**. Jede Aussage hier steht ausführlich woanders;
-wo beides auseinanderläuft, gilt das Ziel des Verweises.
+## Language
 
-## Sprache
+**README.md is German — everything else is English.** The frontend's user-facing strings
+(`index.html`, the status and error texts in `app.js`) are German too, because they are product
+text. Comments, code, scripts and this file are English. Keep a file's language when editing it.
 
-README.md, `docs/` und die Kommentare in `values.yaml`/`.csproj` sind auf **Deutsch**;
-die `--help`-Köpfe der Skripte, `flake.nix` und die Code-Kommentare in C# sind auf
-**Englisch**. Beim Bearbeiten die Sprache der jeweiligen Datei beibehalten.
+README.md is the submission document: it is deliberately short — pitch, setup on kind, the
+CNCF rationale, the twelve factors, tests. It carries no section numbers and nothing outside it
+references it by section. Detail belongs in the file it describes (a comment in `values.yaml`,
+a `--help` in a script), not in a longer README.
 
-## Wo die Begründungen stehen
-
-Der Code trägt bewusst fast keine Prosa. Jede nicht offensichtliche Entscheidung steht in
-`docs/` — **vor** einer Änderung an einem dieser Bereiche das zugehörige Dokument lesen:
-
-| Bereich | Dokument |
-|---|---|
-| Dienste, Schnitt, geteilte Typen (`Contracts`), manuelle Kopplungen, Logging | `docs/architecture.md` |
-| Producer, Consumer, Offsets, GroupId, Shutdown, `KafkaSecurity` | `docs/kafka.md` |
-| SSE, Verlaufspuffer, Backpressure, Heartbeats, Resume | `docs/streaming.md` |
-| Caddyfile, `app.js`, Frontend-Image | `docs/frontend.md` |
-| Helm-Chart, TLS, Probes, Jobs, HPA | `docs/deployment.md` |
-| Zentrale Build-Konfiguration, Lockfiles, Digest-Pins, `build-images.sh` | `docs/build.md` |
-
-README.md bleibt maßgeblich für alles Bedienbare (Befehle, Konfigurationstabelle,
-Abnahmeliste, bekannte Einschränkungen). **Ihre Abschnittsnummern sind stabil und werden aus
-Code und Doku heraus referenziert** — beim Umsortieren die Verweise mitziehen.
-
-## Befehle
+## Commands
 
 ```bash
-nix develop                    # Dev-Shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo
+nix develop                    # dev shell: .NET 10, rpk, kubectl, helm, kubeconform, skopeo
 
-dotnet build                   # TreatWarningsAsErrors=true, keine Ausnahmen im Repo
-dotnet test                    # gesamte Suite (RedeTim.Backend.Tests, xunit v3)
-dotnet test --filter "FullyQualifiedName~ChatHistoryTests.RoomsAreKeptApart"  # ein Test
+dotnet build                   # TreatWarningsAsErrors=true, no exceptions in the repo
+dotnet test                    # whole suite (RedeTim.Backend.Tests, xunit v3)
+dotnet test --filter "FullyQualifiedName~ChatHistoryTests.RoomsAreKeptApart"  # a single test
 
-./scripts/validate-chart.sh    # beide HPA-Varianten, replicas-Kopplung, Negativfall
-./scripts/check-repro.sh       # alle vier Projekte im locked mode gegen ihre Lockfiles
-./scripts/check-digests.sh     # Digest-Drift + Broker-Parität lokal/Cluster (braucht skopeo)
+./scripts/validate-chart.sh    # HPA + ingress variants, replicas coupling, ingress wiring, negative case
+./scripts/check-repro.sh       # all four projects in locked mode against their lockfiles
+./scripts/check-digests.sh     # digest drift + broker parity local/cluster (needs skopeo)
 ```
 
-`validate-chart.sh` ist die einzige Stelle, an der die Chart-Regeln stehen; CI ruft dasselbe
-Skript. Wer eine Regel ändert, ändert sie dort — und nur dort.
+`validate-chart.sh` is the only place the chart rules live; CI calls the same script. Change a
+rule there — and only there.
 
-Lokaler Lauf ohne Kubernetes und die Variante gegen einen TLS/SASL-Broker: README Abschnitt 5.
-Images bauen und pushen: `./scripts/build-images.sh [--release] [--push]`, README
-Abschnitt 6. Demo mit Port-Forwards: `./scripts/demo.sh`.
+Local run without Kubernetes: `RedeTim-kafka-docker/docker-compose.yml` for the broker, then
+`dotnet run` per project; `make-tls.sh` next to it brings up the TLS/SASL listener on :19093.
+Building and pushing images: `./scripts/build-images.sh [--release] [--push]`.
 
-**CI** (`.github/workflows/`): ein Workflow je Sache, kein Sammelbecken. `dotnet.yml` und
-`chart.yml` laufen bei Push auf `main` (ohne `deploy/releases/**`), bei jedem PR, per
-`workflow_dispatch` und per `workflow_call`; `release.yml` **nur** per `workflow_dispatch` auf
-`main` und hängt per `needs` an den beiden; `digests.yml` wöchentlich. Details: README
-Abschnitt 12.
+**CI** (`.github/workflows/`): one workflow per concern, no catch-all. `dotnet.yml` and
+`chart.yml` run on push to `main` (excluding `deploy/releases/**`), on every PR, via
+`workflow_dispatch` and via `workflow_call`; `release.yml` runs **only** via `workflow_dispatch`
+on `main` and hangs off the other two through `needs`; `digests.yml` runs weekly.
 
-Einen Cluster hat CI nicht — die manuelle Abnahmeliste in README Abschnitt 12 bleibt manuell.
+CI has no cluster: anything that needs `helm install` stays a manual check.
 
-## Architektur
+## Architecture
 
 ```
-Browser ──HTTPS──▶ Caddy (Frontend) ──proxy /api──▶ Backend ──Kafka──▶ Redpanda
-   ▲                :8443              HTTPS :8443    │                (StatefulSet)
-   └───── SSE (/api/stream) ◀─────────────────────────┘
+Browser ──HTTPS──▶ Traefik ──▶ Caddy (Frontend) ──proxy /api──▶ Backend ──Kafka──▶ Redpanda
+   ▲                 :8443      :8443               HTTPS :8443    │                (StatefulSet)
+   └──────────────── SSE (/api/stream) ◀────────────────────────────┘
 ```
 
-Vier Projekte: `RedeTim.Contracts` (geteiltes Wire-Format + `KafkaSecurity`),
-`RedeTim.Backend` (ASP.NET Core Minimal API), `RedeTim.ChatClient` (Konsolenclient **und**
-Admin-Prozess: `--ensure-topic`), `RedeTim.Frontend`
-(nur Caddyfile + vier statische Dateien, kein Build-Tooling).
+Four projects: `RedeTim.Contracts` (shared wire format + `KafkaSecurity`), `RedeTim.Backend`
+(ASP.NET Core Minimal API), `RedeTim.ChatClient` (console client **and** admin process:
+`--ensure-topic`), `RedeTim.Frontend` (Caddyfile plus static files, no build tooling).
 
-Eine Trennung trägt den Entwurf und ist vorführbar:
+One separation carries the design and is demonstrable: **the frontend speaks no Kafka.** Only
+`/api/...`, no npm, no CDN, no web fonts.
 
-- **Das Frontend spricht kein Kafka.** Nur `/api/...`, kein npm/CDN/Webfonts.
+There is **no telemetry**: no OpenTelemetry SDK, no collector, no Prometheus, no `/metrics`
+endpoint. That is a deliberate cleanup — do not add any of it back unasked.
 
-Es gibt **keine Telemetrie**: kein OpenTelemetry-SDK, keinen Collector, kein Prometheus und
-keinen `/metrics`-Endpunkt. Das ist eine bewusste Entrümpelung — nichts davon wieder einbauen,
-ohne dass jemand danach fragt.
+### Load-bearing invariants
 
-### Die tragenden Invarianten
+Breaking one of these produces no error, just a system that runs wrong.
 
-Wer sie bricht, bekommt keinen Fehler, sondern ein System, das falsch läuft. Die Begründung
-steht jeweils in `docs/`; hier steht nur, was gilt.
+- **One consumer group per pod** (`redetim-backend-<POD_NAME>`) ⇒ fan-out, not load balancing.
+  `POD_NAME` has no default in the cluster: `ResolvePodName` **throws** when
+  `KUBERNETES_SERVICE_HOST` is set and `POD_NAME` is empty — a shared group would hand each
+  message to exactly one replica.
+- **The SSE `id` is the Kafka offset**, so it belongs to the broker — hence neither sticky
+  sessions nor a backplane, and a reconnect against a different replica resumes without gaps via
+  `Last-Event-ID`. Heartbeats deliberately carry **no** id, so they cannot overwrite it.
+- **The room is the Kafka record key.** All messages of a room therefore live on one partition,
+  and the offsets per stream increase strictly monotonically. Offsets are unique **per
+  partition**; that is exactly why the construction still holds at `chat.partitions > 1`.
+- **`WireFormat` is the only place with `JsonSerializer` options.** Backend and console client
+  must not serialize on their own; chat *and* presence payloads go through the same options. The
+  one intended exception is `PresenceKey`, whose JSON is an opaque record *key* whose shape is
+  fixed by the records already in the compacted topic.
+- **`KafkaSecurity.ApplyTo` applies to *every* Kafka client in the repo** (producer, consumer,
+  admin). A new client without that call works against the plaintext demo broker and fails
+  silently against every secured one — that is exactly how the readiness bug happened.
+  `BrokerReadinessTests` checks this per client.
+- **There is no `GET /api/history`.** The history is the first few frames of `/api/stream`.
 
-- **Eine Consumer-Group je Pod** (`redetim-backend-<POD_NAME>`) ⇒ Fan-out, nicht Lastausgleich.
-  `POD_NAME` hat im Cluster keinen Default: `ResolvePodName` **wirft**, wenn
-  `KUBERNETES_SERVICE_HOST` gesetzt und `POD_NAME` leer ist. → `docs/kafka.md#eine-consumer-group-je-pod`
-- **Die SSE-`id` ist der Kafka-Offset**, also brokereigen — daher weder Sticky Sessions noch
-  Backplane, und ein Reconnect auf einer anderen Replica setzt per `Last-Event-ID` lückenlos
-  auf. Heartbeats tragen bewusst **keine** ID. → `docs/streaming.md#wiederaufnahme`
-- **Der Raum ist der Kafka-Record-Key.** Alle Nachrichten eines Raums liegen damit auf einer
-  Partition, und die Offsets je Stream steigen streng monoton. Offsets sind **pro Partition**
-  eindeutig; genau deshalb trägt die Konstruktion auch bei `chat.partitions > 1`.
-- **`WireFormat` ist die einzige Stelle mit `JsonSerializer`-Optionen.** Backend und
-  Konsolenclient dürfen nicht eigenständig serialisieren; Chat- *und* Präsenz-Payload gehen
-  durch dieselben Optionen. Einzige gewollte Ausnahme: `PresenceKey`, dessen JSON ein
-  undurchsichtiger Record-*Key* ist und dessen Form von den Records im kompaktierten Topic
-  festliegt.
-- **`KafkaSecurity.ApplyTo` gilt für *jeden* Kafka-Client im Repo** (Producer, Consumer, Admin).
-  Ein neuer Client ohne diesen Aufruf funktioniert gegen den Plaintext-Demo-Broker und
-  scheitert still gegen jeden abgesicherten; genau so entstand der Readiness-Bug.
-  `BrokerReadinessTests` prüft das pro Client. → `docs/kafka.md#abgesicherte-broker`
-- **Es gibt kein `GET /api/history`.** Der Verlauf sind die ersten Frames von `/api/stream`.
+### Release model
 
-### Release-Modell
+The image tag is **derived, not chosen**: `appVersion` from `Chart.yaml` plus the short commit
+(`0.1.0-g103b98b`), plus a content hash when the tree is dirty. `build-images.sh` writes
+`deploy/releases/<version>.yaml` for it; the chart has **no default tag** and aborts at render
+time without a release file. That is what makes `helm rollback` meaningful. Helm is the only
+installation path.
 
-Der Image-Tag wird **abgeleitet, nicht gewählt**: `appVersion` aus `Chart.yaml` + kurzer
-Commit (`0.1.0-g103b98b`), bei unsauberem Baum plus Inhalts-Hash. `build-images.sh` schreibt
-dazu `deploy/releases/<version>.yaml`; das Chart hat **keinen Default-Tag** und bricht ohne
-Release-Datei beim Rendern ab. Das ist es, was `helm rollback` wirksam macht. Helm ist der
-einzige Installationsweg. → `docs/build.md#die-release-datei-ist-das-release`
+### Configuration
 
-### Konfiguration
+Environment variables only, under plain names; `BackendOptions.FromEnvironment()` reads them
+**explicitly**. Exactly one exception: `ASPNETCORE_Kestrel__Certificates__Default__*` (owned by
+the framework). Credentials **never** live in the ConfigMap or in `values.yaml`, always via
+`secretKeyRef` from `redpanda.auth.existingSecret`. The switches are documented as comments in
+`deploy/helm/redetim/values.yaml`.
 
-Ausschließlich Env-Variablen unter schlichten Namen; `BackendOptions.FromEnvironment()` liest
-sie **explizit**. Genau eine Ausnahme: `ASPNETCORE_Kestrel__Certificates__Default__*`
-(Framework-Eigentum). Zugangsdaten stehen **nie** in der ConfigMap oder in `values.yaml`,
-immer per `secretKeyRef` aus `redpanda.auth.existingSecret`. Vollständige Tabelle:
-README Abschnitt 9.
+## Editing traps
 
-## Fallen beim Bearbeiten
-
-- **Lockfiles.** `dotnet build/test/run` schreiben `packages.lock.json` still neu. Eine
-  absichtliche Versionsänderung gehört mit dem neuen Lockfile in den Commit; eine
-  unbeabsichtigte gehört verworfen. `./scripts/check-repro.sh` ist die Probe.
-  → `docs/build.md#lockfiles-und-wann-sie-tatsächlich-etwas-erzwingen`
-- **`Directory.Build.props`: XML verbietet `--` im Kommentar.** MSBuild meldet dann ein leeres
-  `TargetFramework` aus einer völlig anderen Datei.
-- **NuGet-Versionen gehören ausschließlich in `Directory.Packages.props`**; eine `Version` in
-  einer `.csproj` bricht den Restore absichtlich. `TargetFramework` wird in
-  `Directory.Build.props` angehoben.
-- **Die Runtime-Basis der .NET-Images muss glibc sein** (Debian). `-alpine` (musl) und
-  `-chiseled` scheitern erst zur Laufzeit beim ersten `ConsumerBuilder.Build()`, weil
-  `Confluent.Kafka` native librdkafka-Assets mitbringt.
-- **`replicas` im Backend-Deployment** darf nur gerendert werden, wenn *kein* HPA aktiv ist.
-  `validate-chart.sh` prüft beide Richtungen und vergleicht gegen `values.yaml`.
-- **`helm lint` fängt kein `fail` im Template** — Helm 4 stuft es auf INFO herab. Nur
-  `helm template` bricht wirklich ab. Deshalb prüft `validate-chart.sh` den Negativfall durch
-  Rendern *ohne* Release-Datei.
-- **Manuelle Kopplungen ohne Prüfung** (Tabelle in `docs/architecture.md#manuelle-kopplungen`):
-  die Textlängengrenze in `app.js` hängt an `ChatMessage.DefaultMaxTextLength`;
-  `RedeTim-kafka-docker/docker-compose.yml` und `redpanda.image` in `values.yaml` müssen
-  dasselbe Broker-Image benennen (`check-digests.sh` prüft das).
-- **`TreatWarningsAsErrors=true` ohne eine einzige Ausnahme** im Repo: kein `#pragma warning`,
-  kein `[SuppressMessage]`, kein `NoWarn`.
-- Der `on:`/`concurrency:`-Block in `dotnet.yml` und `chart.yml` ist zwanzig Zeilen doppelt.
-  Bewusst: GitHub Actions kennt für diese Blöcke kein Include.
+- **Lockfiles.** `dotnet build/test/run` silently rewrite `packages.lock.json`. An intentional
+  version change belongs in the commit together with the new lockfile; an unintentional one
+  belongs in the bin. `./scripts/check-repro.sh` is the probe.
+- **`Directory.Build.props`: XML forbids a double hyphen inside a comment.** MSBuild then
+  reports an empty `TargetFramework` coming from a completely different file.
+- **NuGet versions belong exclusively in `Directory.Packages.props`**; a `Version` in a `.csproj`
+  breaks the restore on purpose. `TargetFramework` is raised in `Directory.Build.props`.
+- **The runtime base of the .NET images must be glibc** (Debian). `-alpine` (musl) and
+  `-chiseled` only fail at runtime, on the first `ConsumerBuilder.Build()`, because
+  `Confluent.Kafka` ships native librdkafka assets.
+- **`replicas` in the backend deployment** may only be rendered when *no* HPA is active.
+  `validate-chart.sh` checks both directions and compares against `values.yaml`.
+- **`helm lint` does not catch a `fail` in a template** — Helm 4 downgrades it to INFO. Only
+  `helm template` really aborts. That is why `validate-chart.sh` renders the negative case
+  *without* a release file.
+- **Manual couplings with no check**: the text length limit in `app.js` hangs off
+  `ChatMessage.DefaultMaxTextLength`; `RedeTim-kafka-docker/docker-compose.yml` and
+  `redpanda.image` in `values.yaml` must name the same broker image (`check-digests.sh` checks
+  that one).
+- **`TreatWarningsAsErrors=true` with not a single exception** in the repo: no
+  `#pragma warning`, no `[SuppressMessage]`, no `NoWarn`.
+- The `on:`/`concurrency:` block in `dotnet.yml` and `chart.yml` is twenty duplicated lines. That
+  is deliberate: GitHub Actions has no include for those blocks.

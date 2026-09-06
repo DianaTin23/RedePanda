@@ -13,8 +13,8 @@ COPY src/RedeTim.Backend/ src/RedeTim.Backend/
 RUN dotnet publish src/RedeTim.Backend/RedeTim.Backend.csproj \
     -c Release -o /app --no-restore
 
-# Muss glibc-basiert bleiben: die nativen librdkafka-Assets von Confluent.Kafka laden weder unter
-# -alpine (musl) noch unter -chiseled, und zwar erst zur Laufzeit. Siehe docs/build.md.
+# Must stay glibc-based: Confluent.Kafka's native librdkafka assets load under neither -alpine
+# (musl) nor -chiseled, and they only fail at runtime.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf AS runtime
 WORKDIR /app
 COPY --from=build /app .

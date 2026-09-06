@@ -21,7 +21,7 @@ public sealed class ChatProducer : IDisposable
         KafkaJsonProducer.BuildConfig(options, read);
 
     // The key is the room, so every message of a room lands on one partition and its offsets
-    // stay strictly increasing. See docs/kafka.md and CLAUDE.md's invariants.
+    // stay strictly increasing. See CLAUDE.md's invariants.
     public async Task ProduceAsync(ChatMessage message, CancellationToken cancellationToken)
     {
         var record = new Message<string, string>

@@ -52,7 +52,7 @@ public sealed class BrokerReadiness : IDisposable
 
     // Gates readiness during the initial replay, like MarkHistoryLoaded -- but unlike it, the
     // fatal path calls this too, so a broken presence consumer opens the gate instead of holding
-    // the pod unready. Presence degrades open. See docs/kafka.md#presence-topic.
+    // the pod unready. Presence degrades open.
     public void MarkPresenceLoaded() => _presenceLoaded = true;
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken)

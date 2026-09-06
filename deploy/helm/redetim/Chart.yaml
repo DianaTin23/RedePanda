@@ -12,3 +12,17 @@ keywords:
   - chat
   - redpanda
   - kafka
+
+# Traefik is the browser's way into the cluster. A subchart, not a second release, so
+# `helm install` and `helm uninstall` stay one command each.
+#
+# Not ingress-nginx: retired in March 2026, no security updates since, and its intended
+# successor InGate was discontinued too.
+#
+# Version pinned with Chart.lock next to it -- a weaker guarantee than the digests of our own
+# images, which are pinned by digest.
+dependencies:
+  - name: traefik
+    version: "41.4.0"
+    repository: https://traefik.github.io/charts
+    condition: ingress.enabled

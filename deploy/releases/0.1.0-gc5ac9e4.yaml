@@ -4,17 +4,17 @@
 # what binds that build to the chart's configuration, and it is what a later `helm rollback`
 # restores. Commit it, unless the version says dirty.
 release:
-  version: "0.1.0-g456ed88"
-  gitSha: "456ed884012b8f775768c9b17bd95ae166c9ff59"
-  builtAt: "2026-08-12T10:47:20Z"
+  version: "0.1.0-gc5ac9e4"
+  gitSha: "c5ac9e4d782a6dc2d3fda874da8c2f8889f79cc5"
+  builtAt: "2026-09-05T20:03:22Z"
   dirty: false
 
 backend:
   image:
-    tag: "0.1.0-g456ed88"
+    tag: "0.1.0-gc5ac9e4"
 frontend:
   image:
-    tag: "0.1.0-g456ed88"
+    tag: "0.1.0-gc5ac9e4"
 chatClient:
   image:
-    tag: "0.1.0-g456ed88"
+    tag: "0.1.0-gc5ac9e4"

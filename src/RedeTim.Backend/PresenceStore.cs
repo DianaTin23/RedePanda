@@ -45,7 +45,7 @@ public sealed class PresenceStore
 
     public void Remove(string room, string nickname) => _renewedAt.TryRemove((room, nickname), out _);
 
-    // Piggy-backed on the read paths, no timer. See docs/kafka.md#presence-topic.
+    // Piggy-backed on the read paths, no timer.
     private void SweepExpiredIfDue(DateTimeOffset now)
     {
         var nowTicks = now.UtcTicks;

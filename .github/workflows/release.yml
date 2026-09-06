@@ -1,5 +1,5 @@
 # Cutting a release: build the three images under the derived tag, push them to ghcr.io and
-# commit the release file that names them back to main.
+# hand the release file that names them to whoever asked for the release.
 #
 # This is deliberately NOT triggered by a push. A release here is an identifiable act -- that is
 # why build-images.sh refuses an unclean tree -- so cutting one stays a decision somebody makes,
@@ -26,8 +26,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # commits the release file back to main
-      packages: write   # pushes to ghcr.io
+      packages: write   # pushes to ghcr.io; contents stays read -- nothing is written back
     concurrency:
       # Queue, never cancel: a cancelled release leaves images pushed with no release file
       # naming them.
@@ -60,8 +59,9 @@ jobs:
       - name: Build and push
         run: ./scripts/build-images.sh --push
 
-      # Unconditional: if the commit-back below fails because main moved, the release file is
-      # still recoverable from here rather than lost.
+      # The release file leaves as an artifact, and a human commits it. main takes pull requests
+      # only, so a push from the bot dies with GH013 -- and dies four minutes late, once the
+      # images are already in the registry. Nothing in this job writes to the repository.
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -69,15 +69,13 @@ jobs:
           path: deploy/releases/*.yaml
           if-no-files-found: warn
 
-      - name: Commit the release file
+      - name: Say what is left to do
         run: |
-          set -euo pipefail
-          REL="$(git status --porcelain deploy/releases | awk '{print $2}')"
-          test -n "${REL}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${REL}"
-          git commit -m "release: $(basename "${REL}" .yaml)"
-          # No --force. If main moved while this ran, the push fails and the artifact above
-          # still holds the file.
-          git push origin HEAD:main
+          {
+            echo 'The images are in ghcr.io. The release file is in the `release-file` artifact'
+            echo 'and belongs in `deploy/releases/` via a pull request:'
+            echo
+            echo '```'
+            echo "gh run download ${GITHUB_RUN_ID} -n release-file -D deploy/releases/"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

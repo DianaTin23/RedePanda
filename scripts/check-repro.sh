@@ -4,10 +4,10 @@
 #   ./scripts/check-repro.sh
 #
 # Locked mode is off by default because a deliberate dependency change *should* rewrite the lock
-# file; this script turns it on. Why that matters: docs/build.md.
+# file; this script turns it on.
 #
-# CI runs this on every push and pull request (.github/workflows/dotnet.yml). README section 12
-# lists it as well; run it by hand before cutting a release from a machine.
+# CI runs this on every push and pull request (.github/workflows/dotnet.yml). Run it by hand
+# before cutting a release from a machine.
 #
 # Exit status: 0 when every project restores against its committed lock file, 1 when one of them
 # has drifted, 2 on a usage or tooling error.

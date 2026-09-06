@@ -1,0 +1,49 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "redetim.fullname" . }}
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  annotations:
+    # TLS entrypoint only; the plaintext one redirects to it, configured in the Traefik values.
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # The tls: block below only *loads* the certificate; without this the router answers in
+    # plaintext and says nothing.
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ include "redetim.fullname" . }}-ingress-tls
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "redetim.fullname" . }}-frontend
+                port:
+                  name: https
+---
+# Traefik connects straight to pod IPs, and no pod IP is a SAN in the frontend certificate.
+# `serverName` is therefore mandatory: it is both the SNI sent and the name verified.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ include "redetim.fullname" . }}-frontend
+  labels:
+    {{- include "redetim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  serverName: {{ include "redetim.fullname" . }}-frontend
+  # ca.crt from the frontend TLS secret -- *not* from the -ca secret, which also holds ca.key.
+  rootCAs:
+    - secret: {{ include "redetim.fullname" . }}-frontend-tls
+  # Mirrors `versions 1.1` in the Caddyfile: one TCP connection per stream, all the way through.
+  disableHTTP2: true
+{{- end }}
